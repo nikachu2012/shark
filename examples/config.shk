@@ -1,0 +1,33 @@
+// 失敗するかもしれない処理（Result / try / if var）
+import std.file;
+import std.json;
+import std.path;
+import std.os;
+
+func read_config(p: string) -> Result<Json> {
+  if !file.exists(p) {
+    return Error(f"設定ファイルがありません: {p}");
+  }
+  var text = try file.read(p);
+  return try json.parse(text);
+}
+
+func main() -> int {
+  var tmp = path.join(os.temp_dir(), "shark_example.json");
+  _ = file.write(tmp, "{\"name\": \"さめ\", \"size\": 400}");
+
+  if var j = read_config(tmp) {
+    print(j["name"].string() ?? "名無し");
+    print(j["size"].int() ?? 0);
+  } else var e {
+    print(e.message());
+  }
+
+  if var j = read_config("ないファイル.json") {
+    print(j.kind());
+  } else var e {
+    print(e.message());
+  }
+  _ = file.remove(tmp);
+  return 0;
+}

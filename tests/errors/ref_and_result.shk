@@ -1,0 +1,12 @@
+func change(ref xs: list<int>) -> void { xs.push(1); }
+func may_fail() -> Result<string> { return "ok"; }
+func run_task(ref xs: list<int>) -> int { return xs.len(); }
+
+func main() -> int {
+  var xs = [1];
+  change(xs);                 // E0301
+  may_fail();                 // E0202（警告）
+  var t = task run_task(ref xs);   // E0302
+  print(t.wait());
+  return 0;
+}

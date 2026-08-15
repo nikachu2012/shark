@@ -1,0 +1,10 @@
+// 再帰呼び出し fib(32)
+func fib(n: int) -> int {
+  if n < 2 { return n; }
+  return fib(n - 1) + fib(n - 2);
+}
+
+func main() -> int {
+  print(fib(32));
+  return 0;
+}

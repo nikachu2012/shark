@@ -1,0 +1,20 @@
+// std.test の書き方（spec/library/test.md）
+import std.test;
+import std.math;
+
+func add(a: int, b: int) -> int { return a + b; }
+
+public func test_add_works() {
+  test.eq(add(1, 2), 3);
+  test.ne(add(1, 2), 4);
+}
+
+public func test_sqrt_is_near() {
+  test.describe("平方根がだいたい合っていること");
+  test.near(math.sqrt(2.0), 1.4142, 0.001);
+}
+
+public func test_optional_and_result() {
+  test.is_none(int("さめ"));
+  test.ok(true);
+}

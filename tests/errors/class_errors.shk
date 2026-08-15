@@ -1,0 +1,16 @@
+class Fish {
+  public func id() -> int { return 1; }
+  public virtual func describe() -> string { return "さかな"; }
+}
+class Shark : Fish {
+  public func id() -> int { return 2; }              // E0401
+  public func describe() -> string { return "さめ"; } // E0402
+  public override func nothing() -> void { }         // E0402
+}
+class Shape {
+  public virtual func area() -> float;
+}
+func main() -> int {
+  var s = Shape();   // E0403
+  return 0;
+}

@@ -1,0 +1,13 @@
+// key-value に 50万件入れて、50万回引く
+func main() -> int {
+  var m: map<int, int> = {};
+  for var i in range(500000) {
+    m[i] = i * 2;
+  }
+  var total = 0;
+  for var i in range(500000) {
+    total += m[i];
+  }
+  print(total);
+  return 0;
+}

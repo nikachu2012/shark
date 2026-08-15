@@ -1,0 +1,32 @@
+error[E0401]: Fish の id() は virtual ではないので上書きできません
+  --> class_errors.shk:6:15
+  6 |   public func id() -> int { return 2; }              // E0401
+    |               --
+  直し方: 親のメソッドに virtual を付けるか、別の名前にします
+
+error[E0402]: 親の virtual な describe() を上書きするには override が要ります
+  --> class_errors.shk:7:15
+  7 |   public func describe() -> string { return "さめ"; } // E0402
+    |               --------
+  直し方: override func describe(...) と書きます
+
+error[E0402]: override と書かれていますが、親に nothing() の同じ引数のものがありません
+  --> class_errors.shk:8:24
+  8 |   public override func nothing() -> void { }         // E0402
+    |                        -------
+  直し方: 名前の綴りを確かめます。親に virtual を書き忘れていることもあります
+
+error[E0403]: Shape は抽象クラスなので、そのままでは作れません
+  --> class_errors.shk:14:11
+  14 |   var s = Shape();   // E0403
+     |           -----
+  直し方: 実装されていないメソッド: area()
+      これらを override した子クラスを作ります
+
+warning[W0001]: 変数 s を使っていません
+  --> class_errors.shk:14:7
+  14 |   var s = Shape();   // E0403
+     |       -
+  直し方: 書き間違いでなければ、消すか _ という名前にします
+
+4 件の誤りがあります

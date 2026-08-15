@@ -1,0 +1,15 @@
+// 可変長配列に 100万件足して合計する。これを5回くり返す
+func main() -> int {
+  var total = 0;
+  for var round in range(5) {
+    var xs: list<int> = [];
+    for var i in range(1000000) {
+      xs.push(i);
+    }
+    for var x in xs {
+      total += x;
+    }
+  }
+  print(total);
+  return 0;
+}

@@ -1,0 +1,6 @@
+unit_test.shk
+  ok    test_add_works
+  ok    test_sqrt_is_near
+  ok    test_optional_and_result
+
+3 件中 3 件成功

@@ -1,0 +1,54 @@
+// 値がない状態と、エラー処理
+class Fish {
+  public var name: string;
+  func init(name: string) { this.name = name; }
+  public func name_of() -> string { return this.name; }
+}
+
+func find_fish(id: int) -> Fish? {
+  if id == 1 { return Fish("さめ"); }
+  return none;
+}
+
+func read_config(path: string) -> Result<string> {
+  if path == "" { return Error("設定ファイルがありません", 2); }
+  return "設定: " + path;
+}
+
+func load() -> Result<int> {
+  var text = try read_config("a.toml");
+  return text.len();
+}
+
+func main() -> int {
+  print(find_fish(1)?.name_of() ?? "名無し");
+  print(find_fish(2)?.name_of() ?? "名無し");
+
+  if var f = find_fish(1) {
+    print(f.name);
+  }
+  print(find_fish(1)!.name);
+
+  var r = read_config("a.toml");
+  print(r.ok());
+  print(r.value());
+
+  if var text = read_config("") {
+    print(text);
+  } else var e {
+    print(e.message());
+    print(e.code());
+  }
+
+  var l = load();
+  print(l.ok());
+  print(l.value());
+  print(read_config("") ?? "既定");
+
+  print(int("42") ?? 0);
+  print(int("abc") ?? -1);
+  print(float("1.5") ?? 0.0);
+  print(bool("true") ?? false);
+  _ = read_config("捨てる");
+  return 0;
+}

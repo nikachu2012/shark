@@ -1,0 +1,48 @@
+// string / bytes / list / map
+func main() -> int {
+  var s = "さめ🦈です";
+  print(s.len());
+  print(s[0]);
+  print(s.sub(0, 2));
+  print(s.find("で") ?? -1);
+  print(s.contains("🦈"));
+  print(s.starts_with("さめ"));
+  print(s.replace("さめ", "ふぐ"));
+  print("a,b,c".split(","));
+  print("  x  ".trim());
+  print("Abc".upper() + "/" + "Abc".lower());
+  print(s.bytes().len());
+  print(s.chars().len());
+
+  var b = b"\x01\x02";
+  b.push(0x03);
+  print(b.len());
+  print(b.list());
+  print("あ".bytes().to_string() ?? "×");
+
+  var xs: list<int> = [];
+  xs.push(3);
+  xs.push(1);
+  xs.push(2);
+  xs.insert(0, 9);
+  print(xs);
+  xs.remove(0);
+  print(xs.contains(3));
+  xs.sort();
+  print(xs);
+  print(xs.pop() ?? -1);
+  print(xs.len());
+  print(["a", "b"].join("-"));
+
+  var m: map<string, int> = {"a": 1};
+  m["b"] = 2;
+  m["a"] = 10;
+  print(m.len());
+  print(m["a"]);
+  print(m.get("z") ?? -1);
+  print(m.has("b"));
+  m.remove("a");
+  print(m.keys());
+  print(m.values());
+  return 0;
+}

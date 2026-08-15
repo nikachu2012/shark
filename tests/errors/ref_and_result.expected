@@ -1,0 +1,22 @@
+error[E0301]: ここは ref を付けて渡します
+  --> ref_and_result.shk:7:10
+  7 |   change(xs);                 // E0301
+    |          --
+  直し方: 呼ぶ側にも ref と書きます: change(ref xs)
+
+warning[E0202]: 失敗するかもしれない呼び出しの結果を捨てています
+  --> ref_and_result.shk:8:3
+  8 |   may_fail();                 // E0202（警告）
+    |   -------- Result<string>
+  直し方: 次のどれかを選びます
+      try f()       失敗ならこの関数から返る
+      if var v = f() { } else var e { }
+      _ = f();      意図して捨てる
+
+error[E0302]: ref はタスクに渡せません
+  --> ref_and_result.shk:9:25
+  9 |   var t = task run_task(ref xs);   // E0302
+    |                         ---
+  直し方: ref を外して値のまま渡します。コピーが渡るので、競合は起きません
+
+2 件の誤りがあります

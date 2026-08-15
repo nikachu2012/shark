@@ -1,0 +1,9 @@
+// 整数のループ 1000万回
+func main() -> int {
+  var sum = 0;
+  for var i in range(10000000) {
+    sum += i % 7;
+  }
+  print(sum);
+  return 0;
+}

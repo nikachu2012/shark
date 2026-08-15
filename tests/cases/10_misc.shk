@@ -1,0 +1,59 @@
+// 細かい規則（?. のつながり、入れ子のコレクション、コピーの独立）
+class Node {
+  public var value: int;
+  public var next: Node?;
+  func init(v: int) { this.value = v; }
+}
+
+func main() -> int {
+  var r = range(3);
+  for var i in r { write(string(i)); }
+  print("");
+
+  var grid: list<list<int>> = [[1,2],[3,4]];
+  print(grid[1][0]);
+  grid[0].push(9);
+  print(grid[0]);
+
+  var empty: map<string, list<int>> = {};
+  empty["a"] = [1];
+  print(empty.len());
+
+  var b = b"\x41\x42";
+  print(b.to_string() ?? "");
+
+  var n = Node(1);
+  n.next = Node(2);
+  print(n.next?.value ?? -1);
+  print(n.next!.value);
+  var n2 = n;
+  n2.next = none;
+  print(n.next?.value ?? -1);    // 元は変わらない
+  print(n2.next?.value ?? -1);   // コピーの側だけ none になる
+
+  print("abc" < "abd");
+  print("さめ" == "さめ");
+
+  assert(1 + 1 == 2, "算数が壊れている");
+
+  var s = "";
+  for var c in "さめ🦈".chars() { s = c + s; }
+  print(s);
+
+  var xs = [5, 3, 8];
+  xs.sort();
+  print(xs);
+  var strs = ["b", "a"];
+  strs.sort();
+  print(strs);
+
+  var total = 0;
+  var i = 0;
+  while i < 3 {
+    var i2 = i * 2;
+    total += i2;
+    i += 1;
+  }
+  print(total);
+  return 0;
+}

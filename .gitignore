@@ -1,0 +1,6 @@
+# ビルドでできるもの
+*.o
+/shark
+/examples/embed/game
+/tests/memcheck
+/bench/build/

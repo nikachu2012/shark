@@ -1,0 +1,48 @@
+// タスク・チャネル・parallel（spec/runtime/concurrency.md）
+import std.time;
+
+func work(id: int) -> int {
+  var total = 0;
+  for var i in range(3) {
+    total += i;
+    task.yield();
+  }
+  return total + id;
+}
+
+func producer(ch: channel<int>) -> void {
+  for var i in range(5) { _ = ch.send(i); }
+  ch.close();
+}
+
+func slow() -> int {
+  sleep(0.02);
+  return 7;
+}
+
+func main() -> int {
+  var t = task work(10);
+  print(t.wait());
+
+  var ch = channel<int>(10);
+  task producer(ch);
+  var sum = 0;
+  while var v = ch.recv() { sum += v; }
+  print(sum);
+
+  var rs = parallel {
+    task work(1);
+    task work(2);
+    task work(3);
+  };
+  print(rs);
+
+  var s = task slow();
+  print(s.done());
+  print(s.wait());
+
+  var c = task slow();
+  c.cancel();
+  print(c.wait_timeout(time.seconds(1.0)) ?? -1);
+  return 0;
+}

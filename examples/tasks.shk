@@ -1,0 +1,30 @@
+// 並行処理。async も await も無い（spec/runtime/concurrency.md）
+func fetch(name: string, sec: float) -> string {
+  sleep(sec);                 // このタスクだけが止まる
+  return name + " 取得";
+}
+
+func worker(ch: channel<string>, name: string) -> void {
+  sleep(0.01);
+  _ = ch.send(name);
+}
+
+func main() -> int {
+  var t = task fetch("A", 0.05);   // 走り始める。ここでは待たない
+  print("ほかのことをする");
+  print(t.wait());
+
+  var pages = parallel {           // まとめて走らせて、全部待つ
+    task fetch("B", 0.03);
+    task fetch("C", 0.02);
+  };
+  print(pages);
+
+  var ch = channel<string>();      // 送り手は何個でも、受け手は1つ
+  task worker(ch, "い");
+  task worker(ch, "ろ");
+  for var i in range(2) {
+    print(ch.recv() ?? "なし");
+  }
+  return 0;
+}

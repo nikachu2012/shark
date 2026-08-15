@@ -1,0 +1,5 @@
+import std.net;
+
+func main() -> int {
+  return 0;
+}

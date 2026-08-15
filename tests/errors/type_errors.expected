@@ -1,0 +1,56 @@
+error[E0102]: int と float は足せません
+  --> type_errors.shk:4:15
+  4 |   var total = count + price;   // E0102
+    |               ----- int
+    |                       ----- float
+  直し方: float(count) + price と書くと足せます
+
+error[E0103]: if の条件に書けるのは bool だけです（いまは int）
+  --> type_errors.shk:5:6
+  5 |   if count { }                 // E0103
+    |      -----
+  直し方: 0 と比べます: 例 n != 0
+
+error[E0104]: 空の [] だけでは要素の型が決まりません
+  --> type_errors.shk:6:7
+  6 |   var xs = [];                 // E0104
+    |       --
+  直し方: 型を書きます: var xs: list<int> = [];
+
+error[E0201]: int? には + は使えません
+  --> type_errors.shk:8:9
+  8 |   print(m + 1);                // E0201
+    |         - ここは値が無いかもしれません
+  直し方: 次のどれかを選びます
+    m ?? 既定値
+        値が無いときに使う値を決める
+    if var v = m { }
+        値がある時だけ処理する
+    m!
+        絶対にあると分かっているとき（無ければ止まる）
+
+error[E0101]: 変数の型が合いません: string に int は入りません
+  --> type_errors.shk:9:19
+  9 |   var s: string = count;       // E0101
+    |                   ----- int
+  直し方: string(...) で文字列にします
+
+warning[W0001]: 変数 s を使っていません
+  --> type_errors.shk:9:7
+  9 |   var s: string = count;       // E0101
+    |       -
+  直し方: 書き間違いでなければ、消すか _ という名前にします
+
+warning[W0001]: 変数 xs を使っていません
+  --> type_errors.shk:6:7
+  6 |   var xs = [];                 // E0104
+    |       --
+  直し方: 書き間違いでなければ、消すか _ という名前にします
+
+warning[W0001]: 変数 total を使っていません
+  --> type_errors.shk:4:7
+  4 |   var total = count + price;   // E0102
+    |       -----
+  直し方: 書き間違いでなければ、消すか _ という名前にします
+
+5 件の誤りがあります

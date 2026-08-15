@@ -1,0 +1,40 @@
+// ジェネリクスと制約
+func first<T>(xs: list<T>) -> T? {
+  if xs.len() == 0 { return none; }
+  return xs[0];
+}
+
+func largest<T: Comparable>(xs: list<T>) -> T? {
+  if xs.len() == 0 { return none; }
+  var best = xs[0];
+  for var x in xs {
+    if x.compare(best) > 0 { best = x; }
+  }
+  return best;
+}
+
+func max_by<T>(a: T, b: T, greater: func(T, T) -> bool) -> T {
+  if greater(a, b) { return a; }
+  return b;
+}
+
+func longer(a: string, b: string) -> bool { return a.len() > b.len(); }
+
+class Box<T> {
+  var value: T;
+  func init(value: T) { this.value = value; }
+  public func get() -> T { return this.value; }
+}
+
+func main() -> int {
+  print(first([1, 2, 3]) ?? 0);
+  print(first(["x", "y"]) ?? "");
+  print(largest([3, 9, 2]) ?? 0);
+  print(largest(["a", "z"]) ?? "");
+  print(max_by("さめ", "しゃち", longer));
+  var b = Box<int>(1);
+  print(b.get());
+  var c = Box<string>("さめ");
+  print(c.get());
+  return 0;
+}

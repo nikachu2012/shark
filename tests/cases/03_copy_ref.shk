@@ -1,0 +1,38 @@
+// 代入はコピー。共有したいときだけ ref
+class Fish {
+  public var name: string;
+  func init(name: string) { this.name = name; }
+}
+
+func add_one(ref xs: list<int>) -> void { xs.push(1); }
+func rename(ref f: Fish) -> void { f.name = "しゃち"; }
+func touch(xs: list<int>) -> void { xs.push(99); }
+
+func main() -> int {
+  var a = [1, 2, 3];
+  var b = a;
+  b.push(4);
+  print(a.len());
+  print(b.len());
+
+  var xs = [1];
+  add_one(ref xs);
+  print(xs.len());
+  touch(xs);
+  print(xs.len());
+
+  var f = Fish("さめ");
+  var g = f;
+  g.name = "ふぐ";
+  print(f.name);
+  print(g.name);
+  rename(ref f);
+  print(f.name);
+
+  var m = {"a": 1};
+  var m2 = m;
+  m2["b"] = 2;
+  print(m.len());
+  print(m2.len());
+  return 0;
+}

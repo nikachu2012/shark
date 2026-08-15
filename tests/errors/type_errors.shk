@@ -1,0 +1,11 @@
+func main() -> int {
+  var count = 1;
+  var price = 2.0;
+  var total = count + price;   // E0102
+  if count { }                 // E0103
+  var xs = [];                 // E0104
+  var m: int? = none;
+  print(m + 1);                // E0201
+  var s: string = count;       // E0101
+  return 0;
+}

@@ -1,0 +1,40 @@
+// クラス・継承・インタフェース・並べ替え
+class Fish : Comparable {
+  public var name: string;
+  public var size: int;
+
+  func init(name: string, size: int) {
+    this.name = name;
+    this.size = size;
+  }
+
+  public virtual func describe() -> string { return f"{this.name} ({this.size}cm)"; }
+  public func to_string() -> string { return this.describe(); }
+  override func compare(other: Fish) -> int {
+    if this.size < other.size { return -1; }
+    if this.size > other.size { return 1; }
+    return 0;
+  }
+}
+
+class Shark : Fish {
+  var teeth: int;
+  func init(name: string, teeth: int) {
+    super.init(name, 400);
+    this.teeth = teeth;
+  }
+  override func describe() -> string { return f"🦈 {super.describe()} 歯 {this.teeth} 本"; }
+}
+
+func main() -> int {
+  var aquarium = [Fish("あじ", 30), Shark("さめ", 50), Fish("ぶり", 90)];
+  aquarium.sort();                       // Comparable なので並べ替えられる
+  for var f in aquarium {
+    print(f.describe());                 // virtual なので中身の型で決まる
+  }
+
+  var copy = aquarium[0];                // 代入はコピー
+  copy.name = "変えた";
+  print(aquarium[0].name);               // 元は変わらない
+  return 0;
+}
