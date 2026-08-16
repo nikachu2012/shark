@@ -225,11 +225,24 @@ static int cmd_test(const Str& file, Lang lang, bool color, const Str& filter) {
     names = n2;
   }
   printf("%s\n", file.c_str());
+  // トップレベルの文（test.before_each の登録など）を先に済ませる
+  test_reset_hooks();
+  e.run_only(e.has_entry() ? e.program()->entry : -1, true);
+  if (run_loop(e, color) != 0) return 1;
+
   int passed = 0;
   for (int i = 0; i < tests.size(); i++) {
     test_begin();
-    e.run_only(tests[i]);
+    if (test_before_index() >= 0) {
+      e.run_only(test_before_index(), false);
+      run_loop(e, color);
+    }
+    e.run_only(tests[i], false);
     int rc = run_loop(e, color);
+    if (test_after_index() >= 0) {
+      e.run_only(test_after_index(), false);
+      run_loop(e, color);
+    }
     bool ok = !test_failed() && rc == 0;
     if (ok) {
       passed++;

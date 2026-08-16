@@ -198,18 +198,16 @@ void Engine::find_tests(Vec<int>* out, Vec<Str>* names) {
   }
 }
 
-void Engine::run_only(int func_index) {
-  // 1件のテストだけを走らせる。グローバルの初期化は毎回やり直す
-  for (int i = 0; i < vm_.tasks.size(); i++) task_unref(vm_.tasks[i]);
-  vm_.tasks.clear();
-  for (int i = 0; i < vm_.globals.size(); i++) val_release(vm_.globals[i]);
-  vm_.globals.clear();
+void Engine::run_only(int func_index, bool with_inits) {
+  // 関数を1つだけ走らせる（テストの前後の処理と、テスト本体に使う）
   int saved = prog_->entry;
   prog_->entry = func_index;
   vm_.status = SK_Running;
   vm_.has_panic = false;
+  vm_.aborted = false;
   vm_.error_message.clear();
-  vm_.start();
+  vm_.error_trace.clear();
+  vm_.start(with_inits);
   prog_->entry = saved;
 }
 

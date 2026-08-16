@@ -78,7 +78,8 @@ class Engine {
 
   // テスト（spec/library/test.md）。1件ずつ順に走らせるのは呼ぶ側
   void find_tests(Vec<int>* out, Vec<Str>* names);
-  void run_only(int func_index);
+  // 関数を1つだけ走らせる。with_inits が false なら、いまのグローバルをそのまま使う
+  void run_only(int func_index, bool with_inits = true);
 
   Program* program() { return prog_; }
   const Vec<Str>& module_list() const { return reg_.modules(); }

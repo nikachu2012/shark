@@ -18,6 +18,11 @@ void test_begin() {
   g_message.clear();
   g_desc.clear();
 }
+// ファイルを変えるときに呼ぶ（前後の処理の登録を捨てる）
+void test_reset_hooks() {
+  g_before = -1;
+  g_after = -1;
+}
 bool test_failed() { return g_failed; }
 const Str& test_message() { return g_message; }
 const Str& test_desc() { return g_desc; }

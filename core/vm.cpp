@@ -80,17 +80,19 @@ Value VM::default_of(Type* t) {
   }
 }
 
-void VM::start() {
+void VM::start(bool with_inits) {
   // ここから先に確保するものは「実行中のプログラムのぶん」として数える
   MemRunScope run_scope;
   // 読み込み直しに備えて、前回のぶんを離してから始める
-  for (int i = 0; i < globals.size(); i++) val_release(globals[i]);
-  globals.clear();
   for (int i = 0; i < tasks.size(); i++) task_unref(tasks[i]);
   tasks.clear();
-  for (int i = 0; i < prog->globals.size(); i++) globals.push(default_of(prog->globals[i]->type));
   boot.clear();
-  for (int i = 0; i < prog->inits.size(); i++) boot.push(prog->inits[i]);
+  if (with_inits) {
+    for (int i = 0; i < globals.size(); i++) val_release(globals[i]);
+    globals.clear();
+    for (int i = 0; i < prog->globals.size(); i++) globals.push(default_of(prog->globals[i]->type));
+    for (int i = 0; i < prog->inits.size(); i++) boot.push(prog->inits[i]);
+  }
   if (prog->entry >= 0) boot.push(prog->entry);
   boot_pos = 0;
   TaskState* main_task = task_new(*this, stack_size);

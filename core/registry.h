@@ -71,6 +71,7 @@ void register_methods(Registry& r);
 
 // std.test の記録（フロントエンドが読む）
 void test_begin();
+void test_reset_hooks();
 bool test_failed();
 const Str& test_message();
 const Str& test_desc();
