@@ -5,6 +5,7 @@
 
 書くところは **Monaco Editor**（VS Code と同じもの）で、Shark 用の色分けと
 入力補完を付けてある。誤りの指摘は**本物の型検査**から出している。
+出したり打ったりするところは**端末とおなじ**で、`input()` は打たれるまで待つ（下の「ターミナル」）。
 
 ```
 make web                    # web/dist/ に作る（Emscripten が要る）
@@ -34,7 +35,7 @@ git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
 |---|---|
 | [`../core/platform/web.cpp`](../core/platform/web.cpp) | 移植層。ブラウザ向けに、メモリ・時間・入出力・ファイルを埋めたもの |
 | [`shark_web.cpp`](shark_web.cpp) | ホスト。`Engine` を呼び、出力と診断を JavaScript に渡す |
-| [`app.js`](app.js) | 画面。書くところの用意、実行の刻み、出力と診断の表示 |
+| [`app.js`](app.js) | 画面。書くところの用意、実行の刻み、ターミナル（下）と診断の表示 |
 | [`lang.js`](lang.js) | Monaco に Shark を教える。色分けと入力補完（下） |
 | [`api.py`](api.py) | 補完に使う API の表（`api.js`）を、仕様書と実装から作る |
 | [`index.html`](index.html) / [`style.css`](style.css) | 画面の骨と見た目 |
@@ -77,6 +78,43 @@ function tick() {
 
 止まらない繰り返しを書いても `status` は 0 のままなので、画面は動き続け、
 「止める」（`shk_abort`）で終われる。
+
+## ターミナル
+
+右がわは**端末とおなじ**にしてある。出力も、打った文字も1本の流れに並び、
+出るものは `shark` コマンド（[../frontend/main.cpp](../frontend/main.cpp)）と同じ形。
+
+```
+$ shark run playground.shk
+名前を教えてください
+さめ                        ← ここで打つ。打った行はそのまま流れに残る
+こんにちは、さめ さん！
+$ 
+```
+
+| すること | どうする |
+|---|---|
+| プログラムに答える | そのまま打って <kbd>Enter</kbd>。`input()` は**打たれるまで待つ** |
+| 入力の終わり | <kbd>Ctrl</kbd> + <kbd>D</kbd>。その `input()` は `none` になる |
+| 止める | <kbd>Ctrl</kbd> + <kbd>C</kbd>（「止める」ボタンと同じ） |
+| 流れを消す | <kbd>Ctrl</kbd> + <kbd>L</kbd> / <kbd>Ctrl</kbd> + <kbd>U</kbd> は打ちかけの行を消す |
+| 打った覚え | <kbd>↑</kbd> <kbd>↓</kbd> |
+
+ボタンを押さずに、`run` `check` `test` `explain E0102` `modules` `version`
+`clear` `help` と打っても動く（`shark run playground.shk` のように書いてもよい）。
+`--lang` `--memory` `--strict` `--no-color` も端末と同じに効く。
+開けるファイルは `playground.shk`（左に書いているもの）だけ。
+
+打つ文字を受けるのは、印（カーソル）の場所に置いた見えない `textarea`。
+かな漢字変換の窓がそこに出るようにするためで、`input()` に日本語を渡せる。
+
+### 待てないところで待つ
+
+ブラウザは止まって待てないので、`input()` は**待ちに入って刻みをホストに返す**
+（[../spec/runtime/embedding.md](../spec/runtime/embedding.md)）。
+`HostIO::input_ready` が「まだ来ていない」と答える間、`shk_waiting_input()` が 1 になり、
+画面はそれを見て入力を促す。行が来れば、そのまま続きから動く。
+`sleep` や `task` は待っている間も動く。
 
 ## 入力補完（IntelliSense）
 
@@ -122,7 +160,9 @@ function tick() {
 | `shk_pump(budget)` | `budget` 命令だけ進める。0=続く 1=終わり 2=止まった |
 | `shk_abort()` / `shk_idle()` | 止める / 待ちに入っているか |
 | `shk_out_ptr()` `shk_out_len()` `shk_out_clear()` | `print` の出力（UTF-8 のまま受け取る） |
-| `shk_push_input(text)` | `input()` に返す行をためる |
+| `shk_push_input(text)` | `input()` に返す行を渡す（打たれたそばから呼ぶ） |
+| `shk_push_eof()` | もう入力は無いと伝える（端末の Ctrl + D）。次の `input()` が `none` になる |
+| `shk_waiting_input()` | `input()` が行を待って止まっているか |
 | `shk_error()` | 止まった理由（JSON。理由・場所・呼び出しの経路） |
 | `shk_exit_code()` / `shk_test_passed()` / `shk_test_total()` | 終了コード / テストの結果 |
 | `shk_memory_used()` / `shk_memory_limit()` | 使っている量 / 上限（バイト） |
@@ -169,7 +209,6 @@ createShark().then((M) => {
 |---|---|
 | 外のファイルを読む | `std.file` が触るのはタブの中だけの仮の置き場（Emscripten の MEMFS）。閉じると消える |
 | 外のプログラムを呼ぶ | `os.run()` は失敗を返す（[../spec/library/os.md](../spec/library/os.md) のとおり `Result` で受け取れる） |
-| 端末から読む | `input()` は「入力」に書いた行を上から順に読む。無くなると `none` |
 | その場で待つ | 移植層の `sleep` は何もしない。`sleep()` はタスクを譲るだけで、実時間は描画の刻みで進む |
 | `std.net` `std.http` `std.ui` | もともとこの実装に入っていない（[../docs/implementation.md](../docs/implementation.md)） |
 

@@ -98,7 +98,7 @@ core/
 
 | モジュール | 実装 | 備考 |
 |---|---|---|
-| 組み込み（`print` `input` `sleep` `len` `range` `panic` `assert` `int()` …） | あり | `print` は `list` `map` も受け取れるようにしてある（仕様の4つに加えた分） |
+| 組み込み（`print` `input` `sleep` `len` `range` `panic` `assert` `int()` …） | あり | `print` は `list` `map` も受け取れるようにしてある（仕様の4つに加えた分）。`input()` は行が来るまで待つ（下） |
 | `std.time` | あり | 暦の計算は自前。書式は `YYYY MM DD hh mm ss SSS` |
 | `std.math` | あり | 乱数は xorshift を埋め込み。同じ種なら同じ並び |
 | `std.task` | あり | `Task` `channel` `task.yield` `task.count` |
@@ -194,6 +194,20 @@ for (;;) {
 実際に足した例が [core/platform/web.cpp](../core/platform/web.cpp)（ブラウザ）。
 コアには手を入れていない。待てない環境なので `sleep` は何もせず、
 進む量はホストが `step()` の刻みで決める（[web/README.md](../web/README.md)）。
+
+### まだ入力が無いとき
+
+端末は `read` の中で待てるが、ブラウザやゲームは止まって待てない。
+そこで `HostIO` に「行が来ているか」を尋ねる口（`input_ready`）を1つ置いた。
+
+| ホスト | どうなるか |
+|---|---|
+| 口を出さない（`shark` コマンド） | `input()` はその場で読む。いままでどおり |
+| 「まだ」と答える（ブラウザ） | `input()` は待ちに入り、`step()` はホストに返る。`Engine::waiting_input()` が立つ |
+| 「終端」と答える | `input()` は `none` |
+
+待ちに入っている間も他のタスクは動く。行き詰まり（deadlock）とは区別していて、
+入力待ちのときは実行時エラーにしない（[../core/vm.cpp](../core/vm.cpp)）。
 
 ## メモリの上限
 

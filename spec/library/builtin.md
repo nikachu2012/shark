@@ -8,7 +8,7 @@
 |---|---|
 | `print(v: string)` `print(v: int)` `print(v: float)` `print(v: bool)` | 標準出力に出して改行する |
 | `write(v: string)` `write(v: int)` `write(v: float)` `write(v: bool)` | 改行せずに出す |
-| `input() -> string?` | 標準入力から1行読む。終端なら `none` |
+| `input() -> string?` | 標準入力から1行読む。まだ無ければ来るまで待つ。終端なら `none` |
 
 ```shark
 print("さめ");           // さめ
@@ -16,6 +16,9 @@ print(42);               // 42
 write("名前: ");
 var name = input() ?? "";
 ```
+
+`input()` は行が打たれるまで待つ。待っている間もホストは止まらない
+（[../runtime/embedding.md](../runtime/embedding.md)）。
 
 `print` は型ごとのオーバーロード（[../syntax.md](../syntax.md)）。
 クラスなど上の4つ以外は `string(v)` で文字列にしてから渡す。
