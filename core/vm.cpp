@@ -45,7 +45,7 @@ void chan_obj_dispose(ChanObj* o) { chan_unref(o->c); }
 VM::VM()
     : prog(0), reg(0), diag(0), cur(0), status(SK_Running), exit_code(0), error_line(0),
       stack_size(65536), task_stack_size(4096), max_call_depth(10000), started_at(0), aborted(false), rng_state(0x853c49e6748fea9bull),
-      steps_since_switch(0), has_panic(false), idle_hint(false), boot_pos(0) {}
+      steps_since_switch(0), has_panic(false), idle_hint(false), input_wait(false), boot_pos(0) {}
 
 VM::~VM() {
   for (int i = 0; i < tasks.size(); i++) task_unref(tasks[i]);
@@ -137,6 +137,12 @@ void VM::write_out(const Str& s) {
 bool VM::read_line(Str* out) {
   if (io.read_line) return io.read_line(io.ud, out);
   return false;
+}
+
+// ホストが行（または終端）を渡しているか。渡していなければ input() は待つ
+bool VM::input_ready() {
+  if (!io.input_ready) return true;   // その場で待つホスト（端末など）
+  return io.input_ready(io.ud);
 }
 
 Value VM::make_error(const Str& msg, int code) {
@@ -330,6 +336,7 @@ RunStatus VM::step(int budget) {
   // 実行中に確保したものだけが、上限の対象になる
   MemRunScope run_scope;
   idle_hint = false;
+  input_wait = false;
 
   while (budget > 0) {
     // os.exit などで終わりが決まったら、その場で戻る
@@ -816,6 +823,8 @@ RunStatus VM::step(int budget) {
               if ((o->status == TS_Waiting || o->status == TS_Ready) && o->wake_at != 0) timer = true;
             }
             if (timer) { idle_hint = true; return SK_Running; }
+            // input() がホストの行を待っている。届けばまた進める
+            if (input_wait) { idle_hint = true; return SK_Running; }
             status = SK_Error;
             error_message = Str("すべてのタスクが待ったままになりました（届く見込みのない受け取り待ちです）");
             error_trace = build_trace();

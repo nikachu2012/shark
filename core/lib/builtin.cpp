@@ -26,6 +26,12 @@ static NativeStatus n_write(VM& vm, Value* a, int n, Value& out) {
 }
 static NativeStatus n_input(VM& vm, Value* a, int n, Value& out) {
   (void)a; (void)n;
+  // ホストがまだ行を渡していなければ、渡されるまで待つ（端末が read で待つのと同じ）
+  if (!vm.input_ready()) {
+    if (vm.task()->cancel_req) return N_Cancel;
+    vm.input_wait = true;
+    return N_Wait;
+  }
   Str line;
   if (!vm.read_line(&line)) { out = mk_none(); return N_Ok; }
   out = mk_str(line);

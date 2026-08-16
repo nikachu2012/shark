@@ -54,8 +54,11 @@ struct ChannelState {
 struct HostIO {
   void* ud;
   void (*write_out)(void* ud, const char* s, int n);
-  bool (*read_line)(void* ud, Str* out);
-  HostIO() : ud(0), write_out(0), read_line(0) {}
+  bool (*read_line)(void* ud, Str* out);   // false は終端
+  // 読める行が来ているか。0 なら「いつでも読める」（端末のように read_line の中で待つホスト）。
+  // false を返す間、input() は待ちに入り、ホストに刻みを返す（spec/runtime/embedding.md）
+  bool (*input_ready)(void* ud);
+  HostIO() : ud(0), write_out(0), read_line(0), input_ready(0) {}
 };
 
 struct VM {
@@ -94,6 +97,7 @@ struct VM {
   void panic(const Str& msg);
   void write_out(const Str& s);
   bool read_line(Str* out);
+  bool input_ready();
   Value make_error(const Str& msg, int code);
   Str build_trace();
 
@@ -108,6 +112,7 @@ struct VM {
   Str pending_panic;
   bool has_panic;
   bool idle_hint;       // どのタスクも待ちで、進められない
+  bool input_wait;      // input() がホストからの行を待っている
   Vec<int> boot;        // 初期化と入口の呼び出し順
   int boot_pos;
   Value default_of(Type* t);

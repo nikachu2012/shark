@@ -64,6 +64,8 @@ class Engine {
   // 少しずつ動かす
   RunStatus step(int budget);
   bool idle() const { return vm_.idle_hint; }
+  // input() がホストからの行を待っている（HostIO::input_ready を使うホストだけ）
+  bool waiting_input() const { return vm_.input_wait; }
   void abort_run() { vm_.abort_run(); }
   int exit_code() const { return vm_.exit_code; }
   const Str& error_message() const { return vm_.error_message; }
