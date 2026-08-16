@@ -203,18 +203,60 @@ main {
 .panel { flex: 1; margin: 0; overflow: auto; padding: 12px 14px; }
 .panel.hidden { display: none; }
 
-.out {
+/* --- ターミナル -----------------------------------------------------
+   出力も、打った文字も、1本の流れに並ぶ（端末と同じ）。
+   打つ文字を受けるのは term-key（見えない textarea）。かな漢字変換の窓を
+   正しい場所に出すため、印（カーソル）の位置に置いてある */
+.term {
+  position: relative;
+  padding: 10px 12px;
+  cursor: text;
+}
+#term-body {
+  margin: 0;
   font-family: var(--mono);
   font-size: 13px;
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
 }
-.out .sys { color: var(--ink-dim); }
-.out .err { color: var(--err); }
-.out .ok { color: var(--ok); }
+.term .ps1 { color: var(--accent); font-weight: 600; }
+.term .sys { color: var(--ink-dim); }
+.term .err { color: var(--err); }
+.term .warn { color: var(--warn); }
+.term .ok { color: var(--ok); }
 
-.diag .empty, .in .note { color: var(--ink-dim); }
+.caret {
+  display: inline-block;
+  min-width: .6em;
+  background: var(--accent);
+  color: var(--panel);
+  border-radius: 1px;
+}
+.term.on .caret { animation: blink 1.1s step-end infinite; }
+.term.off .caret { background: none; color: inherit; box-shadow: inset 0 0 0 1px var(--ink-dim); }
+@keyframes blink { 50% { background: transparent; color: inherit; } }
+
+/* 打つ文字を受けるところ。見えないが、位置だけは印に合わせる */
+.term-key {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2px;
+  height: 1.2em;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font: inherit;
+}
+
+.diag .empty { color: var(--ink-dim); }
 .diag pre {
   margin: 0 0 4px;
   font-family: var(--mono);
@@ -238,22 +280,6 @@ main {
 .item .where { margin-left: auto; font-size: 11.5px; color: var(--ink-dim); }
 .item .msg { font-weight: 600; }
 .item .hint { margin: 4px 0 0; padding-left: 18px; color: var(--ink-dim); font-size: 13px; }
-
-.in { display: flex; flex-direction: column; gap: 8px; }
-#stdin {
-  flex: 1;
-  min-height: 120px;
-  resize: none;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel-2);
-  color: var(--ink);
-  font-family: var(--mono);
-  font-size: 13px;
-  line-height: 1.6;
-}
-#btn-send { align-self: flex-start; }
 
 /* ------------------------------------------------------------------ 下の帯 */
 .status {

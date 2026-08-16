@@ -60,24 +60,23 @@
 
   <section class="pane" id="pane-side">
     <div class="tabs" role="tablist">
-      <button class="tab active" data-tab="out" role="tab">出力</button>
+      <button class="tab active" data-tab="term" role="tab">ターミナル</button>
       <button class="tab" data-tab="diag" role="tab">診断<span class="badge" id="diag-count"></span></button>
-      <button class="tab" data-tab="in" role="tab">入力</button>
       <div class="tab-space"></div>
-      <button id="btn-clear" class="ghost" title="出力を消す">消す</button>
+      <button id="btn-clear" class="ghost" title="流れを消す（Ctrl + L）">消す</button>
     </div>
 
     <div class="tab-body">
-      <pre id="out" class="panel out" role="tabpanel"></pre>
+      <!-- 端末と同じ1本の流れ。出力も、打った文字も、ここに並ぶ。
+           打つ文字は下の textarea が受ける（かな漢字変換のため） -->
+      <div id="term" class="panel term" role="tabpanel" aria-label="ターミナル">
+        <pre id="term-body"><span id="term-log"></span><span id="term-line"><span id="term-ps1" class="ps1"></span><span id="term-pre"></span><span id="term-caret" class="caret"> </span><span id="term-post"></span></span></pre>
+        <textarea id="term-key" class="term-key" rows="1" spellcheck="false" autocomplete="off"
+                  autocapitalize="off" autocorrect="off" aria-label="ターミナルに打つ"></textarea>
+      </div>
 
       <div id="diag" class="panel diag hidden" role="tabpanel">
         <p class="empty">まだ何も読み込んでいません。</p>
-      </div>
-
-      <div id="in" class="panel in hidden" role="tabpanel">
-        <p class="note"><code>input()</code> が読む行をここに書いておきます。1行が1回ぶんです。</p>
-        <textarea id="stdin" spellcheck="false" placeholder="さめ&#10;42"></textarea>
-        <button id="btn-send">実行中のプログラムに送る</button>
       </div>
     </div>
   </section>
@@ -105,6 +104,17 @@
       <li><b>テスト</b> … <code>test_</code> で始まる関数を順に走らせる</li>
       <li><b>止める</b> … 途中でやめる。止まらない繰り返しでも画面は固まりません</li>
     </ul>
+
+    <h3>ターミナル</h3>
+    <p>右がわは端末とおなじ流れです。出力も、打った文字も1本に並び、
+       出る形は <code>shark</code> コマンドと同じにしてあります。</p>
+    <ul>
+      <li><code>input()</code> は<b>打たれるまで待ちます</b>。そのまま打って <kbd>Enter</kbd></li>
+      <li>ボタンを押さずに、<code>run</code> <code>check</code> <code>test</code>
+          <code>explain E0102</code> <code>modules</code> と打っても動きます（<code>help</code> で一覧）</li>
+      <li><kbd>Ctrl</kbd> + <kbd>C</kbd> … 止める　/　<kbd>Ctrl</kbd> + <kbd>D</kbd> … 入力の終わり（<code>none</code> になる）</li>
+      <li><kbd>Ctrl</kbd> + <kbd>L</kbd> … 流れを消す　/　<kbd>↑</kbd> <kbd>↓</kbd> … 打った覚え</li>
+    </ul>
     <h3>覚えておくと早い</h3>
     <ul>
       <li><kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>Enter</kbd> … 実行</li>
@@ -126,7 +136,7 @@
     <ul>
       <li><code>std.file</code> が触るのは、このタブの中だけにある仮の置き場です。閉じると消えます</li>
       <li><code>os.run()</code>（外のプログラムを呼ぶ）は使えません</li>
-      <li><code>input()</code> は「入力」に書いた行を上から順に読みます。無くなると <code>none</code> です</li>
+      <li>読めるファイルは <code>playground.shk</code>（左に書いているもの）だけです</li>
     </ul>
     <h3>この処理系が持つモジュール</h3>
     <p id="help-modules" class="mods">—</p>

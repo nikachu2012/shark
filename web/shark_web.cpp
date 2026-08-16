@@ -22,8 +22,9 @@ namespace {
 
 // ------------------------------------------------------------ 出入り口
 Str g_out;          // print と write が書いたもの。JavaScript が読んでは空にする
-Str g_in;           // input() に返す行。JavaScript が先に入れておく
+Str g_in;           // input() に返す行。JavaScript が打たれたそばから入れる
 int g_in_pos = 0;
+int g_eof_at = -1;  // ここまで読んだら終端を1度返す（端末の Ctrl-D にあたる）。-1 は無し
 
 void on_output(void* ud, const char* s, int n) {
   (void)ud;
@@ -36,7 +37,10 @@ void on_platform_write(void* ud, const char* s, int n, bool is_err) {
 bool on_input(void* ud, Str* out) {
   (void)ud;
   out->clear();
-  if (g_in_pos >= g_in.size()) return false;   // もう無いときは none になる
+  if (g_in_pos >= g_in.size()) {   // 終端。none になる
+    g_eof_at = -1;
+    return false;
+  }
   while (g_in_pos < g_in.size()) {
     char c = g_in[g_in_pos++];
     if (c == '\n') return true;
@@ -44,6 +48,13 @@ bool on_input(void* ud, Str* out) {
     out->push(c);
   }
   return true;
+}
+// 読める行（または終端）が来ているか。来るまで input() は待つ。
+// 端末で read が返るまで止まっているのと同じことを、刻んで動くまま行う
+bool on_input_ready(void* ud) {
+  (void)ud;
+  if (g_in_pos < g_in.size()) return true;
+  return g_eof_at >= 0 && g_in_pos >= g_eof_at;
 }
 
 // ------------------------------------------------------------ 持ち物
@@ -249,6 +260,7 @@ API int shk_load(const char* name, const char* source) {
   g_out.clear();
   g_in.clear();
   g_in_pos = 0;
+  g_eof_at = -1;
   g_mode = M_IDLE;
   g_last_status = 0;
   g_src_names.clear();
@@ -258,6 +270,7 @@ API int shk_load(const char* name, const char* source) {
   HostIO io;
   io.write_out = on_output;
   io.read_line = on_input;
+  io.input_ready = on_input_ready;
   g_engine->set_io(io);
 
   Str n(name), s(source);
@@ -282,11 +295,18 @@ API const char* shk_diagnostics() { return g_answer.c_str(); }
 API int shk_ok() { return g_engine && g_engine->ok() ? 1 : 0; }
 API int shk_has_entry() { return g_engine && g_engine->has_entry() ? 1 : 0; }
 
-// input() に返す文字列をためる
+// input() に返す文字列をためる（打たれた行をそのつど渡す）
 API void shk_push_input(const char* text) {
   g_in += Str(text);
   if (g_in.size() && g_in[g_in.size() - 1] != '\n') g_in.push('\n');
+  if (g_eof_at >= 0 && g_eof_at < g_in.size()) g_eof_at = -1;   // 続きが来たので終端は取り消し
 }
+
+// もう入力は無い、と伝える（端末の Ctrl-D）。次の input() が none になる
+API void shk_push_eof() { g_eof_at = g_in.size(); }
+
+// input() が行を待って止まっているか。JavaScript はこれを見て入力を促す
+API int shk_waiting_input() { return g_engine && g_engine->waiting_input() ? 1 : 0; }
 
 // 実行を始める。読み込みの時点で main は呼ぶ準備ができている
 API int shk_start_run() {

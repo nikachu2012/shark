@@ -1,4 +1,5 @@
-// 入力を読む。右の「入力」に書いた行が input() に渡る
+// 入力を読む。input() は端末と同じで、行が打たれるまで待つ。
+// 右のターミナルに打って Enter（Ctrl + D なら「入力の終わり」で none になる）
 func main() -> int {
   print("名前を教えてください");
   if var name = input() {

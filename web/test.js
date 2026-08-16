@@ -38,6 +38,8 @@ createShark().then((M) => {
     diagnostics: M.cwrap('shk_diagnostics', 'string', []),
     hasEntry: M.cwrap('shk_has_entry', 'number', []),
     pushInput: M.cwrap('shk_push_input', null, ['string']),
+    pushEof: M.cwrap('shk_push_eof', null, []),
+    waitingInput: M.cwrap('shk_waiting_input', 'number', []),
     startRun: M.cwrap('shk_start_run', 'number', []),
     startTest: M.cwrap('shk_start_test', 'number', []),
     pump: M.cwrap('shk_pump', 'number', ['number']),
@@ -65,7 +67,8 @@ createShark().then((M) => {
   const sleepBuf = new Int32Array(new SharedArrayBuffer(4));
   function nap(ms) { Atomics.wait(sleepBuf, 0, 0, ms); }
 
-  // 1回に 20 万命令ずつ、最大 maxMs ミリ秒まで進める
+  // 1回に 20 万命令ずつ、最大 maxMs ミリ秒まで進める。
+  // input() が行を待ち始めたら、そこでいったん返す（ブラウザなら打たれるのを待つところ）
   function drive(maxMs) {
     const start = Date.now();
     let out = '';
@@ -73,6 +76,7 @@ createShark().then((M) => {
       const status = api.pump(200000);
       out += take();
       if (status !== 0) return { status, out };
+      if (api.waitingInput()) return { status: 0, out, waiting: true };
       if (api.idle()) nap(2);
     }
     return { status: 0, out };
@@ -107,12 +111,34 @@ createShark().then((M) => {
   const config = run(fs.readFileSync(path.join(root, 'examples/config.shk'), 'utf8'));
   check('config.shk（file / json / os を使う）', config.errors === 0 && config.status === 1, config.out);
 
-  // --- 入力 ---
-  const ask = run(fs.readFileSync(path.join(root, 'web/examples/ask.shk'), 'utf8'), 'さめ\n');
+  // --- 入力（端末と同じで、打たれるまで待つ）---
+  const askSrc = fs.readFileSync(path.join(root, 'web/examples/ask.shk'), 'utf8');
+  const ask = run(askSrc, 'さめ\n');
   check('input() が読める', ask.out.indexOf('こんにちは、さめ さん！') >= 0, ask.out);
 
-  const noInput = run(fs.readFileSync(path.join(root, 'web/examples/ask.shk'), 'utf8'));
-  check('入力が無いときは none', noInput.out.indexOf('入力がありませんでした') >= 0, noInput.out);
+  function startAsk() {
+    api.config(64, 0, 0);
+    api.load('ask.shk', askSrc);
+    api.startRun();
+    return drive(3000);
+  }
+
+  const waited = startAsk();
+  check('行が来るまで input() は待つ',
+        waited.waiting === true && waited.status === 0 && api.waitingInput() === 1 &&
+        waited.out.indexOf('名前を教えてください') >= 0,
+        JSON.stringify(waited));
+  api.pushInput('まぐろ\n');
+  const answered = drive(3000);
+  check('打たれた行がそのまま渡る',
+        answered.status === 1 && answered.out.indexOf('こんにちは、まぐろ さん！') >= 0,
+        JSON.stringify(answered));
+
+  startAsk();
+  api.pushEof();                       // 端末の Ctrl + D
+  const eof = drive(3000);
+  check('入力の終わり（Ctrl + D）では none',
+        eof.status === 1 && eof.out.indexOf('入力がありませんでした') >= 0, JSON.stringify(eof));
 
   // --- 診断 ---
   const bad = run('func main() -> int {\n  var a = 1 + "さめ";\n  return 0;\n}\n');
