@@ -506,6 +506,21 @@ static FuncInfo* find_in_bases(Program& prog, ClassInfo* c, FuncInfo* f, bool* f
   return 0;
 }
 
+// クラスが自分自身を値として持っていないか（代入がコピーなので大きさが決まらない）
+static bool holds_by_value(ClassInfo* c, ClassInfo* target, Vec<ClassInfo*>* seen) {
+  for (int i = 0; i < c->fields.size(); i++) {
+    Type* ft = c->fields[i].type;
+    if (!ft || ft->kind != T_Class || !ft->cls) continue;
+    if (ft->cls == target) return true;
+    bool visited = false;
+    for (int k = 0; k < seen->size(); k++) if ((*seen)[k] == ft->cls) visited = true;
+    if (visited) continue;
+    seen->push(ft->cls);
+    if (holds_by_value(ft->cls, target, seen)) return true;
+  }
+  return false;
+}
+
 void Checker::collect_funcs(Unit* u) {
   unit_ = u;
   diag_.set_file(u->display);
@@ -2715,6 +2730,20 @@ Type* Checker::check_call(Node* e) {
         e->type = t_.t_unknown();
       }
     }
+    // ?. の先で中身を書き換えることはできない（取り出せるのはコピーだから）
+    if (opt_chain && e->resolved2 == 1) {
+      Diagnostic& d = diag_.error("E0211", diag_.L(Str("?. の先では ") + mname + "() のように中身を書き換えるメソッドは呼べません",
+                                                   Str("cannot call the mutating method ") + mname + "() through ?."));
+      d.spans.push(Span(callee->line, callee->col, callee->len));
+      Str v = expr_text(obj);
+      if (!v.size()) v = Str("xs");
+      d.help.push(diag_.L(Str("値があるか先に確かめ、取り出したものを書き換えてから戻します\n") + "if var v = " + v +
+                              " { v." + mname + "(...); " + v + " = v; }",
+                          Str("check first: if var v = ") + v + " { v." + mname + "(...); " + v + " = v; }"));
+      d.help.push(diag_.L(Str("値が必ずあるなら、? を付けずに宣言します"),
+                          Str("if the value always exists, declare it without ?")));
+      e->resolved2 = 0;
+    }
     if (opt_chain && e->type) e->type = t_.optional_of(e->type);
     return e->type ? e->type : t_.t_unknown();
   }
@@ -2846,6 +2875,35 @@ bool Checker::check_all() {
                                 "mark the parent method virtual, or use a different name"));
           }
         }
+      }
+    }
+  }
+
+  // 自分自身を値として持つクラスは作れない
+  for (int ui = 0; ui < units_.size(); ui++) {
+    Unit* u = units_[ui];
+    unit_ = u;
+    diag_.set_file(u->display);
+    for (int ci = 0; ci < u->classes.size(); ci++) {
+      ClassDecl* cd = u->classes[ci];
+      ClassInfo* c = cd->info;
+      int off = c->fields.size() - cd->fields.size();
+      for (int k = 0; k < cd->fields.size(); k++) {
+        if (off + k < 0 || off + k >= c->fields.size()) continue;
+        Type* ft = c->fields[off + k].type;
+        if (!ft || ft->kind != T_Class || !ft->cls) continue;
+        Vec<ClassInfo*> seen;
+        seen.push(ft->cls);
+        if (ft->cls != c && !holds_by_value(ft->cls, c, &seen)) continue;
+        Diagnostic& d = diag_.error("E0409",
+            diag_.L(c->name + " は自分自身を値として持てません（代入がコピーなので、大きさが決まりません）",
+                    c->name + " cannot contain itself by value"));
+        d.spans.push(Span(cd->fields[k].line, cd->fields[k].col,
+                          cd->fields[k].len > 0 ? cd->fields[k].len : (int)cd->fields[k].name.size()));
+        d.help.push(diag_.L(Str("? を付けると、値が無い状態を表せます: var ") + cd->fields[k].name + ": " +
+                                type_name(ft) + "?;\n  並べて持ちたいときは list<" + type_name(ft) + "> にします",
+                            Str("add ? to allow \"no value\": var ") + cd->fields[k].name + ": " +
+                                type_name(ft) + "?;"));
       }
     }
   }

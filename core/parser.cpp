@@ -241,7 +241,13 @@ ClassDecl* Parser::parse_class(bool is_public) {
       fd.is_public = mpub;
       fd.line = cur().line; fd.col = cur().col;
       p_++;
-      if (at(TK_Ident)) { fd.name = cur().text; fd.len = cur().len; p_++; }
+      if (at(TK_Ident)) {
+        fd.line = cur().line;
+        fd.col = cur().col;
+        fd.name = cur().text;
+        fd.len = cur().len;
+        p_++;
+      }
       else { error_here(diag_.L("メンバ変数の名前が要ります", "expected a field name"), Str()); p_++; }
       if (expect(TK_Colon, "メンバ変数には型注釈が要ります（省略できません）",
                  "a field needs a type annotation")) {
