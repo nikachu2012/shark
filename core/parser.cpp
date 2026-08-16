@@ -136,7 +136,9 @@ void Parser::parse_import() {
   int start_col = cur().col;
   // ./ ../ の並び
   while (at(TK_Dot) || at(TK_Slash)) { path += (at(TK_Dot) ? "." : "/"); p_++; }
-  if (!at(TK_Ident)) {
+  // std.task のように、予約語と同じ綴りの区切りも受け取る
+  bool segment = at(TK_Ident) || (cur().kind >= TK_Func && cur().kind <= TK_None && cur().text.size() > 0);
+  if (!segment) {
     error_here(diag_.L("import の後ろにモジュール名が要ります", "expected a module name after import"),
                diag_.L("例: import std.time;  /  import ./util;", "example: import std.time;"));
     sync_to_statement();
@@ -148,7 +150,7 @@ void Parser::parse_import() {
     path += (at(TK_Dot) ? "." : "/");
     p_++;
     if (at(TK_Dot) || at(TK_Slash)) continue;
-    if (!at(TK_Ident)) break;
+    if (!(at(TK_Ident) || (cur().kind >= TK_Func && cur().kind <= TK_None && cur().text.size() > 0))) break;
     path += cur().text;
     p_++;
   }
