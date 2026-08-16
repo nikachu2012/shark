@@ -212,6 +212,12 @@ static NativeStatus fm_read(VM& vm, Value* a, int n, Value& out) {
     return N_Ok;
   }
   int64_t want = A(a, 1)->i;
+  if (want <= 0) {
+    out = mk_result_ok(mk_bytes(Str()));
+    return N_Ok;
+  }
+  const int64_t kOnce = 1 << 30;   // 一度に読むのはここまで
+  if (want > kOnce) want = kOnce;
   Str data;
   while (data.size() < want) {
     if (f->pending.size() > 0) {

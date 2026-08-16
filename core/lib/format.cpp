@@ -70,9 +70,13 @@ static Str fixed(double v, int prec) {
   if (neg) v = -v;
   if (v != v) return Str("nan");
   if (v > 1.7976931348623157e307) return Str(neg ? "-inf" : "inf");
+  if (prec < 0) prec = 0;
+  if (prec > 17) prec = 17;   // これ以上は意味のある桁が出ない
   double scale = 1.0;
   for (int i = 0; i < prec; i++) scale *= 10.0;
   double scaled = v * scale;
+  // 整数に直せない大きさは、桁を並べずにそのまま書く
+  if (scaled >= 9.0e18) return str_from_float(neg ? -v : v);
   // 最近接偶数に丸める
   double fl = (double)(int64_t)scaled;
   double frac = scaled - fl;
