@@ -1,0 +1,47 @@
+// prelude.shk — Shark 自身で書いた標準の一部。
+//
+// 並べ替えは、基本型でもクラスでも同じコードで動かしたいので Shark で書いてある
+// （compare の呼び分けは仮想マシンが行う）。処理系はこのファイルを埋め込んで持ち、
+// 起動時に読み込む。core/prelude.h は tools/prelude.py がここから作る。
+//
+// 名前が __ で始まるものは、書く人からは見えない。xs.sort() から呼ばれる。
+
+func __merge<T: Comparable>(ref xs: list<T>, lo: int, mid: int, hi: int) -> void {
+  var tmp: list<T> = [];
+  var a = lo;
+  var b = mid;
+  while a < mid && b < hi {
+    if xs[b].compare(xs[a]) < 0 {
+      tmp.push(xs[b]);
+      b = b + 1;
+    } else {
+      tmp.push(xs[a]);
+      a = a + 1;
+    }
+  }
+  while a < mid { tmp.push(xs[a]); a = a + 1; }
+  while b < hi { tmp.push(xs[b]); b = b + 1; }
+  var k = 0;
+  while k < tmp.len() {
+    xs[lo + k] = tmp[k];
+    k = k + 1;
+  }
+}
+
+func __sort<T: Comparable>(ref xs: list<T>) -> void {
+  var n = xs.len();
+  if n < 2 { return; }
+  var width = 1;
+  while width < n {
+    var i = 0;
+    while i < n {
+      var mid = i + width;
+      var hi = i + width + width;
+      if mid > n { mid = n; }
+      if hi > n { hi = n; }
+      __merge(ref xs, i, mid, hi);
+      i = i + width + width;
+    }
+    width = width + width;
+  }
+}

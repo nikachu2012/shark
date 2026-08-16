@@ -1,0 +1,202 @@
+// math.shk — std.math の宣言。実装は core/lib/math.cpp。
+
+/// std.math
+///
+/// 数の計算と乱数。三角関数の角度は弧度法（ラジアン）。
+/// int と float は混ぜて渡せないので、float(n) で揃えてから呼ぶ。
+///
+/// 例:
+///   import std.math;
+///   print(math.sqrt(9.0));   // 3.0
+module std.math;
+
+/// 円周率。
+///
+/// 例:
+///   print(math.PI > 3.14);   // true
+const PI: float;
+
+/// 自然対数の底。
+///
+/// 例:
+///   print(math.E > 2.71);   // true
+const E: float;
+
+/// 無限大。
+///
+/// 例:
+///   print(math.is_inf(math.INF));   // true
+const INF: float;
+
+/// 絶対値。
+///
+/// 例:
+///   print(math.abs(-3));      // 3
+///   print(math.abs(-1.5));    // 1.5
+func abs(x: int) -> int;
+func abs(x: float) -> float;
+
+/// 小さい方を返す。
+///
+/// 例:
+///   print(math.min(3, 7));        // 3
+///   print(math.min(1.5, 0.5));    // 0.5
+func min(a: int, b: int) -> int;
+func min(a: float, b: float) -> float;
+
+/// 大きい方を返す。
+///
+/// 例:
+///   print(math.max(3, 7));        // 7
+///   print(math.max(1.5, 0.5));    // 1.5
+func max(a: int, b: int) -> int;
+func max(a: float, b: float) -> float;
+
+/// lo と hi の間に収める。
+///
+/// 引数:
+///   x    収めたい値
+///   lo   下限。これより小さければ lo になる
+///   hi   上限。これより大きければ hi になる
+///
+/// 例:
+///   print(math.clamp(120, 0, 100));      // 100
+///   print(math.clamp(-0.5, 0.0, 1.0));   // 0.0
+func clamp(x: int, lo: int, hi: int) -> int;
+func clamp(x: float, lo: float, hi: float) -> float;
+
+/// 平方根。負の数なら nan。
+///
+/// 例:
+///   print(math.sqrt(9.0));   // 3.0
+func sqrt(x: float) -> float;
+
+/// べき乗（x の y 乗）。
+///
+/// 例:
+///   print(math.pow(2.0, 10.0));   // 1024.0
+func pow(x: float, y: float) -> float;
+
+/// e の x 乗。
+///
+/// 例:
+///   print(math.exp(0.0));   // 1.0
+func exp(x: float) -> float;
+
+/// 自然対数。
+///
+/// 例:
+///   print(math.log(1.0));   // 0.0
+func log(x: float) -> float;
+
+/// 常用対数（底が 10）。
+///
+/// 例:
+///   print(math.log10(1000.0));   // 3.0
+func log10(x: float) -> float;
+
+/// 正弦。角度は弧度法。
+///
+/// 例:
+///   print(math.sin(0.0));   // 0.0
+func sin(x: float) -> float;
+
+/// 余弦。角度は弧度法。
+///
+/// 例:
+///   print(math.cos(0.0));   // 1.0
+func cos(x: float) -> float;
+
+/// 正接。角度は弧度法。
+///
+/// 例:
+///   print(math.tan(0.0));   // 0.0
+func tan(x: float) -> float;
+
+/// 逆正弦。
+///
+/// 例:
+///   print(math.asin(0.0));   // 0.0
+func asin(x: float) -> float;
+
+/// 逆余弦。
+///
+/// 例:
+///   print(math.acos(1.0));   // 0.0
+func acos(x: float) -> float;
+
+/// 逆正接。
+///
+/// 例:
+///   print(math.atan(0.0));   // 0.0
+func atan(x: float) -> float;
+
+/// 座標から角度を出す。戻りは -π 〜 π。
+///
+/// 例:
+///   var deg = math.atan2(1.0, 1.0) * 180.0 / math.PI;
+///   print(deg);   // 45.0
+func atan2(y: float, x: float) -> float;
+
+/// 小さい方の整数に丸める。
+///
+/// 例:
+///   print(math.floor(-1.5));   // -2
+func floor(x: float) -> int;
+
+/// 大きい方の整数に丸める。
+///
+/// 例:
+///   print(math.ceil(1.2));   // 2
+func ceil(x: float) -> int;
+
+/// 四捨五入する。
+///
+/// 例:
+///   print(math.round(2.5));   // 3
+func round(x: float) -> int;
+
+/// 0 の方へ落とす。
+///
+/// 例:
+///   print(math.trunc(-1.5));   // -1
+func trunc(x: float) -> int;
+
+/// 数でない値（nan）かどうか。
+///
+/// 例:
+///   print(math.is_nan(math.sqrt(-1.0)));   // true
+func is_nan(x: float) -> bool;
+
+/// 無限大かどうか。
+///
+/// 例:
+///   print(math.is_inf(1.0 / 0.0));   // true
+func is_inf(x: float) -> bool;
+
+/// 0 以上 1 未満の乱数。
+///
+/// 例:
+///   math.seed(42);
+///   print(math.random() < 1.0);   // true
+func random() -> float;
+
+/// lo 以上 hi 以下の整数の乱数。
+///
+/// 引数:
+///   lo   いちばん小さい値
+///   hi   いちばん大きい値。lo より小さいと実行時エラー
+///
+/// 例:
+///   math.seed(42);
+///   print(math.random_int(1, 6));   // 1（種が同じなら、どこでも同じ並びになる）
+func random_int(lo: int, hi: int) -> int;
+
+/// 乱数の種を決める。同じ種なら、どの環境でも同じ並びになる。
+///
+/// 例:
+///   math.seed(42);
+///   write(math.random_int(1, 100)); write(" ");   // 37
+///   math.seed(42);
+///   print(math.random_int(1, 100));               // 37（同じ種なら同じ）
+func seed(n: int) -> void;

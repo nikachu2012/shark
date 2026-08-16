@@ -17,6 +17,8 @@
 ```
 make            # コア（静的な .o）と shark コマンドを作る
 make test       # tests/ を走らせる（メモリの検査を含む）
+make docs       # 標準ライブラリのリファレンス（docs/reference/）を作る
+make docs-check # リファレンスに載る例を、ぜんぶ動かして確かめる
 make embed      # 組み込みの例（examples/embed）を作る
 make web        # ブラウザで動く形（WebAssembly）を作る
 ```
@@ -59,7 +61,7 @@ core/
   value                   値・参照カウント・書き込み時コピー
   diag                    診断（番号と文面）
   registry                関数の表（標準ライブラリとホスト関数）
-  prelude.h               Shark 自身で書いた部分（並べ替え）
+  prelude.h               Shark 自身で書いた部分（stdlib/prelude.shk から作る）
   platform/               移植層          ← 差し替える場所
     desktop.cpp             Windows / macOS / Linux
     console.cpp             ファイルも OS も無い機種の雛形
@@ -85,7 +87,7 @@ core/
 | `T?` `none` `??` `if var` `!` `?.` | あり |
 | `Result<T>` `Error` `try` `panic` | あり |
 | クラス・継承・`virtual` / `override`・純粋仮想・インタフェース・`This` | あり |
-| `Comparable` と `sort()` | あり（並べ替えは `core/prelude.h` に Shark で書いてある） |
+| `Comparable` と `sort()` | あり（並べ替えは [stdlib/prelude.shk](../stdlib/prelude.shk) に Shark で書いてある） |
 | ジェネリクス（関数・クラス・制約 `<T: Comparable>`） | あり（型ごとの複製はしない） |
 | 関数オーバーロード（引数の型か個数で選ぶ） | あり |
 | `ref`（引数だけ・借用） | あり |
@@ -173,6 +175,8 @@ for (;;) {
 }
 ```
 
+- プレイヤーに渡す関数の一覧も同じ道具で作れる。ゲーム側の関数を `.shk` の宣言ファイルに
+  書いて `python3 docs/gen.py out --stdlib その置き場` を走らせる（[stdlib/README.md](../stdlib/README.md)）
 - `step(budget)` の `budget` は**命令の数**。時間ではないので、機種や負荷で結果が変わらない
 - 止めたいときは `engine.abort_run()`
 - 診断は構造化データ（`Diagnostic`）で返る。整形はホストの仕事。

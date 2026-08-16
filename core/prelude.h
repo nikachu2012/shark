@@ -1,7 +1,6 @@
-// prelude.h — Shark 自身で書いた部分
+// prelude.h — Shark 自身で書いた部分（tools/prelude.py が stdlib/prelude.shk から作る）
 //
-// 並べ替えは、基本型でもクラスでも同じコードで動かしたいので、
-// ここに Shark で書いてある（compare の呼び分けは仮想マシンが行う）。
+// ここを直さない。直すのは stdlib/prelude.shk。
 #ifndef SHARK_PRELUDE_H
 #define SHARK_PRELUDE_H
 
@@ -46,7 +45,8 @@ static const char* kPreludeSource =
     "    }\n"
     "    width = width + width;\n"
     "  }\n"
-    "}\n";
+    "}\n"
+;
 
 }  // namespace shark
 #endif

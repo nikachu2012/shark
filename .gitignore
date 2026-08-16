@@ -4,6 +4,9 @@
 /examples/embed/game
 /tests/memcheck
 /bench/build/
+/docs/reference/
 /web/dist/
 /web/vendor/
 __pycache__/
+.DS_Store
+Thumbs.db

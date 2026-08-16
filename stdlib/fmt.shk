@@ -1,0 +1,57 @@
+// fmt.shk — std.fmt の宣言。実装は core/lib/fmt.cpp。
+
+/// std.fmt
+///
+/// 書式指定 f"{v:...}" で書けないものを補う。
+/// 桁揃え・ゼロ埋め・桁区切りは書式指定で書けるので、このモジュールは要らない。
+///
+/// 例:
+///   import std.fmt;
+///   print(fmt.bytes(1536));   // 1.5 KB
+module std.fmt;
+
+/// 書式を実行時に決めて当てる。記法は f"{v:...}" と同じ。
+///
+/// 引数:
+///   v      当てる値
+///   spec   書式（"05" ".2f" "x" "," など）。おかしければ、そのまま文字列にする
+///
+/// 例:
+///   print(fmt.apply(7, "03"));        // 007
+///   print(fmt.apply(3.14159, ".2f")); // 3.14
+///   print(fmt.apply("さめ", ">6"));   //   さめ（表示幅 6 に右寄せ）
+func apply(v: int, spec: string) -> string;
+func apply(v: float, spec: string) -> string;
+func apply(v: string, spec: string) -> string;
+
+/// データ量を読みやすい形にする。
+///
+/// 例:
+///   print(fmt.bytes(1536));   // 1.5 KB
+func bytes(v: int) -> string;
+
+/// 期間を読みやすい形にする。
+///
+/// 例:
+///   import std.time;
+///   print(fmt.duration(time.seconds(3725.0)));   // 1時間2分5秒
+func duration(d: Duration) -> string;
+
+/// 表示幅で切って … を付ける。全角は 2 と数える。
+///
+/// 引数:
+///   s       元の文字列
+///   width   切ったあとの表示幅
+///
+/// 例:
+///   print(fmt.truncate("とても長い名前です", 8));   // とても長…
+func truncate(s: string, width: int) -> string;
+
+/// 列の幅を揃えて表にする。1行目を見出しにはしない。
+///
+/// 例:
+///   print(fmt.table([
+///     ["名前", "大きさ"],
+///     ["さめ", "400"],
+///   ]));
+func table(rows: list<list<string>>) -> string;

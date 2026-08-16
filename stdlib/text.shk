@@ -1,0 +1,205 @@
+// text.shk — std.text の宣言。実装は core/lib/text.cpp。
+
+/// std.text
+///
+/// Unicode の細かい扱いと正規表現。
+/// upper() や split() のような日常的な操作は string のメソッドにある。
+///
+/// 例:
+///   import std.text;
+///   print(text.width("さめ"));   // 4
+module std.text;
+
+/// Unicode の正規化。
+///
+/// 引数:
+///   s      直す文字列
+///   form   "NFC"（合成）か "NFD"（分解）
+///
+/// 例:
+///   print(text.normalize("が", "NFD").len());   // 2（か と 濁点）
+///   print(text.normalize("が", "NFC").len());   // 1
+func normalize(s: string, form: string) -> string;
+
+/// 表示幅。全角は 2 と数える。等幅で桁を揃えるときに使う。
+///
+/// 例:
+///   print(text.width("さめ"));     // 4
+///   print(text.width("shark"));    // 5
+func width(s: string) -> int;
+
+/// 大文字小文字を無視して比べるための形にする。
+///
+/// 例:
+///   print(text.fold_case("Shark") == text.fold_case("SHARK"));   // true
+func fold_case(s: string) -> string;
+
+/// 1文字をコードポイントの番号にする。
+///
+/// 例:
+///   print(text.code("A"));   // 65
+func code(c: string) -> int;
+
+/// コードポイントの番号から1文字を作る。番号がおかしければ none。
+///
+/// 例:
+///   print(text.from_code(65) ?? "");   // A
+func from_code(n: int) -> string?;
+
+/// 数字かどうか。
+///
+/// 例:
+///   print(text.is_digit("7"));   // true
+///   print(text.is_digit("さ"));  // false
+func is_digit(c: string) -> bool;
+
+/// 文字（数字や記号ではないもの）かどうか。
+///
+/// 例:
+///   print(text.is_alpha("さ"));   // true
+func is_alpha(c: string) -> bool;
+
+/// 空白かどうか。改行やタブも含む。
+///
+/// 例:
+///   print(text.is_space(" "));   // true
+func is_space(c: string) -> bool;
+
+/// 大文字かどうか。
+///
+/// 例:
+///   print(text.is_upper("A"));   // true
+func is_upper(c: string) -> bool;
+
+/// 小文字かどうか。
+///
+/// 例:
+///   print(text.is_lower("a"));   // true
+func is_lower(c: string) -> bool;
+
+/// コードポイント順に比べる。小さいと -1、同じなら 0、大きいと 1。
+///
+/// 例:
+///   print(text.compare("あ", "い"));   // -1
+func compare(a: string, b: string) -> int;
+
+/// 五十音順に比べる。ひらがなとカタカナは同じものとして扱う。
+///
+/// 例:
+///   print(text.compare_ja("さめ", "あじ"));   // 1
+func compare_ja(a: string, b: string) -> int;
+
+/// 五十音順に並べ替える。漢字は対象外で、コードポイント順に置かれる。
+///
+/// 例:
+///   var xs = ["サメ", "あじ", "ぶり", "いわし"];
+///   text.sort_ja(ref xs);
+///   print(xs.join(", "));   // あじ, いわし, サメ, ぶり
+func sort_ja(ref xs: list<string>) -> void;
+
+/// 正規表現を組み立てる。書けないパターンなら失敗を返す。
+///
+/// 使えるのは文字クラス、* + ? { }、|、( )、^ $ まで。
+/// 先読みや後方参照は持たない。
+///
+/// 例:
+///   if var re = text.regex("[0-9]+") {
+///     print(re.matches("さめ2匹"));   // true
+///   }
+func regex(pattern: string) -> Result<Regex>;
+
+/// バイト列を文字列にする。
+///
+/// 引数:
+///   b     元のバイト列
+///   enc   文字コード。"utf-8" は必ず使える。ほかは処理系による
+///
+/// 例:
+///   if var s = text.decode("さめ".bytes(), "utf-8") { print(s); }   // さめ
+func decode(b: bytes, enc: string) -> Result<string>;
+
+/// 文字列をバイト列にする。
+///
+/// 例:
+///   if var b = text.encode("さめ", "utf-8") { print(b.len()); }   // 6
+func encode(s: string, enc: string) -> Result<bytes>;
+
+/// 組み立てた正規表現。
+class Regex {
+  /// 最初に見つかった1つ。無ければ none。
+  ///
+  /// 例:
+  ///   if var re = text.regex("([0-9]{4})-([0-9]{2})-([0-9]{2})") {
+  ///     if var m = re.find("期限は 2026-08-15 です") {
+  ///       print(m.text());   // 2026-08-15
+  ///     }
+  ///   }
+  func find(s: string) -> Match?;
+
+  /// 見つかったものを全部。
+  ///
+  /// 例:
+  ///   if var re = text.regex("[0-9]+") {
+  ///     print(re.find_all("さめ2匹、ふぐ3匹").len());   // 2
+  ///   }
+  func find_all(s: string) -> list<Match>;
+
+  /// 見つかるかどうか。
+  ///
+  /// 例:
+  ///   if var re = text.regex("^さめ") {
+  ///     print(re.matches("さめ2匹"));   // true
+  ///   }
+  func matches(s: string) -> bool;
+
+  /// 見つかったところを置き換える。$1 $2 で ( ) の中を差し込める。
+  ///
+  /// 例:
+  ///   if var re = text.regex("([0-9]{4})-([0-9]{2})-([0-9]{2})") {
+  ///     print(re.replace("2026-08-15", "$1年$2月$3日"));   // 2026年08月15日
+  ///   }
+  func replace(s: string, to: string) -> string;
+
+  /// 見つかったところで区切る。
+  ///
+  /// 例:
+  ///   if var re = text.regex("[,、]") {
+  ///     print(re.split("さめ,ふぐ、あじ").len());   // 3
+  ///   }
+  func split(s: string) -> list<string>;
+}
+
+/// 正規表現で見つかった1か所。
+class Match {
+  /// 一致した部分の文字列。
+  ///
+  /// 例:
+  ///   if var re = text.regex("[0-9]+") {
+  ///     if var m = re.find("さめ2匹") { print(m.text()); }   // 2
+  ///   }
+  func text() -> string;
+
+  /// 始まりの位置（文字単位、0 から）。
+  ///
+  /// 例:
+  ///   if var re = text.regex("[0-9]+") {
+  ///     if var m = re.find("さめ2匹") { print(m.start()); }   // 2
+  ///   }
+  func start() -> int;
+
+  /// 終わりの位置。ここは含まない。
+  ///
+  /// 例:
+  ///   if var re = text.regex("[0-9]+") {
+  ///     if var m = re.find("さめ2匹") { print(m.end()); }   // 3
+  ///   }
+  func end() -> int;
+
+  /// ( ) で囲んだ部分。1 から数える。無ければ none。
+  ///
+  /// 例:
+  ///   if var re = text.regex("([0-9]{4})-([0-9]{2})") {
+  ///     if var m = re.find("2026-08") { print(m.group(1) ?? ""); }   // 2026
+  ///   }
+  func group(i: int) -> string?;
+}

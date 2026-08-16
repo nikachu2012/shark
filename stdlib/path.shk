@@ -1,0 +1,74 @@
+// path.shk — std.path の宣言。実装は core/lib/path.cpp。
+
+/// std.path
+///
+/// パスの文字列を組み立て、分解する。読み書きするのは std.file。
+/// プログラムの中では区切りに / を書いておけばよく、join が環境に合わせる。
+///
+/// 例:
+///   import std.path;
+///   print(path.join("data", "fish.json"));   // data/fish.json
+module std.path;
+
+/// 2つをつなぐ。区切り文字は環境に合わせる。
+///
+/// 例:
+///   print(path.join("data", "fish.json"));   // data/fish.json
+func join(a: string, b: string) -> string;
+
+/// まとめてつなぐ。
+///
+/// 例:
+///   print(path.join_all(["a", "b", "c.txt"]));   // a/b/c.txt
+func join_all(parts: list<string>) -> string;
+
+/// 親ディレクトリの部分。
+///
+/// 例:
+///   print(path.dir("data/fish.json"));   // data
+func dir(p: string) -> string;
+
+/// ファイル名の部分（拡張子つき）。
+///
+/// 例:
+///   print(path.name("data/fish.json"));   // fish.json
+func name(p: string) -> string;
+
+/// ファイル名の部分（拡張子なし）。
+///
+/// 例:
+///   print(path.stem("data/fish.json"));   // fish
+func stem(p: string) -> string;
+
+/// 拡張子。. を含む。無ければ空文字。
+///
+/// 例:
+///   print(path.ext("data/fish.json"));   // .json
+///   print(path.ext("README") == "");     // true
+func ext(p: string) -> string;
+
+/// . や .. を畳んで、短い形にする。
+///
+/// 例:
+///   print(path.normalize("a/b/../c"));   // a/c
+func normalize(p: string) -> string;
+
+/// 絶対パスにする。いまいる場所を使う。
+///
+/// 例:
+///   if var full = path.absolute("fish.json") {
+///     print(path.is_absolute(full));   // true
+///   }
+func absolute(p: string) -> Result<string>;
+
+/// 絶対パスかどうか。
+///
+/// 例:
+///   print(path.is_absolute("data/fish.json"));   // false
+func is_absolute(p: string) -> bool;
+
+/// この環境の区切り文字（"/" か "\"）。
+///
+/// 例:
+///   print(path.separator().len());   // 1
+func separator() -> string;

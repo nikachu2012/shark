@@ -1,0 +1,144 @@
+// task.shk — std.task の宣言。実装は core/lib/task.cpp。
+
+/// std.task
+///
+/// タスクとチャネル。async も await も無く、どの関数も上から順に読める。
+/// task f() で別の流れとして走らせ、parallel { } でまとめて待つ。
+/// task・parallel・channel を使うだけなら import は省ける。
+///
+/// 例:
+///   func slow() -> int { sleep(0.05); return 42; }
+///   var t = task slow();
+///   print("先に進める");
+///   print(t.wait());   // 42
+module std.task;
+
+/// 待ちが無くても、ほかのタスクに順番を譲る。
+///
+/// 長い計算を回すタスクは、ときどき呼ぶと全体が詰まらない。
+///
+/// 例:
+///   func heavy() -> int {
+///     var sum = 0;
+///     for var i in range(1000) { sum = sum + i; task.yield(); }
+///     return sum;
+///   }
+///   var t = task heavy();
+///   print(t.wait());   // 499500
+func yield() -> void;
+
+/// いま走っているタスクの数。
+///
+/// 例:
+///   print(task.count() >= 0);   // true
+func count() -> int;
+
+/// 値を受け渡す待ち行列を作る。
+///
+/// 引数:
+///   capacity   ためられる件数。省くと1件ずつ渡す
+///
+/// 例:
+///   var ch = channel<int>(4);
+///   _ = ch.send(1);
+///   print(ch.recv() ?? -1);   // 1
+func channel<T>() -> channel<T>;
+func channel<T>(capacity: int) -> channel<T>;
+
+/// task f() が返す値。T は f の戻り値の型。
+class Task<T> {
+  /// 終わるまで待って、戻り値を受け取る。
+  ///
+  /// 例:
+  ///   func slow() -> int { sleep(0.05); return 42; }
+  ///   var t = task slow();
+  ///   print(t.wait());   // 42
+  func wait() -> T;
+
+  /// 時間を区切って待つ。間に合わなければ none。
+  ///
+  /// 例:
+  ///   import std.time;
+  ///   func slow() -> int { sleep(1.0); return 42; }
+  ///   var t = task slow();
+  ///   print(t.wait_timeout(time.seconds(0.05)) ?? -1);   // -1（間に合わない）
+  ///   t.cancel();
+  func wait_timeout(t: Duration) -> T?;
+
+  /// 終わっているか。待たない。
+  ///
+  /// 例:
+  ///   func slow() -> int { sleep(0.05); return 1; }
+  ///   var t = task slow();
+  ///   while !t.done() { sleep(0.01); }
+  ///   print(t.done());   // true
+  func done() -> bool;
+
+  /// 取り消しを頼む。すぐには止まらず、待っている関数が次に見たときに終わる。
+  ///
+  /// 例:
+  ///   func slow() -> int { sleep(1.0); return 1; }
+  ///   var t = task slow();
+  ///   t.cancel();
+  ///   print("取り消しを頼んだ");
+  func cancel() -> void;
+
+  /// 見分けるための番号。
+  ///
+  /// 例:
+  ///   func slow() -> int { return 1; }
+  ///   var t = task slow();
+  ///   print(t.id() >= 0);   // true
+  func id() -> int;
+}
+
+/// タスクの間で値を受け渡す待ち行列。
+///
+/// 送り手は何個でもよく、受け取るのは1つのタスク。コピーしても同じ待ち行列を指す。
+class channel<T> {
+  /// 送る。ためられないときは、空くまで待つ。
+  ///
+  /// 例:
+  ///   var ch = channel<int>(2);
+  ///   print(ch.send(1).ok());   // true
+  func send(v: T) -> Result<void>;
+
+  /// 受け取る。何も無ければ届くまで待つ。閉じられていれば none。
+  ///
+  /// 例:
+  ///   func producer(ch: channel<int>) {
+  ///     for var i in range(3) { _ = ch.send(i); }
+  ///     ch.close();
+  ///   }
+  ///   var ch = channel<int>(4);
+  ///   task producer(ch);
+  ///   while var v = ch.recv() { write(v); }   // 012
+  ///   print("");
+  func recv() -> T?;
+
+  /// 待たずに受け取る。何も無ければ none。
+  ///
+  /// 例:
+  ///   var ch = channel<int>(2);
+  ///   print(ch.try_recv() ?? -1);   // -1（まだ何も無い）
+  ///   _ = ch.send(7);
+  ///   print(ch.try_recv() ?? -1);   // 7
+  func try_recv() -> T?;
+
+  /// 閉じる。待っている受け手には none が返る。
+  ///
+  /// 例:
+  ///   var ch = channel<int>(1);
+  ///   ch.close();
+  ///   print(ch.recv() ?? -1);   // -1
+  func close() -> void;
+
+  /// たまっている件数。
+  ///
+  /// 例:
+  ///   var ch = channel<int>(4);
+  ///   _ = ch.send(1);
+  ///   _ = ch.send(2);
+  ///   print(ch.len());   // 2
+  func len() -> int;
+}

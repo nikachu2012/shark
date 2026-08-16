@@ -281,9 +281,21 @@ window.SharkLang = (function () {
     return e.name + '(' + parts.join(', ') + ')';
   }
 
+  // 引数ごとの説明（仕様書の 引数 の表）
+  function argRows(e) {
+    var rows = [];
+    for (var i = 0; e.args && i < e.args.length; i++) {
+      if (e.args[i][2]) rows.push('`' + (e.args[i][0] || e.args[i][1]) + '` — ' + e.args[i][2]);
+    }
+    return rows.join('\n\n');
+  }
+
   function docFor(e) {
     var md = [];
     if (e.doc) md.push(e.doc);
+    var rows = argRows(e);
+    if (rows) md.push(rows);
+    if (e.example) md.push('```shark\n' + e.example + '\n```');
     if (e.overloads && e.overloads.length) md.push('ほかの書き方:\n\n```shark\n' + e.overloads.join('\n') + '\n```');
     return md.length ? { value: md.join('\n\n'), isTrusted: false } : undefined;
   }
@@ -487,7 +499,8 @@ window.SharkLang = (function () {
         var me = methodOf(t, name);
         if (me) {
           e = { name: name, sig: me.name + '(' + (me.params || []).join(', ') + ')' +
-                (me.ret ? ' -> ' + substitute(me.ret, t) : ''), doc: me.doc };
+                (me.ret ? ' -> ' + substitute(me.ret, t) : ''), doc: me.doc,
+                args: me.args, example: me.example };
           extra = t ? '\n\n受け手: `' + t + '`' : '';
         }
       }
@@ -515,6 +528,9 @@ window.SharkLang = (function () {
     var md = [{ value: '```shark\n' + (e.sig || e.name) + '\n```' }];
     if (e.doc) md.push({ value: e.doc + extra });
     else if (extra) md.push({ value: extra });
+    var rows = argRows(e);
+    if (rows) md.push({ value: rows });
+    if (e.example) md.push({ value: '```shark\n' + e.example + '\n```' });
     if (e.overloads && e.overloads.length) md.push({ value: 'ほかの書き方:\n```shark\n' + e.overloads.join('\n') + '\n```' });
     return { range: range, contents: md };
   }
@@ -575,8 +591,12 @@ window.SharkLang = (function () {
     if (!e) return null;
     var sigs = [{
       label: e.sig || e.name,
-      documentation: e.doc || '',
-      parameters: (e.params || []).map(function (p) { return { label: p }; })
+      documentation: e.example ? { value: (e.doc ? e.doc + '\n\n' : '') +
+                                          '```shark\n' + e.example + '\n```' } : (e.doc || ''),
+      parameters: (e.params || []).map(function (p, i) {
+        var a = e.args && e.args[i];
+        return a && a[2] ? { label: p, documentation: a[2] } : { label: p };
+      })
     }];
     if (e.overloads) {
       for (var o = 0; o < e.overloads.length; o++) {

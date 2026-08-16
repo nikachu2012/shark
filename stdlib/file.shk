@@ -1,0 +1,192 @@
+// file.shk — std.file の宣言。実装は core/lib/file.cpp。
+
+/// std.file
+///
+/// ファイルの読み書き。任意モジュールなので、扱えない処理系では import でエラーになる。
+/// 取り込めたあとの「無い・権限が無い」は Result で返る。
+///
+/// 例:
+///   import std.file;
+///   _ = file.write("さかな.txt", "さめ\n");
+///   if var text = file.read("さかな.txt") { print(text.trim()); }   // さめ
+///   _ = file.remove("さかな.txt");
+module std.file;
+
+/// UTF-8 の文字列として、まるごと読む。
+///
+/// 例:
+///   _ = file.write("data.txt", "さめ\n");
+///   if var text = file.read("data.txt") {
+///     print(text.trim());   // さめ
+///   } else var e {
+///     print(e.message());
+///   }
+///   _ = file.remove("data.txt");
+func read(p: string) -> Result<string>;
+
+/// バイト列として、まるごと読む。
+///
+/// 例:
+///   _ = file.write("data.txt", "さめ");
+///   if var b = file.read_bytes("data.txt") { print(b.len()); }   // 6
+///   _ = file.remove("data.txt");
+func read_bytes(p: string) -> Result<bytes>;
+
+/// 文字列を書く。すでにあれば上書きする。
+///
+/// 例:
+///   _ = file.write("data.txt", "さめ\n");
+///   print(file.exists("data.txt"));   // true
+///   _ = file.remove("data.txt");
+func write(p: string, text: string) -> Result<void>;
+
+/// バイト列を書く。すでにあれば上書きする。
+///
+/// 例:
+///   _ = file.write_bytes("data.bin", "さめ".bytes());
+///   if var b = file.read_bytes("data.bin") { print(b.len()); }   // 6
+///   _ = file.remove("data.bin");
+func write_bytes(p: string, b: bytes) -> Result<void>;
+
+/// 末尾に足す。無ければ作る。
+///
+/// 例:
+///   _ = file.write("log.txt", "1\n");
+///   _ = file.append("log.txt", "2\n");
+///   if var text = file.read("log.txt") { print(text.trim().split("\n").len()); }   // 2
+///   _ = file.remove("log.txt");
+func append(p: string, text: string) -> Result<void>;
+
+/// あるかどうか。
+///
+/// 例:
+///   print(file.exists("ない.txt"));   // false
+func exists(p: string) -> bool;
+
+/// ディレクトリかどうか。
+///
+/// 例:
+///   _ = file.make_dir("data");
+///   print(file.is_dir("data"));   // true
+func is_dir(p: string) -> bool;
+
+/// バイト数。
+///
+/// 例:
+///   _ = file.write("data.txt", "さめ");
+///   if var n = file.size("data.txt") { print(n); }   // 6
+///   _ = file.remove("data.txt");
+func size(p: string) -> Result<int>;
+
+/// 最後に書き換えた時刻。
+///
+/// 例:
+///   import std.time;
+///   _ = file.write("data.txt", "さめ");
+///   if var t = file.modified("data.txt") { print(t.year() >= 2026); }   // true
+///   _ = file.remove("data.txt");
+func modified(p: string) -> Result<Time>;
+
+/// 消す。
+///
+/// 例:
+///   _ = file.write("data.txt", "さめ");
+///   _ = file.remove("data.txt");
+///   print(file.exists("data.txt"));   // false
+func remove(p: string) -> Result<void>;
+
+/// 複製する。
+///
+/// 例:
+///   _ = file.write("a.txt", "さめ");
+///   _ = file.copy("a.txt", "b.txt");
+///   print(file.exists("b.txt"));   // true
+///   _ = file.remove("a.txt");
+///   _ = file.remove("b.txt");
+func copy(from: string, to: string) -> Result<void>;
+
+/// 名前を変える。場所を移すのにも使う。
+///
+/// 例:
+///   _ = file.write("a.txt", "さめ");
+///   _ = file.rename("a.txt", "b.txt");
+///   print(file.exists("a.txt"));   // false
+///   _ = file.remove("b.txt");
+func rename(from: string, to: string) -> Result<void>;
+
+/// ディレクトリの中の名前を並べる。
+///
+/// 例:
+///   _ = file.make_dir("data");
+///   _ = file.write("data/fish.txt", "さめ");
+///   if var names = file.list("data") { print(names.len() >= 1); }   // true
+func list(dir: string) -> Result<list<string>>;
+
+/// ディレクトリを作る。途中の階層も作る。
+///
+/// 例:
+///   _ = file.make_dir("a/b/c");
+///   print(file.is_dir("a/b/c"));   // true
+func make_dir(p: string) -> Result<void>;
+
+/// 開いて、少しずつ読み書きする。大きなファイルに使う。
+///
+/// 引数:
+///   p      ファイルの場所
+///   mode   "r" 読む / "w" 上書きする / "a" 末尾に足す
+///
+/// 例:
+///   _ = file.write("log.txt", "1行目\n2行目\n");
+///   if var f = file.open("log.txt", "r") {
+///     while var line = f.read_line() { print(line); }
+///     f.close();
+///   }
+///   _ = file.remove("log.txt");
+func open(p: string, mode: string) -> Result<File>;
+
+/// 開いたファイル。コピーしても同じファイルを指す（ハンドル型）。
+class File {
+  /// 1行読む。改行は含まない。終端なら none。
+  ///
+  /// 例:
+  ///   _ = file.write("log.txt", "1行目\n2行目\n");
+  ///   if var f = file.open("log.txt", "r") {
+  ///     print(f.read_line() ?? "");   // 1行目
+  ///     f.close();
+  ///   }
+  ///   _ = file.remove("log.txt");
+  func read_line() -> string?;
+
+  /// n バイト読む。残りが少なければ、あるだけ返す。
+  ///
+  /// 例:
+  ///   _ = file.write("data.txt", "さめ");
+  ///   if var f = file.open("data.txt", "r") {
+  ///     if var b = f.read(3) { print(b.to_string() ?? ""); }   // さ
+  ///     f.close();
+  ///   }
+  ///   _ = file.remove("data.txt");
+  func read(n: int) -> Result<bytes>;
+
+  /// 書く。開くときの mode に合わせて、上書きか追加になる。
+  ///
+  /// 例:
+  ///   if var f = file.open("out.txt", "w") {
+  ///     _ = f.write("さめ\n");
+  ///     f.close();
+  ///   }
+  ///   if var text = file.read("out.txt") { print(text.trim()); }   // さめ
+  ///   _ = file.remove("out.txt");
+  func write(text: string) -> Result<void>;
+
+  /// 閉じる。書いたものはここで確実に書き出される。
+  ///
+  /// 例:
+  ///   if var f = file.open("out.txt", "w") {
+  ///     _ = f.write("さめ");
+  ///     f.close();
+  ///     print(file.exists("out.txt"));   // true
+  ///   }
+  ///   _ = file.remove("out.txt");
+  func close() -> void;
+}

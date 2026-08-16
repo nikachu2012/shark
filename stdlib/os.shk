@@ -1,0 +1,103 @@
+// os.shk — std.os の宣言。実装は core/lib/os.cpp。
+
+/// std.os
+///
+/// プログラムの外側とのやり取り。引数・環境変数・場所・外のプログラム。
+/// 任意モジュール。ゲーム機のように外を持たない処理系では、import でエラーになる。
+///
+/// 例:
+///   import std.os;
+///   print(os.platform().len() > 0);   // true
+module std.os;
+
+/// コマンド引数。1番目はプログラム名。
+///
+/// 例:
+///   var args = os.args();
+///   print(args.len() >= 1);   // true
+func args() -> list<string>;
+
+/// 環境変数を読む。無ければ none。
+///
+/// 例:
+///   os.set_env("SHARK_FISH", "さめ");
+///   print(os.env("SHARK_FISH") ?? "");   // さめ
+///   print(os.env("SHARK_NOTHING") ?? "無し");   // 無し
+func env(name: string) -> string?;
+
+/// 環境変数を書く。このプロセスと、ここから起動するプログラムに効く。
+///
+/// 例:
+///   os.set_env("SHARK_FISH", "ふぐ");
+///   print(os.env("SHARK_FISH") ?? "");   // ふぐ
+func set_env(name: string, value: string) -> void;
+
+/// 動いている環境。"macos" "windows" "linux" "wasm" "embedded" のどれか。
+///
+/// 例:
+///   print(os.platform() != "");   // true
+func platform() -> string;
+
+/// いまいるディレクトリ。
+///
+/// 例:
+///   if var here = os.cwd() { print(here.len() > 0); }   // true
+func cwd() -> Result<string>;
+
+/// いまいるディレクトリを変える。
+///
+/// 例:
+///   _ = os.chdir(os.temp_dir());
+///   if var here = os.cwd() { print(here.len() > 0); }   // true
+func chdir(p: string) -> Result<void>;
+
+/// 一時ファイルを置いてよい場所。
+///
+/// 例:
+///   print(os.temp_dir().len() > 0);   // true
+func temp_dir() -> string;
+
+/// すぐ終わる。戻ってこない。走っているタスクは待たない。
+///
+/// ふつうは main から return する方がよい。
+///
+/// 例（動かさない）:
+///   if os.args().len() < 2 {
+///     print("使い方: fish <ファイル>");
+///     os.exit(1);
+///   }
+func exit(code: int) -> void;
+
+/// 外のプログラムを起動して、終わるまで待つ。シェルは通さない。
+///
+/// 引数:
+///   cmd    プログラムの名前か場所
+///   args   渡す引数。空白で区切らず、1つずつ入れる
+///
+/// 例:
+///   if var o = os.run("echo", ["さめ"]) {
+///     print(o.code());          // 0
+///     print(o.out().trim());    // さめ
+///   }
+func run(cmd: string, args: list<string>) -> Result<Output>;
+
+/// 外のプログラムの結果。
+class Output {
+  /// 終了コード。0 なら成功したことが多い。
+  ///
+  /// 例:
+  ///   if var o = os.run("echo", ["さめ"]) { print(o.code()); }   // 0
+  func code() -> int;
+
+  /// 標準出力に出たもの。
+  ///
+  /// 例:
+  ///   if var o = os.run("echo", ["さめ"]) { print(o.out().trim()); }   // さめ
+  func out() -> string;
+
+  /// 標準エラーに出たもの。
+  ///
+  /// 例:
+  ///   if var o = os.run("echo", ["さめ"]) { print(o.err() == ""); }   // true
+  func err() -> string;
+}

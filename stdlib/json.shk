@@ -1,0 +1,138 @@
+// json.shk — std.json の宣言。実装は core/lib/json.cpp。
+
+/// std.json
+///
+/// JSON の読み書き。任意モジュール。
+/// 読み出しは短く書けることを優先していて、添字は常に Json を返す。
+/// 無いキーや範囲外でも止まらず、最後に string() や int() で取り出したときに T? になる。
+///
+/// 例:
+///   import std.json;
+///   if var root = json.parse("{\"name\": \"さめ\"}") {
+///     print(root["name"].string() ?? "名無し");   // さめ
+///   }
+module std.json;
+
+/// 文字列から読む。壊れていれば失敗を返す。
+///
+/// 例:
+///   if var root = json.parse("{\"size\": 400}") {
+///     print(root["size"].int() ?? 0);   // 400
+///   }
+func parse(s: string) -> Result<Json>;
+
+/// ファイルから読む。
+///
+/// 例:
+///   import std.file;
+///   _ = file.write("fish.json", "{\"name\": \"さめ\"}");
+///   if var root = json.parse_file("fish.json") {
+///     print(root["name"].string() ?? "");   // さめ
+///   }
+///   _ = file.remove("fish.json");
+func parse_file(p: string) -> Result<Json>;
+
+/// 1行の文字列にする。
+///
+/// 例:
+///   print(json.stringify(json.of(400)));   // 400
+func stringify(v: Json) -> string;
+
+/// 字下げ付きの文字列にする。
+///
+/// 引数:
+///   indent   字下げの空白の数
+///
+/// 例:
+///   var obj = json.of({"name": json.of("さめ")});
+///   print(json.stringify_pretty(obj, 2).contains("\n"));   // true
+func stringify_pretty(v: Json, indent: int) -> string;
+
+/// Shark の値から Json を作る。
+///
+/// 例:
+///   print(json.stringify(json.of("さめ")));    // "さめ"
+///   print(json.stringify(json.of(true)));      // true
+///   print(json.stringify(json.of([json.of(1), json.of(2)])));   // [1,2]
+func of(v: int) -> Json;
+func of(v: float) -> Json;
+func of(v: string) -> Json;
+func of(v: bool) -> Json;
+func of(v: list<Json>) -> Json;
+func of(v: map<string, Json>) -> Json;
+
+/// 「無い」を表す Json。
+///
+/// 例:
+///   print(json.none().exists());   // false
+func none() -> Json;
+
+/// JSON の値。無いところを引いても止まらず、「無い」を表す Json が返る。
+class Json {
+  /// 文字列として取り出す。文字列でなければ none。
+  ///
+  /// 例:
+  ///   if var root = json.parse("{\"name\": \"さめ\"}") {
+  ///     print(root["name"].string() ?? "");     // さめ
+  ///     print(root["なし"].string() ?? "無し"); // 無し
+  ///   }
+  func string() -> string?;
+
+  /// 整数として取り出す。数でなければ none。
+  ///
+  /// 例:
+  ///   if var root = json.parse("{\"size\": 400}") {
+  ///     print(root["size"].int() ?? 0);   // 400
+  ///   }
+  func int() -> int?;
+
+  /// 小数として取り出す。
+  ///
+  /// 例:
+  ///   if var root = json.parse("{\"ratio\": 1.5}") {
+  ///     print(root["ratio"].float() ?? 0.0);   // 1.5
+  ///   }
+  func float() -> float?;
+
+  /// 真偽値として取り出す。
+  ///
+  /// 例:
+  ///   if var root = json.parse("{\"debug\": true}") {
+  ///     print(root["debug"].bool() ?? false);   // true
+  ///   }
+  func bool() -> bool?;
+
+  /// 配列として取り出す。配列でなければ空の配列。
+  ///
+  /// 例:
+  ///   if var root = json.parse("{\"items\": [1, 2, 3]}") {
+  ///     print(root["items"].list().len());   // 3
+  ///   }
+  func list() -> list<Json>;
+
+  /// 表のキーを並べる。表でなければ空の配列。
+  ///
+  /// 例:
+  ///   if var root = json.parse("{\"a\": 1, \"b\": 2}") {
+  ///     print(root.keys().len());   // 2
+  ///   }
+  func keys() -> list<string>;
+
+  /// 値があるかどうか。無いキーを引いたあとの確認に使う。
+  ///
+  /// 例:
+  ///   if var root = json.parse("{\"a\": 1}") {
+  ///     print(root["a"].exists());     // true
+  ///     print(root["b"].exists());     // false
+  ///   }
+  func exists() -> bool;
+
+  /// 種類を返す。"none" "bool" "number" "string" "list" "map" のどれか。
+  ///
+  /// 例:
+  ///   if var root = json.parse("{\"a\": [1]}") {
+  ///     print(root.kind());        // map
+  ///     print(root["a"].kind());   // list
+  ///   }
+  func kind() -> string;
+}

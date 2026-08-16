@@ -37,7 +37,7 @@ git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
 | [`shark_web.cpp`](shark_web.cpp) | ホスト。`Engine` を呼び、出力と診断を JavaScript に渡す |
 | [`app.js`](app.js) | 画面。書くところの用意、実行の刻み、ターミナル（下）と診断の表示 |
 | [`lang.js`](lang.js) | Monaco に Shark を教える。色分けと入力補完（下） |
-| [`api.py`](api.py) | 補完に使う API の表（`api.js`）を、仕様書と実装から作る |
+| [`api.py`](api.py) | 補完に使う `api.js` を、[`../stdlib/`](../stdlib/README.md) の宣言ファイルから作る |
 | [`index.html`](index.html) / [`style.css`](style.css) | 画面の骨と見た目 |
 | [`build.sh`](build.sh) | 作る。emcc の呼び出しと Monaco の取り寄せ。`web/dist/` にまとめる |
 | [`serve.sh`](serve.sh) | 配る。先に `build.sh` を呼んでから、`web/dist/` をその場で配る |
@@ -129,16 +129,20 @@ $
 | 誤りの指摘 | 打つ手が止まると**本物の型検査**が走り、波線と番号が付く |
 | import の書き足し | `text` を選ぶと `import std.text;` を一緒に書き足す |
 
-補完に出す標準ライブラリの表（`api.js`）は、[`api.py`](api.py) が**3つの出どころ**を
-突き合わせて作る。手で書いた一覧は持たない。
+補完に出す標準ライブラリの表（`api.js`）は、[`api.py`](api.py) が
+[`../stdlib/*.shk`](../stdlib/README.md)（宣言ファイル）から作る。手で書いた一覧は持たない。
+HTML のリファレンス（`make docs`）と**同じ出どころ**なので、説明も例も食い違わない。
 
-| 出どころ | 何を取るか |
+| 宣言ファイルに書いたもの | 補完でどう出るか |
 |---|---|
-| `core/lib/*.cpp` の `r.add("...")` | **この処理系が本当に持っている関数**の名前 |
-| `core/check.cpp` のメソッドの表 | 型ごとのメソッドと、引数・戻り値の型 |
-| `spec/library/*.md` `spec/types/*.md` の表 | 引数の名前と、日本語の説明 |
+| 署名（`func sqrt(x: float) -> float;`） | 候補の型と、引数の案内 |
+| `///` の説明 | hover と候補の説明 |
+| `引数:` の節 | 引数の案内で、いま打っている引数の説明 |
+| `例:` の節 | hover と引数の案内に出る、動く例 |
 
-仕様書にあっても実装に入っていないもの（`std.net` など）は補完に出ない。
+`api.py` は作るときに実装（`core/lib/*.cpp`）と突き合わせ、
+宣言と実装が食い違っていれば知らせる。仕様書にあっても実装に入っていないもの
+（`std.net` など）は宣言が無いので補完にも出ない。
 `make web-test` が、`api.js` の一覧と処理系が持つモジュールの一致を確かめている。
 
 変数の型は `lang.js` が軽く見当をつける（宣言の型注釈、リテラル、

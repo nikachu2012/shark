@@ -1,0 +1,89 @@
+// test.shk — std.test の宣言。実装は core/lib/test.cpp。
+
+/// std.test
+///
+/// テストの書き方。test_ で始まる public 関数がテストになり、
+/// shark test で集めて走る。失敗しても panic せず、そのテストだけを失敗として記録する。
+///
+/// 例:
+///   import std.test;
+///   public func test_add() {
+///     test.eq(1 + 2, 3);
+///   }
+module std.test;
+
+/// 真であることを確かめる。
+///
+/// 例:
+///   test.ok("さめ".len() == 2);
+///   print("失敗しても次に進む");
+func ok(cond: bool) -> void;
+
+/// 2つが等しいことを確かめる。
+///
+/// 引数:
+///   actual     実際の値
+///   expected   期待する値
+///
+/// 例:
+///   test.eq("さめ".upper(), "さめ");
+///   test.eq(1 + 2, 3);
+func eq<T>(actual: T, expected: T) -> void;
+
+/// 2つが等しくないことを確かめる。
+///
+/// 例:
+///   test.ne(1, 2);
+func ne<T>(a: T, b: T) -> void;
+
+/// 小数がほぼ等しいことを確かめる。
+///
+/// 引数:
+///   tolerance   許す差
+///
+/// 例:
+///   import std.math;
+///   test.near(math.sqrt(2.0), 1.4142, 0.001);
+func near(a: float, b: float, tolerance: float) -> void;
+
+/// 失敗した Result であることを確かめる。
+///
+/// 例:
+///   import std.file;
+///   test.is_error(file.read("ない.txt"));
+func is_error<T>(r: Result<T>) -> void;
+
+/// 値が無い（none）ことを確かめる。
+///
+/// 例:
+///   test.is_none(int("さめ"));
+func is_none<T>(v: T?) -> void;
+
+/// その場で失敗させる。通らないはずの道に置く。
+///
+/// 例:
+///   var n = 1;
+///   if n > 100 { test.fail("ここには来ないはず"); }
+///   print("来ない道は通らなかった");
+func fail(msg: string) -> void;
+
+/// このテストの説明。識別子に使えない日本語は、ここに書く。
+///
+/// 例:
+///   test.describe("負の大きさを渡したら 0 に直す");
+///   print("説明を付けた");
+func describe(s: string) -> void;
+
+/// 各テストの前に呼ぶ関数を決める。
+///
+/// 例:
+///   func setup() { print("前準備"); }
+///   test.before_each(setup);
+func before_each(f: func()) -> void;
+
+/// 各テストの後に呼ぶ関数を決める。
+///
+/// 例:
+///   func teardown() { print("後片付け"); }
+///   test.after_each(teardown);
+func after_each(f: func()) -> void;

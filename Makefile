@@ -2,6 +2,8 @@
 #
 #   make            コアと shark コマンドを作る
 #   make test       tests/ を走らせる
+#   make docs       stdlib/ の宣言から HTML のリファレンスを作る
+#   make docs-check 宣言に書いた例を、ぜんぶ本物の shark で動かす
 #   make web        ブラウザで動く形（WebAssembly）を作る。Emscripten が要る
 #   make web-serve  作ってから、その場で配る（http://localhost:8000/）
 #   make clean
@@ -29,6 +31,10 @@ HDR = $(wildcard core/*.h core/platform/*.h core/lib/*.inc)
 
 all: shark
 
+# Shark 自身で書いた部分（並べ替え）。コアはファイルを読まないので埋め込む
+core/prelude.h: stdlib/prelude.shk tools/prelude.py
+	@python3 tools/prelude.py
+
 # ゲームに組み込む例（spec/runtime/embedding.md）
 embed: examples/embed/game
 examples/embed/game: examples/embed/game.o $(CORE_SRC:.cpp=.o)
@@ -52,6 +58,15 @@ tests/memcheck: tests/memcheck.o $(CORE_SRC:.cpp=.o)
 bench: shark
 	@python3 bench/run.py
 
+# リファレンス（docs/reference/）。中身は stdlib/*.shk の宣言ファイルが正で、
+# ライブラリごとに1枚ずつ作る。実装と食い違っていればここで知らせる
+docs:
+	@python3 docs/gen.py
+
+# 宣言に書いた例を、ぜんぶ動かして確かめる
+docs-check: shark
+	@python3 tools/runex.py
+
 # ブラウザで動かす（web/README.md）。移植層は core/platform/web.cpp
 web:
 	@sh web/build.sh
@@ -68,6 +83,7 @@ web-test: web
 
 clean:
 	rm -f $(OBJ) examples/embed/game.o examples/embed/game tests/memcheck.o tests/memcheck shark
+	rm -rf docs/reference
 	rm -rf bench/build web/dist
 
-.PHONY: all test clean embed bench web web-serve web-test
+.PHONY: all test clean embed bench docs docs-check web web-serve web-test

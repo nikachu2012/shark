@@ -1,0 +1,140 @@
+// builtin.shk — import なしで使える関数の宣言。実装は core/lib/builtin.cpp。
+// 書き方は stdlib/README.md。docs/gen.py と web/api.py がここを読む。
+
+/// 組み込み関数
+///
+/// import なしで、どこからでも使える関数。入出力・待ち・数え上げ・型変換がある。
+module builtin;
+
+/// 標準出力に出して、改行する。
+///
+/// この4つ以外の型（クラスなど）は string(v) で文字列にしてから渡す。
+///
+/// 例:
+///   print("さめ");      // さめ
+///   print(42);          // 42
+///   print(3.5);         // 3.5
+///   print(true);        // true
+func print(v: string) -> void;
+func print(v: int) -> void;
+func print(v: float) -> void;
+func print(v: bool) -> void;
+
+/// 標準出力に出す。改行しない。
+///
+/// 例:
+///   write("名前: ");
+///   write("さめ");
+///   print("");          // ここで改行する
+func write(v: string) -> void;
+func write(v: int) -> void;
+func write(v: float) -> void;
+func write(v: bool) -> void;
+
+/// 標準入力から1行読む。改行は含まない。
+///
+/// まだ行が来ていなければ、来るまで待つ。終端なら none を返す。
+/// 待っている間もホストは止まらない。
+///
+/// 例:
+///   write("名前: ");
+///   var name = input() ?? "ゲスト";
+///   print(f"こんにちは、{name}さん");
+func input() -> string?;
+
+/// 決めた秒だけ待つ。
+///
+/// 待つのはこのタスクだけで、ほかのタスクは動き続ける。
+///
+/// 引数:
+///   sec   待つ秒数。0 以下ならすぐ戻る
+///
+/// 例:
+///   print("いきます");
+///   sleep(0.5);
+///   print("0.5 秒たちました");
+func sleep(sec: float) -> void;
+
+/// 条件が偽なら、記録を残して止める。
+///
+/// 引数:
+///   cond   真であってほしい条件
+///   msg    偽だったときに出す説明
+///
+/// 例:
+///   var xs = [1, 2, 3];
+///   assert(xs.len() > 0, "空の配列");
+///   print("ここまで来ます");
+func assert(cond: bool, msg: string) -> void;
+
+/// 長さを返す。文字列は文字数、そのほかは要素数。
+///
+/// 例:
+///   print(len("さめ🦈"));           // 3
+///   print(len([1, 2, 3]));          // 3
+///   print(len({"a": 1}));           // 1
+func len(s: string) -> int;
+func len(b: bytes) -> int;
+func len<T>(xs: list<T>) -> int;
+func len<K, V>(m: map<K, V>) -> int;
+
+/// 数え上げる範囲を作る。for でそのまま回せる。
+///
+/// 値を全部は持たず、回すたびに次を作る。
+///
+/// 引数:
+///   start   最初の値。省くと 0
+///   end     ここは含まない
+///
+/// 例:
+///   for var i in range(3) { write(i); }        // 012
+///   print("");
+///   for var i in range(1, 4) { write(i); }     // 123
+///   print("");
+func range(end: int) -> Range;
+func range(start: int, end: int) -> Range;
+
+/// 刻み幅を決めて数え上げる。
+///
+/// 引数:
+///   step    増やす幅。負なら減らす。0 は実行時エラー
+///
+/// 例:
+///   for var i in range_step(10, 0, -2) { write(i); }   // 108642
+///   print("");
+func range_step(start: int, end: int, step: int) -> Range;
+
+/// 整数にする。文字列からは int?（読めなければ none）。
+///
+/// 例:
+///   print(int(3.9));                // 3
+///   print(int(true));               // 1
+///   print(int("42") ?? 0);          // 42
+///   print(int("さめ") ?? -1);       // -1
+func int(v: float) -> int;
+func int(v: bool) -> int;
+func int(s: string) -> int?;
+
+/// 小数にする。文字列からは float?（読めなければ none）。
+///
+/// 例:
+///   print(float(3));                // 3.0
+///   print(float("1.5") ?? 0.0);     // 1.5
+func float(v: int) -> float;
+func float(s: string) -> float?;
+
+/// 文字列にする。クラスは to_string() が使われる。
+///
+/// 例:
+///   print(string(42) + "匹");       // 42匹
+///   print(string(true));            // true
+func string(v: int) -> string;
+func string(v: float) -> string;
+func string(v: bool) -> string;
+
+/// 真偽値にする。"true" と "false" だけを読む。
+///
+/// 例:
+///   print(bool("true") ?? false);   // true
+///   print(bool("はい") ?? false);   // false
+func bool(s: string) -> bool?;

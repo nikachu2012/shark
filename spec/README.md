@@ -169,6 +169,18 @@ func main() -> int {
 | [library/ui.md](library/ui.md) | `std.ui` GUI と宣言的 UI の実行モデル |
 | [library/test.md](library/test.md) | `std.test` テスト |
 
+### 仕様書と宣言ファイル
+
+ここ（[library/](library/) と [types/](types/)）は**決めごとを日本語で書く場所**で、
+道具は読まない。関数ごとの署名・引数の説明・例は
+[../stdlib/](../stdlib/) の**宣言ファイル**（`.shk`）が正で、
+リファレンス（`make docs`）も入力補完（`api.js`）もそこから作る。
+
+| | 書く場所 |
+|---|---|
+| なぜそう決めたか、規則、制限 | この仕様書 |
+| 関数の署名・引数の説明・動く例 | [../stdlib/](../stdlib/README.md) |
+
 ### そのほか
 
 | ファイル | 内容 |

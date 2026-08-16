@@ -1,0 +1,405 @@
+// types.shk — コアが持つ型と、その関数の宣言。
+// 実装は core/lib/builtin.cpp（string / bytes / list / map / Result）と
+// core/check.cpp（Error / Comparable）。list.sort() は stdlib/prelude.shk。
+
+/// 組み込み型
+///
+/// import なしで使える型と、その型に付く関数。
+/// 値のうしろに . を付けて呼ぶ。代入すると中身はコピーされる。
+module builtin;
+
+/// Unicode の文字列。
+///
+/// 内部は UTF-8 だが、添字も長さも文字（コードポイント）単位で数える。
+/// バイト単位で触りたいときは bytes() で変換する。
+class string {
+  /// 文字数を返す。バイト数ではない。
+  ///
+  /// 例:
+  ///   print("さめ🦈".len());     // 3
+  func len() -> int;
+
+  /// start から end の手前までを取り出す。位置は文字単位。
+  ///
+  /// 引数:
+  ///   start   最初の文字の位置（0 から）
+  ///   end     ここは含まない
+  ///
+  /// 例:
+  ///   print("さめ🦈".sub(0, 2));   // さめ
+  func sub(start: int, end: int) -> string;
+
+  /// 見つかった位置を返す。無ければ none。
+  ///
+  /// 例:
+  ///   print("さめざめ".find("ざ") ?? -1);   // 2
+  ///   print("さめ".find("ふぐ") ?? -1);     // -1
+  func find(s: string) -> int?;
+
+  /// 含んでいるか。
+  ///
+  /// 例:
+  ///   print("さめざめ".contains("めざ"));   // true
+  func contains(s: string) -> bool;
+
+  /// その文字列で始まるか。
+  ///
+  /// 例:
+  ///   print("さめ.txt".starts_with("さめ"));   // true
+  func starts_with(s: string) -> bool;
+
+  /// その文字列で終わるか。
+  ///
+  /// 例:
+  ///   print("さめ.txt".ends_with(".txt"));   // true
+  func ends_with(s: string) -> bool;
+
+  /// 区切り文字で分ける。
+  ///
+  /// 例:
+  ///   var xs = "さめ,ふぐ,あじ".split(",");
+  ///   print(xs.len());     // 3
+  ///   print(xs[1]);        // ふぐ
+  func split(sep: string) -> list<string>;
+
+  /// 前後の空白（改行を含む）を落とす。
+  ///
+  /// 例:
+  ///   print("  さめ  ".trim() + "!");   // さめ!
+  func trim() -> string;
+
+  /// 大文字にする。
+  ///
+  /// 例:
+  ///   print("shark".upper());   // SHARK
+  func upper() -> string;
+
+  /// 小文字にする。
+  ///
+  /// 例:
+  ///   print("Shark".lower());   // shark
+  func lower() -> string;
+
+  /// 見つかった部分を全部置き換える。
+  ///
+  /// 例:
+  ///   print("さめさめ".replace("さめ", "ふぐ"));   // ふぐふぐ
+  func replace(from: string, to: string) -> string;
+
+  /// UTF-8 のバイト列にする。
+  ///
+  /// 例:
+  ///   print("さめ".bytes().len());   // 6
+  func bytes() -> bytes;
+
+  /// 1文字ずつの配列にする。
+  ///
+  /// 例:
+  ///   var cs = "さめ🦈".chars();
+  ///   print(cs.len());   // 3
+  ///   print(cs[2]);      // 🦈
+  func chars() -> list<string>;
+
+  /// 並べ替えのための比較。コードポイント順で、小さいと負、等しいと 0。
+  ///
+  /// 例:
+  ///   print("あ".compare("い"));   // -1
+  func compare(other: string) -> int;
+}
+
+/// バイトの並び。添字はバイト単位。
+///
+/// b"..." と書くとリテラルになる。文字として扱いたいときは to_string()。
+class bytes {
+  /// バイト数を返す。
+  ///
+  /// 例:
+  ///   print(b"\x01\x02".len());   // 2
+  func len() -> int;
+
+  /// 末尾に1バイト足す。
+  ///
+  /// 例:
+  ///   var b = b"\x01";
+  ///   b.push(0x02);
+  ///   print(b.len());   // 2
+  func push(v: int) -> void;
+
+  /// UTF-8 として文字列にする。壊れていれば none。
+  ///
+  /// 例:
+  ///   print("さめ".bytes().to_string() ?? "");   // さめ
+  func to_string() -> string?;
+
+  /// 1バイトずつの数の配列にする。
+  ///
+  /// 例:
+  ///   print(b"\x01\x02".list()[1]);   // 2
+  func list() -> list<int>;
+
+  /// start から end の手前までを取り出す。位置はバイト単位。
+  ///
+  /// 例:
+  ///   print("さめ".bytes().sub(0, 3).to_string() ?? "");   // さ
+  func sub(start: int, end: int) -> bytes;
+
+  /// 並べ替えのための比較。
+  ///
+  /// 例:
+  ///   print(b"\x01".compare(b"\x02"));   // -1
+  func compare(other: bytes) -> int;
+}
+
+/// 64ビットの整数。どの環境でも 64 ビット。
+///
+/// 計算があふれると実行時エラーになる。あふれてよい計算には wrapping_ を使う。
+class int {
+  /// 8バイトのバイト列にする。小さい桁が先（リトルエンディアン）。
+  ///
+  /// 例:
+  ///   var b = 258.to_bytes();     // 258 は 0x0102
+  ///   print(b.len());             // 8
+  ///   print(b.list()[0]);         // 2
+  ///   print(b.list()[1]);         // 1
+  func to_bytes() -> bytes;
+
+  /// あふれても止まらない足し算。一周して続きの値になる。
+  ///
+  /// 例:
+  ///   print(1.wrapping_add(2));   // 3
+  func wrapping_add(v: int) -> int;
+
+  /// あふれても止まらない引き算。
+  ///
+  /// 例:
+  ///   print(5.wrapping_sub(8));   // -3
+  func wrapping_sub(v: int) -> int;
+
+  /// あふれても止まらない掛け算。
+  ///
+  /// 例:
+  ///   print(3.wrapping_mul(4));   // 12
+  func wrapping_mul(v: int) -> int;
+
+  /// 並べ替えのための比較。
+  ///
+  /// 例:
+  ///   print(1.compare(2));   // -1
+  func compare(other: int) -> int;
+}
+
+/// 64ビットの小数（IEEE 754）。
+///
+/// int とは混ぜて計算できない。float(n) で変換してから使う。
+class float {
+  /// 並べ替えのための比較。
+  ///
+  /// 例:
+  ///   print(1.5.compare(0.5));   // 1
+  func compare(other: float) -> int;
+}
+
+/// true か false。
+///
+/// if や while の条件に書けるのはこの型だけ。
+class bool {
+  /// 並べ替えのための比較。false が小さい。
+  ///
+  /// 例:
+  ///   print(false.compare(true));   // -1
+  func compare(other: bool) -> int;
+}
+
+/// 同じ型 T を並べた、長さの変わる配列。
+///
+/// 添字は 0 から。範囲外を読むと実行時エラーになる。
+class list<T> {
+  /// 末尾に足す。
+  ///
+  /// 例:
+  ///   var xs = [1, 2];
+  ///   xs.push(3);
+  ///   print(xs.len());   // 3
+  func push(v: T) -> void;
+
+  /// 末尾を取り出して、配列から取り除く。空なら none。
+  ///
+  /// 例:
+  ///   var xs = [1, 2];
+  ///   print(xs.pop() ?? -1);   // 2
+  ///   print(xs.len());         // 1
+  func pop() -> T?;
+
+  /// 要素数を返す。
+  ///
+  /// 例:
+  ///   print([1, 2, 3].len());   // 3
+  func len() -> int;
+
+  /// i の位置に差し込む。後ろの要素はずれる。
+  ///
+  /// 例:
+  ///   var xs = ["さめ", "あじ"];
+  ///   xs.insert(1, "ふぐ");
+  ///   print(xs[1]);   // ふぐ
+  func insert(i: int, v: T) -> void;
+
+  /// i の位置の要素を取り除く。
+  ///
+  /// 例:
+  ///   var xs = [1, 2, 3];
+  ///   xs.remove(0);
+  ///   print(xs[0]);   // 2
+  func remove(i: int) -> void;
+
+  /// その値を含んでいるか。
+  ///
+  /// 例:
+  ///   print([1, 2, 3].contains(2));   // true
+  func contains(v: T) -> bool;
+
+  /// 区切り文字を挟んで1つの文字列にする。list<string> だけで使える。
+  ///
+  /// 例:
+  ///   print(["さめ", "ふぐ"].join(" と "));   // さめ と ふぐ
+  func join(sep: string) -> string;
+
+  /// 小さい順に並べ替える。要素が Comparable のときだけ呼べる。
+  ///
+  /// 同じ大きさのものは順番が変わらない（安定な並べ替え）。
+  ///
+  /// 例:
+  ///   var xs = [3, 1, 2];
+  ///   xs.sort();
+  ///   print(xs[0]);   // 1
+  func sort() -> void;
+}
+
+/// キー K から値 V を引く表。
+///
+/// 無いキーを添字で読むと実行時エラー。get() なら none が返る。
+class map<K, V> {
+  /// 引く。無ければ none。
+  ///
+  /// 例:
+  ///   var m = {"さめ": 400};
+  ///   print(m.get("さめ") ?? 0);   // 400
+  ///   print(m.get("ふぐ") ?? 0);   // 0
+  func get(k: K) -> V?;
+
+  /// そのキーがあるか。
+  ///
+  /// 例:
+  ///   print({"さめ": 400}.has("さめ"));   // true
+  func has(k: K) -> bool;
+
+  /// そのキーを取り除く。無ければ何もしない。
+  ///
+  /// 例:
+  ///   var m = {"さめ": 400};
+  ///   m.remove("さめ");
+  ///   print(m.len());   // 0
+  func remove(k: K) -> void;
+
+  /// 入っている件数を返す。
+  ///
+  /// 例:
+  ///   print({"a": 1, "b": 2}.len());   // 2
+  func len() -> int;
+
+  /// キーを並べた配列を返す。
+  ///
+  /// 例:
+  ///   var m = {"さめ": 400};
+  ///   for var k in m.keys() { print(k); }   // さめ
+  func keys() -> list<K>;
+
+  /// 値を並べた配列を返す。
+  ///
+  /// 例:
+  ///   var m = {"さめ": 400};
+  ///   print(m.values()[0]);   // 400
+  func values() -> list<V>;
+}
+
+/// 成功した値 T か、失敗した Error のどちらか。
+///
+/// 失敗するかもしれない関数はこれを返す。try / if var / ?? で取り出す。
+class Result<T> {
+  /// 成功しているか。
+  ///
+  /// 例:
+  ///   func half(n: int) -> Result<int> {
+  ///     if n % 2 != 0 { return Error("奇数は半分にできません"); }
+  ///     return n / 2;
+  ///   }
+  ///   print(half(10).ok());   // true
+  ///   print(half(3).ok());    // false
+  func ok() -> bool;
+
+  /// 成功した値を取り出す。失敗しているときに呼ぶと panic する。
+  ///
+  /// 例:
+  ///   func half(n: int) -> Result<int> {
+  ///     if n % 2 != 0 { return Error("奇数は半分にできません"); }
+  ///     return n / 2;
+  ///   }
+  ///   var r = half(10);
+  ///   if r.ok() { print(r.value()); }   // 5
+  func value() -> T;
+
+  /// 失敗した理由を取り出す。
+  ///
+  /// 例:
+  ///   func half(n: int) -> Result<int> {
+  ///     if n % 2 != 0 { return Error("奇数は半分にできません"); }
+  ///     return n / 2;
+  ///   }
+  ///   var r = half(3);
+  ///   if !r.ok() { print(r.error().message()); }   // 奇数は半分にできません
+  func error() -> Error;
+}
+
+/// 失敗の理由。Result に入って返る。
+///
+/// 独自のエラーは Error を継承して作り、message() を上書きする。
+class Error {
+  /// 理由を作る。code を省くと 0 になる。
+  ///
+  /// 例:
+  ///   var e = Error("見つかりません", 404);
+  ///   print(e.code());   // 404
+  func init(message: string) -> void;
+  func init(message: string, code: int) -> void;
+
+  /// 説明の文。
+  ///
+  /// 例:
+  ///   print(Error("見つかりません").message());   // 見つかりません
+  func message() -> string;
+
+  /// 番号。付けていなければ 0。
+  ///
+  /// 例:
+  ///   var e = Error("見つかりません", 404);
+  ///   print(e.code());   // 404
+  func code() -> int;
+}
+
+/// 大小を比べられることを表すインタフェース。
+///
+/// これを実装したクラスは、list の sort() で並べ替えられる。
+class Comparable {
+  /// 自分と other を比べる。小さいと負、等しいと 0、大きいと正。
+  ///
+  /// 例:
+  ///   class Fish : Comparable {
+  ///     public var size: int;
+  ///     func init(size: int) { this.size = size; }
+  ///     override func compare(other: This) -> int { return this.size - other.size; }
+  ///   }
+  ///   var xs = [Fish(400), Fish(20)];
+  ///   xs.sort();
+  ///   print(xs[0].size);   // 20
+  func compare(other: This) -> int;
+}

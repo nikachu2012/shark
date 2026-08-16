@@ -87,6 +87,8 @@ python3 bench/run.py loop fib   # 選んで測る
 | | |
 |---|---|
 | [docs/reference.md](docs/reference.md) | 言語の使い方（利用者向け・全17章） |
+| docs/reference/（`make docs`） | 標準ライブラリのリファレンス。ライブラリごとに1枚、全関数に動く例つき |
+| [stdlib/README.md](stdlib/README.md) | その元になる宣言ファイルの書き方 |
 | [docs/implementation.md](docs/implementation.md) | 実装メモ（作った範囲・組み込み方・移植の手順） |
 | [web/README.md](web/README.md) | ブラウザで動かす（作り方・ホストの入口・できないこと） |
 | [spec/README.md](spec/README.md) | 思想と仕様書の索引 |
@@ -103,7 +105,9 @@ web/      ブラウザで動かす一式（WebAssembly。これもコアとは�
 examples/ サンプル。embed/ はゲームに組み込む例
 tests/    テスト（make test）
 bench/    C・Python・Shark の速さ比べ（python3 bench/run.py）
-docs/     利用者向けのリファレンスと実装メモ
+stdlib/   標準ライブラリの宣言（名前・型・説明・例）。リファレンスと補完のもと
+tools/    宣言を読む道具（リファレンス生成・例の実行・prelude の埋め込み）
+docs/     利用者向けのリファレンスと実装メモ。gen.py が stdlib/ から HTML を作る
 spec/     仕様
   types/      型システム
   runtime/    実行系（コア）の内部と、ホストとの境界

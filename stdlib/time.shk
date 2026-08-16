@@ -1,0 +1,198 @@
+// time.shk — std.time の宣言。実装は core/lib/time.cpp。
+
+/// std.time
+///
+/// 時刻と期間。Time（ある瞬間）と Duration（長さ）は別の型で、
+/// Time + Time のような意味のない計算は書けない。
+///
+/// 例:
+///   import std.time;
+///   var t = time.date(2026, 8, 15)!;
+///   print(t.format("YYYY/MM/DD"));   // 2026/08/15
+module std.time;
+
+/// いまの時刻。
+///
+/// 例:
+///   var now = time.now();
+///   print(now.year() >= 2026);   // true
+func now() -> Time;
+
+/// 起動してからの経過。時計合わせの影響を受けないので、時間を測るのに使う。
+///
+/// 例:
+///   var start = time.monotonic();
+///   sleep(0.2);
+///   print(time.monotonic().seconds() > start.seconds());   // true
+func monotonic() -> Duration;
+
+/// 年月日から作る。ありえない日付なら none。
+///
+/// 引数:
+///   y    年
+///   mo   月（1〜12）
+///   d    日（1〜31）
+///
+/// 例:
+///   print(time.date(2026, 8, 15)!.format("YYYY-MM-DD"));   // 2026-08-15
+///   print(time.date(2026, 2, 30) == none);                 // true
+func date(y: int, mo: int, d: int) -> Time?;
+
+/// 年月日と時分秒から作る。ありえない日時なら none。
+///
+/// 例:
+///   var t = time.datetime(2026, 8, 15, 12, 34, 56)!;
+///   print(t.format("hh:mm:ss"));   // 12:34:56（UTC で持つ）
+func datetime(y: int, mo: int, d: int, h: int, mi: int, s: int) -> Time?;
+
+/// 文字列から読む。書式に合わなければ none。
+///
+/// 引数:
+///   s        読む文字列
+///   format   書式。format() と同じ記号（YYYY MM DD hh mm ss）
+///
+/// 例:
+///   var t = time.parse("2026-08-15 12:00:00", "YYYY-MM-DD hh:mm:ss")!;
+///   print(t.hour());   // 12
+func parse(s: string, format: string) -> Time?;
+
+/// 秒から Duration を作る。
+///
+/// 例:
+///   print(time.seconds(90.0).minutes());   // 1.5
+func seconds(v: float) -> Duration;
+
+/// 分から Duration を作る。
+///
+/// 例:
+///   print(time.minutes(2.0).seconds());   // 120.0
+func minutes(v: float) -> Duration;
+
+/// 時から Duration を作る。
+///
+/// 例:
+///   print(time.hours(1.0).minutes());   // 60.0
+func hours(v: float) -> Duration;
+
+/// 日から Duration を作る。
+///
+/// 例:
+///   print(time.days(1.0).hours());   // 24.0
+func days(v: float) -> Duration;
+
+/// ある瞬間。中では UTC で持っている。
+///
+/// Time - Time で Duration、Time + Duration で Time になる。
+class Time {
+  /// 書式に沿って文字列にする。
+  ///
+  /// 引数:
+  ///   f   YYYY 年 / MM 月 / DD 日 / hh 時 / mm 分 / ss 秒 / SSS ミリ秒
+  ///
+  /// 例:
+  ///   var t = time.datetime(2026, 8, 15, 12, 34, 56)!;
+  ///   print(t.format("YYYY/MM/DD hh:mm:ss"));   // 2026/08/15 12:34:56
+  func format(f: string) -> string;
+
+  /// 年。
+  ///
+  /// 例:
+  ///   print(time.date(2026, 8, 15)!.year());   // 2026
+  func year() -> int;
+
+  /// 月（1〜12）。
+  ///
+  /// 例:
+  ///   print(time.date(2026, 8, 15)!.month());   // 8
+  func month() -> int;
+
+  /// 日（1〜31）。
+  ///
+  /// 例:
+  ///   print(time.date(2026, 8, 15)!.day());   // 15
+  func day() -> int;
+
+  /// 時（0〜23）。
+  ///
+  /// 例:
+  ///   print(time.datetime(2026, 8, 15, 12, 34, 56)!.hour());   // 12
+  func hour() -> int;
+
+  /// 分（0〜59）。
+  ///
+  /// 例:
+  ///   print(time.datetime(2026, 8, 15, 12, 34, 56)!.minute());   // 34
+  func minute() -> int;
+
+  /// 秒（0〜59）。
+  ///
+  /// 例:
+  ///   print(time.datetime(2026, 8, 15, 12, 34, 56)!.second());   // 56
+  func second() -> int;
+
+  /// 曜日。0（日）〜 6（土）。
+  ///
+  /// 例:
+  ///   print(time.date(2026, 8, 15)!.weekday());   // 6（土曜）
+  func weekday() -> int;
+
+  /// 表示を地域時刻に切り替える。人に見せるときに使う。
+  ///
+  /// 指している瞬間は変わらないので、引き算や比較の結果は同じになる。
+  ///
+  /// 例:
+  ///   var t = time.datetime(2026, 8, 15, 12, 0, 0)!;   // UTC の 12:00
+  ///   print(t.to_local().format("YYYY-MM-DD hh:mm"));  // 地域時刻（日本なら 2026-08-15 21:00）
+  ///   print((t.to_local() - t).seconds());             // 0.0（同じ瞬間）
+  func to_local() -> Time;
+
+  /// 表示を UTC に戻す。記録に残すときに使う。何度呼んでも結果は変わらない。
+  ///
+  /// 例:
+  ///   var t = time.datetime(2026, 8, 15, 12, 0, 0)!;
+  ///   print(t.to_local().to_utc().format("hh:mm"));   // 12:00
+  func to_utc() -> Time;
+
+  /// 並べ替えのための比較。早い方が小さい。
+  ///
+  /// 例:
+  ///   var a = time.date(2026, 1, 1)!;
+  ///   var b = time.date(2026, 8, 15)!;
+  ///   print(a.compare(b));   // -1
+  func compare(other: Time) -> int;
+}
+
+/// 時間の長さ。
+///
+/// Duration + Duration は Duration。Time との足し引きもできる。
+class Duration {
+  /// 秒に直す。
+  ///
+  /// 例:
+  ///   print(time.minutes(1.0).seconds());   // 60.0
+  func seconds() -> float;
+
+  /// 分に直す。
+  ///
+  /// 例:
+  ///   print(time.hours(1.0).minutes());   // 60.0
+  func minutes() -> float;
+
+  /// 時に直す。
+  ///
+  /// 例:
+  ///   print(time.days(1.0).hours());   // 24.0
+  func hours() -> float;
+
+  /// 日に直す。
+  ///
+  /// 例:
+  ///   print(time.hours(36.0).days());   // 1.5
+  func days() -> float;
+
+  /// 並べ替えのための比較。短い方が小さい。
+  ///
+  /// 例:
+  ///   print(time.seconds(1.0).compare(time.minutes(1.0)));   // -1
+  func compare(other: Duration) -> int;
+}
