@@ -3,6 +3,7 @@
 #   make            コアと shark コマンドを作る
 #   make test       tests/ を走らせる
 #   make web        ブラウザで動く形（WebAssembly）を作る。Emscripten が要る
+#   make web-serve  作ってから、その場で配る（http://localhost:8000/）
 #   make clean
 #
 # 例外と RTTI は使わない（spec/skeleton.md）。外部ライブラリには依存しない。
@@ -55,8 +56,11 @@ bench: shark
 web:
 	@sh web/build.sh
 
+# 作ってから配る（web/serve.sh が中で web/build.sh を呼ぶので、いつも作りたてが出る）
+#   make web-serve PORT=8080  で港（ポート）を変えられる
+PORT ?= 8000
 web-serve:
-	@sh web/build.sh serve
+	@sh web/serve.sh $(PORT)
 
 # 作ったものを node で確かめる（画面は出さない）
 web-test: web

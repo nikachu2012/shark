@@ -43,7 +43,8 @@ make embed && ./examples/embed/game   # ゲームに組み込む例
 書いて動かすところまで、タブの中だけで完結する（何も外に送らない）。
 
 ```
-make web-serve      # 作って http://localhost:8000/ に配る（Emscripten が要る）
+make web            # web/dist/ に作る（Emscripten が要る）
+make web-serve      # 作ってから http://localhost:8000/ に配る
 make web-test       # 作ったものを node で確かめる
 ```
 

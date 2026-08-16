@@ -1,9 +1,9 @@
 #!/bin/sh
 # build.sh — ブラウザで動く Shark を作る（web/dist/ に出る）
 #
-#   sh web/build.sh          # 作る
-#   sh web/build.sh serve    # 作って、その場に配って開けるようにする
+#   sh web/build.sh          # 作る（make web も同じ）
 #
+# 配るのは web/serve.sh の役目。ここは作るところまでしかしない。
 # 要るもの: Emscripten（emcc）。入っていなければ入れ方を出して止まる。
 set -e
 
@@ -46,7 +46,7 @@ $root/core/lib/text.cpp $root/core/lib/json.cpp $root/core/lib/test.cpp \
 $here/shark_web.cpp"
 
 # ---------------------------------------------------------------- Monaco Editor
-if [ ! -f "$monaco_dir/vs/editor.js" ]; then
+if [ ! -f "$monaco_dir/vs/editor/editor.main.js" ]; then   # 取り寄せ済みかの印
   echo "Monaco Editor $MONACO を取り寄せています..."
   tmp=$(mktemp -d)
   url="https://registry.npmjs.org/monaco-editor/-/monaco-editor-$MONACO.tgz"
@@ -107,9 +107,3 @@ EOF
 
 echo "できました: web/dist/"
 ls -lh "$out" | sed 's/^/  /'
-
-if [ "$1" = "serve" ]; then
-  echo
-  echo "http://localhost:8000/ を開きます（止めるときは Ctrl-C）"
-  cd "$out" && exec python3 -m http.server 8000
-fi

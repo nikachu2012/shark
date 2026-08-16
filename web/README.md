@@ -7,10 +7,15 @@
 入力補完を付けてある。誤りの指摘は**本物の型検査**から出している。
 
 ```
-make web          # web/dist/ に作る（Emscripten が要る）
-make web-serve    # 作って http://localhost:8000/ に配る
-make web-test     # 作ったものを node で確かめる（画面は出さない）
+make web                    # web/dist/ に作る（Emscripten が要る）
+make web-serve              # 作ってから http://localhost:8000/ に配る
+make web-serve PORT=8080    # 港（ポート）を変える
+make web-test               # 作ったものを node で確かめる（画面は出さない）
 ```
+
+作るのと配るのは別の手（`web/build.sh` と `web/serve.sh`）。
+配る側は中で作る側を毎回呼ぶので、直したものがそのまま出る。
+`file://` では `.wasm` を読めないので、見るときは配って開く。
 
 初回だけ、Monaco Editor を npm から取り寄せて `web/vendor/` にためる（git には入れない）。
 2回目からは取り寄せない。配るときに要るのは `web/dist/` だけで、
@@ -33,7 +38,8 @@ git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
 | [`lang.js`](lang.js) | Monaco に Shark を教える。色分けと入力補完（下） |
 | [`api.py`](api.py) | 補完に使う API の表（`api.js`）を、仕様書と実装から作る |
 | [`index.html`](index.html) / [`style.css`](style.css) | 画面の骨と見た目 |
-| [`build.sh`](build.sh) | emcc の呼び出しと Monaco の取り寄せ。`web/dist/` にまとめる |
+| [`build.sh`](build.sh) | 作る。emcc の呼び出しと Monaco の取り寄せ。`web/dist/` にまとめる |
+| [`serve.sh`](serve.sh) | 配る。先に `build.sh` を呼んでから、`web/dist/` をその場で配る |
 | [`test.js`](test.js) | できたものを node で確かめる |
 | [`examples.py`](examples.py) / [`examples/`](examples) | お手本を `examples.js` にまとめる |
 
