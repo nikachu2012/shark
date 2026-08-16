@@ -315,9 +315,11 @@ void CodeGen::gen_place(Node* e) {
       emit(OP_PLACE_INDEX);
       break;
     default:
-      // ここには来ない（型検査で弾いてある）
-      emit(OP_PLACE_LOCAL);
-      emit_i32(0);
+      // ここには来ないはず（型検査で弾いてある）。もし来たら、別の場所を
+      // 指してしまう前に止める
+      emit(OP_CONST);
+      emit_i32(add_const(mk_str("借りられない値を書き換えようとしました")));
+      emit(OP_PANIC);
       break;
   }
 }
@@ -364,7 +366,10 @@ void CodeGen::gen_call(Node* e) {
     bool lvalue = recv->kind == E_Ident || recv->kind == E_Field || recv->kind == E_Index ||
                   recv->kind == E_This || recv->kind == E_Super;
     bool method = (e->opcode == CK_Func || e->opcode == CK_Virtual);
-    bool by_ref = (e->resolved2 == 1 || (method && lvalue && !opt));
+    // resolved2 の意味は呼び出しの種類で違う。ネイティブでは「受け手を借りる」印、
+    // virtual では仮想表の位置。混ぜると、位置が 1 のメソッドが借用になってしまう
+    bool native_ref = (e->opcode == CK_Native && e->resolved2 == 1);
+    bool by_ref = (native_ref || (method && lvalue && !opt));
     if (recv->kind == E_This || recv->kind == E_Super) {
       // this は借用で渡す（メソッドの中の書き換えが、呼んだ側の変数に届く）
       if (e->resolved2 == 1 || method) { emit(OP_REF_LOCAL); emit_i32(0); }

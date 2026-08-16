@@ -2737,7 +2737,7 @@ Type* Checker::check_call(Node* e) {
       }
     }
     // ?. の先で中身を書き換えることはできない（取り出せるのはコピーだから）
-    if (opt_chain && e->resolved2 == 1) {
+    if (opt_chain && e->opcode == CK_Native && e->resolved2 == 1) {
       Diagnostic& d = diag_.error("E0211", diag_.L(Str("?. の先では ") + mname + "() のように中身を書き換えるメソッドは呼べません",
                                                    Str("cannot call the mutating method ") + mname + "() through ?."));
       d.spans.push(Span(callee->line, callee->col, callee->len));
