@@ -13,7 +13,10 @@
 #include <io.h>
 #else
 #include <dirent.h>
+#include <errno.h>
+#include <poll.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -223,18 +226,71 @@ const char* o_temp_dir() {
   const char* t = getenv("TMPDIR"); return t ? t : "/tmp";
 #endif
 }
+// シェルを通さずに直接起動する。
+// 文字列を並べてシェルに渡すと、引数の中身がそのまま命令として動いてしまうため。
 bool o_run(const char* cmd, const Vec<Str>& args, int* code, Str* out, Str* err) {
-  Str line(cmd);
-  for (int i = 0; i < args.size(); i++) { line += " '"; line += args[i]; line += "'"; }
-  line += " 2>/dev/null";
-  FILE* p = popen(line.c_str(), "r");
-  if (!p) { *err = Str("実行できません: ") + cmd; return false; }
-  char buf[1024];
-  size_t n;
-  while ((n = fread(buf, 1, sizeof buf, p)) > 0) out->append(buf, (int)n);
-  int st = pclose(p);
-  *code = (st == -1) ? -1 : (st >> 8) & 0xff;
+#if defined(_WIN32)
+  (void)cmd; (void)args; (void)code; (void)out;
+  *err = Str("この移植層は外のプログラムを呼べません");
+  return false;
+#else
+  int op[2], ep[2];
+  if (pipe(op) != 0) { *err = Str("通り道を作れません"); return false; }
+  if (pipe(ep) != 0) { close(op[0]); close(op[1]); *err = Str("通り道を作れません"); return false; }
+
+  pid_t pid = fork();
+  if (pid < 0) {
+    close(op[0]); close(op[1]); close(ep[0]); close(ep[1]);
+    *err = Str("起動できません: ") + cmd;
+    return false;
+  }
+  if (pid == 0) {
+    dup2(op[1], 1);
+    dup2(ep[1], 2);
+    close(op[0]); close(op[1]); close(ep[0]); close(ep[1]);
+    // execvp に渡す並び。子の側なので、確保に失敗したらそのまま終わる
+    char** argv = (char**)malloc(sizeof(char*) * (size_t)(args.size() + 2));
+    if (!argv) _exit(127);
+    argv[0] = (char*)cmd;
+    for (int i = 0; i < args.size(); i++) argv[i + 1] = (char*)args[i].c_str();
+    argv[args.size() + 1] = 0;
+    execvp(cmd, argv);
+    _exit(127);   // 起動できなかった
+  }
+
+  close(op[1]);
+  close(ep[1]);
+  // 片方だけ読んでいると、もう片方が詰まって止まるので、両方を見ながら読む
+  bool o_open = true, e_open = true;
+  char buf[4096];
+  while (o_open || e_open) {
+    struct pollfd fds[2];
+    int n = 0;
+    int oi = -1, ei = -1;
+    if (o_open) { fds[n].fd = op[0]; fds[n].events = POLLIN; oi = n; n++; }
+    if (e_open) { fds[n].fd = ep[0]; fds[n].events = POLLIN; ei = n; n++; }
+    if (poll(fds, (nfds_t)n, -1) < 0) break;
+    if (oi >= 0 && (fds[oi].revents & (POLLIN | POLLHUP))) {
+      int got = (int)read(op[0], buf, sizeof buf);
+      if (got > 0) out->append(buf, got);
+      else o_open = false;
+    }
+    if (ei >= 0 && (fds[ei].revents & (POLLIN | POLLHUP))) {
+      int got = (int)read(ep[0], buf, sizeof buf);
+      if (got > 0) err->append(buf, got);
+      else e_open = false;
+    }
+  }
+  close(op[0]);
+  close(ep[0]);
+
+  int st = 0;
+  while (waitpid(pid, &st, 0) < 0) {
+    if (errno != EINTR) break;
+  }
+  *code = WIFEXITED(st) ? WEXITSTATUS(st) : -1;
   return true;
+#endif
 }
 const PlatformOS kOS = {o_name, o_env, o_set_env, o_cwd, o_chdir, o_temp_dir, o_run};
 

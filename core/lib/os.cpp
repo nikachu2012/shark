@@ -76,6 +76,10 @@ static NativeStatus o_run(VM& vm, Value* a, int n, Value& out) {
     out = mk_result_err(vm.make_error(se.size() ? se : Str("実行できません"), 0));
     return N_Ok;
   }
+  if (code == 127 && so.size() == 0) {
+    out = mk_result_err(vm.make_error(Str("見つからないか、起動できません: ") + S(a, 0), 127));
+    return N_Ok;
+  }
   // Output は list<string> で持つ（0: 出力, 1: エラー出力, 2: 終了コード）
   Value o = mk_list();
   as_list(o)->v.push(mk_str(so));
