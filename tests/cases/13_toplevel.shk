@@ -1,0 +1,30 @@
+// main を書かないファイル（スクリプト）の決まりごと
+import std.math;
+
+// トップレベルの var の初期化も、書いた順に走る
+func step(tag: string) -> int {
+  print(tag);
+  return tag.len();
+}
+
+print("1");
+var a = step("2");
+print("3");
+var b = step("4");
+print(a + b);
+
+// 種を決めてから引くので、同じ並びが返る
+math.seed(42);
+var first = math.random_int(1, 100);
+math.seed(42);
+print(math.random_int(1, 100) == first);
+
+// 関数からもトップレベルの変数が見える
+var total = 0;
+func bump() -> int {
+  total = total + 1;
+  return total;
+}
+print(bump());
+print(bump());
+print(total);

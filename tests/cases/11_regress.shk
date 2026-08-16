@@ -2,6 +2,8 @@
 import std.task;
 import std.json;
 import std.text;
+import std.time;
+import std.math;
 
 var g: list<int> = [1, 2, 3];
 var grid: list<list<int>> = [[1]];
@@ -54,6 +56,29 @@ func main() -> int {
   for var i in range(20000) { long = long + "a"; }
   print(text.regex("a*b")!.matches(long));
   print(text.regex("a*b")!.matches(long + "b"));
+
+  // 作ったばかりの値に、そのままメソッドを呼べる（仮想表の位置と取り違えない）
+  print(Error("むり").message());
+  print(Error("むり", 404).code());
+  print(Error("むり").code());
+
+  // float の見た目。桁が少なくても指数の形にしない
+  print(60.0);
+  print(100.0);
+  print(1024.0);
+  print(0.1);
+  print(1e16);
+
+  // 小さすぎ・大きすぎる数も、0 や inf に落とさずに読む
+  print(2.2250738585072014e-308 > 0.0);
+  print(1.7976931348623157e308 < math.INF);
+
+  // 表示の切り替えは、指している瞬間を動かさない
+  var t = time.datetime(2026, 8, 15, 12, 0, 0)!;
+  print(t.to_local().to_utc().format("hh:mm"));
+  print(t.to_local().to_local().format("hh:mm") == t.to_local().format("hh:mm"));
+  print((t.to_local() - t).seconds());
+  print(t.to_local().compare(t));
 
   // 待たれていないタスクが panic しても、プログラムは終わる
   _ = task boom();
