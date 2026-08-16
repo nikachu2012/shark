@@ -148,6 +148,9 @@ inline void  val_release(Value& v) { if (v.k == V_Obj) { obj_release(v.o); v.k =
 // ref 引数の借用をたどる
 inline Value* val_deref(Value* v) { while (v->k == V_Ref) v = v->r; return v; }
 
+// 片付け待ちの置き場を返す（処理系を捨てるときに一度だけ呼ぶ）
+void obj_release_pool_free();
+
 // 中身を書き換える前に呼ぶ。参照数が 2 以上なら複製して、自分だけの実体にする
 Obj* obj_unique(Value& v);
 inline StrObj*  as_str(const Value& v) { return (StrObj*)v.o; }

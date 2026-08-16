@@ -62,6 +62,7 @@ class Vec {
   ~Vec() { clear(); sk_free(d_); }
 
   int size() const { return n_; }
+  int capacity() const { return c_; }
   bool empty() const { return n_ == 0; }
   T& operator[](int i) { return d_[i]; }
   const T& operator[](int i) const { return d_[i]; }

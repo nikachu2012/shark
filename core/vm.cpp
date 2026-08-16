@@ -50,6 +50,7 @@ VM::VM()
 VM::~VM() {
   for (int i = 0; i < tasks.size(); i++) task_unref(tasks[i]);
   for (int i = 0; i < globals.size(); i++) val_release(globals[i]);
+  obj_release_pool_free();
 }
 
 void VM::set_program(Program* p, Registry* r) {

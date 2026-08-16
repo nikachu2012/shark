@@ -46,10 +46,38 @@ void obj_retain(Obj* o) { if (o) o->rc++; }
 
 void free_obj(Obj* o);
 
+// 片付け待ちの置き場。長い鎖でも C++ の再帰にならないよう、順に片付ける
+// （free_obj の中の val_release は、下の while が回っている間はここへ積むだけになる）
+static Vec<Obj*> g_dead;
+static bool g_draining = false;
+
 void obj_release(Obj* o) {
   if (!o) return;
   if (--o->rc > 0) return;
-  free_obj(o);
+  // 中に値を持たないものは、その場で片付ける（一時的な文字列はほとんどこちら）
+  switch (o->kind) {
+    case O_Str: case O_Bytes: case O_Range: case O_Func:
+    case O_Time: case O_Dur: case O_Regex: case O_Match:
+      free_obj(o);
+      return;
+    default:
+      break;
+  }
+  g_dead.push(o);
+  if (g_draining) return;   // 外側が片付ける
+
+  g_draining = true;
+  while (g_dead.size() > 0) {
+    Obj* x = g_dead.back();
+    g_dead.pop();
+    free_obj(x);
+  }
+  g_draining = false;
+  // 深い鎖のあとは置き場が大きくなっているので、返しておく
+  if (g_dead.capacity() > 1024) {
+    Vec<Obj*> empty;
+    empty.swap_with(g_dead);
+  }
 }
 
 void free_obj(Obj* o) {
@@ -91,6 +119,12 @@ void free_obj(Obj* o) {
     case O_Match: ((MatchObj*)o)->~MatchObj(); break;
   }
   sk_free(o);
+}
+
+void obj_release_pool_free() {
+  if (g_draining) return;
+  Vec<Obj*> empty;
+  empty.swap_with(g_dead);
 }
 
 // --- 書き込み時コピー -----------------------------------------------------
