@@ -140,7 +140,7 @@ func main() -> int {
 
 | ファイル | 内容 |
 |---|---|
-| [runtime/execution.md](runtime/execution.md) | 仮想マシンと実行時コンパイル |
+| [runtime/execution.md](runtime/execution.md) | 仮想マシンと実行時コンパイル、呼び出しの深さ |
 | [runtime/memory.md](runtime/memory.md) | 値セマンティクス、参照カウント、`ref`、実行時のメモリの上限 |
 | [runtime/concurrency.md](runtime/concurrency.md) | 並行処理（`async` / `await` を持たない） |
 | [runtime/error.md](runtime/error.md) | エラー処理（例外を持たない） |
