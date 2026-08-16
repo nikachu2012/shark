@@ -1,0 +1,62 @@
+// 直した不具合が戻っていないかを見る
+import std.task;
+import std.json;
+import std.text;
+
+var g: list<int> = [1, 2, 3];
+var grid: list<list<int>> = [[1]];
+
+func grow() -> int {
+  for var i in range(2000) { g.push(i); }
+  return 99;
+}
+func grow_grid() -> int {
+  for var i in range(2000) { grid.push([0]); }
+  return 42;
+}
+func boom() -> int {
+  task.yield();
+  panic("このタスクだけが止まる");
+  return 1;
+}
+
+func main() -> int {
+  // 代入先は右辺を作ってから決める（途中で配列が伸びても大丈夫）
+  g[0] = grow();
+  print(g[0]);
+  grid[0].push(grow_grid());
+  print(grid[0]);
+
+  // += も同じ
+  var xs = [10, 20];
+  xs[0] += 5;
+  print(xs);
+  var s = ["a"];
+  s[0] += "b";
+  print(s[0]);
+
+  // 引き算の左右が入れ替わらないこと
+  var ys = [10];
+  ys[0] -= 3;
+  print(ys[0]);
+
+  // 書式のあふれ
+  print(f"{1e30:.2f}");
+  print(f"{1.5:.60f}");
+
+  // JSON のサロゲート対と、壊れた入力
+  var emoji = json.parse("{\"k\":\"\\ud83d\\ude00\"}");
+  print(emoji.value()["k"].string() ?? "×");
+  print(json.parse("\"\\uZZZZ\"").ok());
+
+  // 長い文字列でも正規表現が積み上がらない
+  var long = "";
+  for var i in range(20000) { long = long + "a"; }
+  print(text.regex("a*b")!.matches(long));
+  print(text.regex("a*b")!.matches(long + "b"));
+
+  // 待たれていないタスクが panic しても、プログラムは終わる
+  _ = task boom();
+  print("おわり");
+  return 0;
+}

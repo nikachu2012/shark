@@ -1,0 +1,10 @@
+class Node {
+  public var v: int;
+  var next: Node;        // E0409（自分自身を値として持てない）
+}
+
+func main() -> int {
+  var xs: list<int>? = none;
+  xs?.push(1);           // E0211（?. の先では書き換えられない）
+  return 0;
+}
