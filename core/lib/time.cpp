@@ -35,6 +35,12 @@ static void civil_from_days(int64_t z, int64_t* y, int* m, int* d) {
 
 struct Parts { int64_t y; int mo, d, h, mi, s, ms, wd; };
 
+// 表示に使う瞬間。持っているのは UTC で、to_local() で付いたずれをここで足す
+static int64_t shown_ns(Value* v) {
+  TimeObj* t = (TimeObj*)v->o;
+  return t->unix_ns + (int64_t)t->off_s * 1000000000ll;
+}
+
 static void split_time(int64_t ns, Parts* p) {
   int64_t total = ns / 1000000000ll;
   int64_t rem = ns % 1000000000ll;
@@ -146,7 +152,7 @@ static void pad2(Str& out, int v) {
 static NativeStatus tm_format(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)n;
   Parts p;
-  split_time(((TimeObj*)A(a, 0)->o)->unix_ns, &p);
+  split_time(shown_ns(A(a, 0)), &p);
   const Str& f = S(a, 1);
   Str r;
   for (int i = 0; i < f.size();) {
@@ -182,7 +188,7 @@ static NativeStatus tm_format(VM& vm, Value* a, int n, Value& out) {
   static NativeStatus name(VM& vm, Value* a, int n, Value& out) {              \
     (void)vm; (void)n;                                                         \
     Parts p;                                                                   \
-    split_time(((TimeObj*)A(a, 0)->o)->unix_ns, &p);                           \
+    split_time(shown_ns(A(a, 0)), &p);                                         \
     out = mk_int(p.field);                                                     \
     return N_Ok;                                                               \
   }
@@ -194,16 +200,17 @@ TM_PART(tm_minute, mi)
 TM_PART(tm_second, s)
 TM_PART(tm_weekday, wd)
 
+// 指している瞬間は動かさず、表示のずれだけを付け替える。
+// 何度呼んでも結果は変わらない（to_local().to_local() も地域時刻のまま）
 static NativeStatus tm_to_local(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)n;
   int64_t ns = ((TimeObj*)A(a, 0)->o)->unix_ns;
-  out = mk_time(ns + (int64_t)platform().local_offset_seconds(ns) * 1000000000ll);
+  out = mk_time(ns, (int32_t)platform().local_offset_seconds(ns));
   return N_Ok;
 }
 static NativeStatus tm_to_utc(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)n;
-  int64_t ns = ((TimeObj*)A(a, 0)->o)->unix_ns;
-  out = mk_time(ns - (int64_t)platform().local_offset_seconds(ns) * 1000000000ll);
+  out = mk_time(((TimeObj*)A(a, 0)->o)->unix_ns, 0);
   return N_Ok;
 }
 

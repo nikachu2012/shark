@@ -23,7 +23,12 @@ Value mk_range(int64_t s, int64_t e, int64_t st) {
   o->start = s; o->end = e; o->step = st; return wrap(o);
 }
 Value mk_func(int fn) { FuncObj* o = new (sk_alloc(sizeof(FuncObj))) FuncObj(); o->fn = fn; return wrap(o); }
-Value mk_time(int64_t ns) { TimeObj* o = new (sk_alloc(sizeof(TimeObj))) TimeObj(); o->unix_ns = ns; return wrap(o); }
+Value mk_time(int64_t ns, int32_t off_s) {
+  TimeObj* o = new (sk_alloc(sizeof(TimeObj))) TimeObj();
+  o->unix_ns = ns;
+  o->off_s = off_s;
+  return wrap(o);
+}
 Value mk_dur(int64_t ns) { DurObj* o = new (sk_alloc(sizeof(DurObj))) DurObj(); o->ns = ns; return wrap(o); }
 Value mk_json() { return wrap(new (sk_alloc(sizeof(JsonObj))) JsonObj()); }
 

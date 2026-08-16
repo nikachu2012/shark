@@ -90,7 +90,13 @@ struct FuncObj : Obj {  // 関数を値として持つ（func(int) -> bool な�
   FuncObj() : Obj(O_Func), fn(-1) {}
 };
 
-struct TimeObj : Obj { int64_t unix_ns; TimeObj() : Obj(O_Time), unix_ns(0) {} };
+// 瞬間は常に UTC で持ち、off_s は「表示に使うずれ」だけを覚える。
+// to_local() / to_utc() が変えるのは off_s で、指している瞬間は動かない
+struct TimeObj : Obj {
+  int64_t unix_ns;
+  int32_t off_s;
+  TimeObj() : Obj(O_Time), unix_ns(0), off_s(0) {}
+};
 struct DurObj  : Obj { int64_t ns; DurObj() : Obj(O_Dur), ns(0) {} };
 
 struct FileObj : Obj {  // ハンドル型
@@ -134,7 +140,7 @@ Value mk_result_ok(const Value& v);
 Value mk_result_err(const Value& err);
 Value mk_range(int64_t s, int64_t e, int64_t st);
 Value mk_func(int fn);
-Value mk_time(int64_t ns);
+Value mk_time(int64_t ns, int32_t off_s = 0);
 Value mk_dur(int64_t ns);
 Value mk_json();
 Value mk_obj_value(Obj* o);  // 参照数を増やさずに包む

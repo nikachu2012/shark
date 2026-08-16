@@ -601,7 +601,7 @@ RunStatus VM::step(int budget) {
         Value b = pop(), a = pop();
         int64_t ns = ((TimeObj*)a.o)->unix_ns;
         int64_t d = ((DurObj*)b.o)->ns;
-        push(mk_time(op == OP_ADD_TIME_DUR ? ns + d : ns - d));
+        push(mk_time(op == OP_ADD_TIME_DUR ? ns + d : ns - d, ((TimeObj*)a.o)->off_s));
         val_release(a); val_release(b);
         break;
       }

@@ -39,7 +39,7 @@ var t = time.parse("2026-08-15 12:00:00", "YYYY-MM-DD hh:mm:ss")!;
 | `year() -> int` `month()` `day()` | 年・月・日 |
 | `hour() -> int` `minute()` `second()` | 時・分・秒 |
 | `weekday() -> int` | 0（日）〜 6（土） |
-| `to_local() -> Time` `to_utc() -> Time` | 地域時刻と UTC の切り替え |
+| `to_local() -> Time` `to_utc() -> Time` | 表示を地域時刻／UTC に切り替える |
 
 書式に使える記号。
 
@@ -53,6 +53,10 @@ var t = time.parse("2026-08-15 12:00:00", "YYYY-MM-DD hh:mm:ss")!;
 print(now.format("YYYY/MM/DD"));           // 2026/08/15
 print(now.to_local().format("hh:mm"));     // 21:05
 ```
+
+切り替えるのは**表示だけ**で、指している瞬間は動かない。
+`t.to_local() - t` は 0、`t.to_local().compare(t)` も 0 になる。
+何度呼んでも結果は変わらない（`t.to_local().to_local()` は地域時刻のまま）。
 
 ## Duration
 
