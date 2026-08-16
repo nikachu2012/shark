@@ -143,8 +143,8 @@ static Obj* clone_obj(Obj* o) {
       return n;
     }
     default:
-      // ハンドル型（File / Task / channel）と、書き換えのない型は複製しない
-      obj_retain(o);
+      // ハンドル型（File / Task / channel）と、書き換えのない型は複製しない。
+      // 呼び出し側は「同じ番地なら何もしない」ので、参照数も動かさない
       return o;
   }
 }
