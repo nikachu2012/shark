@@ -62,6 +62,7 @@ core/
   platform/  移植層                ← 差し替える場所
     desktop
     console
+    web
   lib/       標準ライブラリ        ← 全部入れておく
     time  math  task
     file  text  json  ui  ...

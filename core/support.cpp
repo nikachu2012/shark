@@ -10,7 +10,14 @@ namespace shark {
 static const Platform* g_platform = 0;
 
 const Platform& platform() {
-  if (!g_platform) g_platform = platform_desktop();
+  // 差し替えられていないときに使うもの。作る相手に合わせて選ぶ
+  if (!g_platform) {
+#if defined(__EMSCRIPTEN__)
+    g_platform = platform_web();
+#else
+    g_platform = platform_desktop();
+#endif
+  }
   return *g_platform;
 }
 void platform_set(const Platform* p) { g_platform = p; }

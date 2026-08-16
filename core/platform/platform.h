@@ -68,6 +68,7 @@ void platform_set(const Platform* p);
 // 用意してある移植層
 const Platform* platform_desktop();  // platform/desktop.cpp
 const Platform* platform_console();  // platform/console.cpp（ファイルも OS も無い機種の例）
+const Platform* platform_web();      // platform/web.cpp（ブラウザ。Emscripten 以外では 0）
 
 }  // namespace shark
 #endif
