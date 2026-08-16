@@ -565,6 +565,11 @@ void Checker::collect_funcs(Unit* u) {
   }
 }
 
+// 書いた場所が前かどうか（トップレベルの並べ替えに使う）
+static bool earlier(Node* a, Node* b) {
+  return a->line < b->line || (a->line == b->line && a->col < b->col);
+}
+
 void Checker::collect_globals(Unit* u) {
   unit_ = u;
   diag_.set_file(u->display);
@@ -1055,6 +1060,7 @@ void Checker::check_return(Node* s) {
 
 void Checker::check_stmt(Node* s) {
   if (!s) return;
+  if (s->checked) return;   // トップレベルの初期化。@init を作るときに検査してある
   switch (s->kind) {
     case S_Block: check_block(s); break;
     case S_VarDecl: check_var_decl(s); break;
@@ -2938,6 +2944,10 @@ bool Checker::check_all() {
     unit_ = u;
     diag_.set_file(u->display);
 
+    // 文を並べただけのファイルでは、初期化も文も「書いた順」に走らせる。
+    // 先にまとめて初期化すると、print と var の順が入れ替わって見える
+    bool script = u->is_entry && !u->has_main && u->top_stmts.size() > 0;
+
     if (u->globals.size() > 0) {
       FuncInfo* fi = new_func(prog_);
       fi->name = Str("@init");
@@ -3008,7 +3018,27 @@ bool Checker::check_all() {
       fd->body = body;
       fd->info = fi;
       fi->decl = fd;
-      prog_.inits.push(fi->index);
+      if (script) {
+        // 検査は済んでいるので、そのまま文の並びへ移す（@init は使わない）
+        Vec<Node*> merged;
+        int gi = 0;
+        for (int si = 0; si < u->top_stmts.size(); si++) {
+          Node* st = u->top_stmts[si];
+          while (gi < body->list.size() && earlier(body->list[gi], st)) {
+            body->list[gi]->checked = true;
+            merged.push(body->list[gi++]);
+          }
+          merged.push(st);
+        }
+        while (gi < body->list.size()) {
+          body->list[gi]->checked = true;
+          merged.push(body->list[gi++]);
+        }
+        u->top_stmts = merged;
+        body->list.clear();
+      } else {
+        prog_.inits.push(fi->index);
+      }
     }
 
     for (int ci = 0; ci < u->classes.size(); ci++) {

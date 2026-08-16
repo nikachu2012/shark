@@ -123,12 +123,13 @@ struct Node {
   FuncInfo* rfunc;
   bool is_global;
   bool is_ref_param;
+  bool checked;          // 検査を済ませてある（トップレベルの初期化を文の間に混ぜたとき）
 
   Node()
       : kind(E_Int), line(0), col(0), len(0), ival(0), dval(0), a(0), b(0), c(0), tann(0),
         is_const(false), optional_chain(false), type(0), bind_type(0), bind2_type(0), slot(-1),
         slot2(-1), resolved(-1), resolved2(-1), opcode(0), rcls(0), rfunc(0), is_global(false),
-        is_ref_param(false) {}
+        is_ref_param(false), checked(false) {}
 };
 
 struct ParamDecl {
