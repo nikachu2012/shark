@@ -22,11 +22,37 @@ static Value json_num(double d, bool is_int, int64_t iv) {
 }
 
 // --- 読む ---
+static const int kJsonMaxDepth = 200;
+
 struct JParser {
   const Str& s;
   int i;
+  int depth;
   Str err;
-  JParser(const Str& src) : s(src), i(0) {}
+  JParser(const Str& src) : s(src), i(0), depth(0) {}
+
+  // 深くなりすぎないように数える（壊れた入力で C++ 側のスタックが尽きないため）
+  struct Deeper {
+    JParser* p;
+    Deeper(JParser* q) : p(q) { p->depth++; }
+    ~Deeper() { p->depth--; }
+  };
+
+  bool read_hex4(int* out) {
+    int v = 0;
+    for (int k = 0; k < 4; k++) {
+      if (i >= s.size()) return false;
+      char h = s[i];
+      int d = (h >= '0' && h <= '9') ? h - '0'
+              : (h >= 'a' && h <= 'f') ? h - 'a' + 10
+              : (h >= 'A' && h <= 'F') ? h - 'A' + 10 : -1;
+      if (d < 0) return false;
+      v = v * 16 + d;
+      i++;
+    }
+    *out = v;
+    return true;
+  }
 
   void ws() { while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r')) i++; }
   bool lit(const char* w) {
@@ -90,9 +116,17 @@ struct JParser {
           case '/': out->push('/'); break;
           case 'u': {
             int v = 0;
-            for (int k = 0; k < 4 && i < s.size(); k++) {
-              char h = s[i++];
-              v = v * 16 + (h <= '9' ? h - '0' : (h <= 'F' ? h - 'A' + 10 : h - 'a' + 10));
+            if (!read_hex4(&v)) { err = Str("\\u の後ろには 16 進 4 桁が要ります"); return false; }
+            // 上位のサロゲートは、続く \uXXXX と組にして1文字にする
+            if (v >= 0xD800 && v <= 0xDBFF && i + 1 < s.size() && s[i] == '\\' && s[i + 1] == 'u') {
+              int save = i;
+              i += 2;
+              int lo = 0;
+              if (read_hex4(&lo) && lo >= 0xDC00 && lo <= 0xDFFF) {
+                v = 0x10000 + ((v - 0xD800) << 10) + (lo - 0xDC00);
+              } else {
+                i = save;   // 組になっていなければ、そのままの文字として扱う
+              }
             }
             utf8_encode(*out, v);
             break;
@@ -108,6 +142,8 @@ struct JParser {
     return true;
   }
   Value parse_obj() {
+    Deeper deeper(this);
+    if (depth > kJsonMaxDepth) { err = Str("入れ子が深すぎます"); return mk_json(); }
     i++;  // {
     Value v = mk_json();
     JsonObj* j = as_json(v);
@@ -124,6 +160,7 @@ struct JParser {
       Value val = parse();
       j->keys.push(key);
       j->items.push(val);
+      if (err.size()) return v;
       ws();
       if (i < s.size() && s[i] == ',') { i++; continue; }
       if (i < s.size() && s[i] == '}') { i++; return v; }
@@ -132,6 +169,8 @@ struct JParser {
     }
   }
   Value parse_arr() {
+    Deeper deeper(this);
+    if (depth > kJsonMaxDepth) { err = Str("入れ子が深すぎます"); return mk_json(); }
     i++;  // [
     Value v = mk_json();
     JsonObj* j = as_json(v);
@@ -141,6 +180,7 @@ struct JParser {
     for (;;) {
       Value item = parse();
       j->items.push(item);
+      if (err.size()) return v;
       ws();
       if (i < s.size() && s[i] == ',') { i++; continue; }
       if (i < s.size() && s[i] == ']') { i++; return v; }
@@ -177,6 +217,7 @@ static void esc(Str& out, const Str& s) {
 
 static void write_json(Str& out, const Value& v, int indent, int depth) {
   if (v.k != V_Obj || v.o->kind != O_Json) { out += "null"; return; }
+  if (depth > 1000) { out += "null"; return; }   // 深すぎるものは切る
   JsonObj* j = (JsonObj*)v.o;
   Str nl = indent >= 0 ? Str("\n") : Str();
   Str pad, pad2;

@@ -264,11 +264,34 @@ struct RParser {
   }
 };
 
+// 1文字だけを見る部品か（繰り返しを積み上げずに数えられる）
+static bool is_simple(RNode* n) {
+  return n->kind == R_Char || n->kind == R_Any || n->kind == R_Class;
+}
+
+static const int kRegexMaxDepth = 4000;
+
 struct RMatcher {
   const Vec<int>& s;
   Vec<int> gs, ge;
-  RMatcher(const Vec<int>& subject, int ngroups) : s(subject) {
+  int depth;
+  bool overflow;   // 深くなりすぎて途中でやめた
+  RMatcher(const Vec<int>& subject, int ngroups) : s(subject), depth(0), overflow(false) {
     for (int i = 0; i <= ngroups; i++) { gs.push(-1); ge.push(-1); }
+  }
+  struct Deeper {
+    RMatcher* m;
+    Deeper(RMatcher* q) : m(q) { m->depth++; }
+    ~Deeper() { m->depth--; }
+  };
+  bool one_char(RNode* n, int pos) {
+    if (pos >= s.size()) return false;
+    switch (n->kind) {
+      case R_Char: return s[pos] == n->ch;
+      case R_Any: return true;
+      case R_Class: return class_match(n, s[pos]);
+      default: return false;
+    }
   }
   bool class_match(RNode* n, int c) {
     bool in = false;
@@ -278,6 +301,8 @@ struct RMatcher {
   }
   bool seq_match(const Vec<RNode*>& seq, int si, int pos, int* end) {
     if (si >= seq.size()) { *end = pos; return true; }
+    Deeper deeper(this);
+    if (depth > kRegexMaxDepth) { overflow = true; return false; }
     return node_match(seq[si], pos, seq, si, end);
   }
   bool node_match(RNode* n, int pos, const Vec<RNode*>& seq, int si, int* end) {
@@ -363,6 +388,8 @@ struct RMatcher {
   // rest の並びを進め、終わったらグループを閉じて外へ
   bool nested(RNode* g, int alt, const Vec<RNode*>& rest, int ri, int pos, const Vec<RNode*>& outer,
               int osi, int* end) {
+    Deeper deeper(this);
+    if (depth > kRegexMaxDepth) { overflow = true; return false; }
     if (ri >= rest.size()) {
       if (g->group > 0) ge[g->group] = pos;
       return seq_match(outer, osi + 1, pos, end);
@@ -404,6 +431,19 @@ struct RMatcher {
   }
   bool rep_nested(RNode* g, int alt, const Vec<RNode*>& rest, int ri, RNode* rep, int count, int pos,
                   const Vec<RNode*>& outer, int osi, int* end) {
+    if (count == 0 && is_simple(rep->child)) {
+      int most = 0;
+      while ((rep->rep_max < 0 || most < rep->rep_max) && one_char(rep->child, pos + most)) most++;
+      if (most < rep->rep_min) return false;
+      if (rep->greedy) {
+        for (int k = most; k >= rep->rep_min; k--)
+          if (nested(g, alt, rest, ri + 1, pos + k, outer, osi, end)) return true;
+      } else {
+        for (int k = rep->rep_min; k <= most; k++)
+          if (nested(g, alt, rest, ri + 1, pos + k, outer, osi, end)) return true;
+      }
+      return false;
+    }
     bool can_more = (rep->rep_max < 0 || count < rep->rep_max);
     if (rep->greedy && can_more) {
       Vec<RNode*> one;
@@ -470,6 +510,20 @@ struct RMatcher {
     }
   }
   bool rep_match(RNode* rep, int count, int pos, const Vec<RNode*>& seq, int si, int* end) {
+    if (count == 0 && is_simple(rep->child)) {
+      // a* や [0-9]+ のような繰り返しは、進めるだけ進めてから戻す
+      int most = 0;
+      while ((rep->rep_max < 0 || most < rep->rep_max) && one_char(rep->child, pos + most)) most++;
+      if (most < rep->rep_min) return false;
+      if (rep->greedy) {
+        for (int k = most; k >= rep->rep_min; k--)
+          if (seq_match(seq, si + 1, pos + k, end)) return true;
+      } else {
+        for (int k = rep->rep_min; k <= most; k++)
+          if (seq_match(seq, si + 1, pos + k, end)) return true;
+      }
+      return false;
+    }
     bool can_more = (rep->rep_max < 0 || count < rep->rep_max);
     if (rep->greedy && can_more) {
       int mid;
@@ -491,11 +545,13 @@ struct RMatcher {
 };
 
 static bool regex_search(RegexProg* prog, const Vec<int>& subject, int from, int* start, int* end,
-                         Vec<int>* gs, Vec<int>* ge) {
+                         Vec<int>* gs, Vec<int>* ge, bool* gave_up = 0) {
   for (int at = from; at <= subject.size(); at++) {
     RMatcher m(subject, prog->ngroups);
     int e = -1;
-    if (m.seq_match(prog->seq, 0, at, &e)) {
+    bool hit = m.seq_match(prog->seq, 0, at, &e);
+    if (m.overflow && gave_up) *gave_up = true;
+    if (hit) {
       *start = at;
       *end = e;
       *gs = m.gs;
