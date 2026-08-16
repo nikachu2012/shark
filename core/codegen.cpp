@@ -116,21 +116,42 @@ void CodeGen::gen_stmt(Node* s) {
       }
       Node* tgt = s->a;
       if (s->name.size() == 0) {
-        // 単純な代入。右辺を先に作る
+        // 右辺を先に作る。先に代入先を決めてしまうと、右辺の中で
+        // 同じ配列が伸びたときに、置き場所が動いてしまう
         if (tgt->kind == E_Ident) {
           gen_expr(s->b);
           emit(tgt->is_global ? OP_STORE_GLOBAL : OP_STORE_LOCAL);
           emit_i32(tgt->slot);
         } else {
-          gen_place(tgt);
           gen_expr(s->b);
+          gen_place(tgt);
           emit(OP_PLACE_STORE);
         }
+      } else if (tgt->kind == E_Ident) {
+        // 変数そのものは動かないので、素直に読んで書き戻す
+        emit(tgt->is_global ? OP_LOAD_GLOBAL : OP_LOAD_LOCAL);
+        emit_i32(tgt->slot);
+        gen_expr(s->b);
+        Type* ty = s->type;
+        uint8_t op = OP_ADD_INT;
+        if (ty && ty->kind == T_Float)
+          op = s->name == "+" ? OP_ADD_FLOAT : s->name == "-" ? OP_SUB_FLOAT
+               : s->name == "*" ? OP_MUL_FLOAT : OP_DIV_FLOAT;
+        else if (ty && ty->kind == T_String)
+          op = OP_CONCAT;
+        else
+          op = s->name == "+" ? OP_ADD_INT : s->name == "-" ? OP_SUB_INT
+               : s->name == "*" ? OP_MUL_INT : OP_DIV_INT;
+        emit(op);
+        if (op == OP_CONCAT) emit_i32(2);
+        emit(tgt->is_global ? OP_STORE_GLOBAL : OP_STORE_LOCAL);
+        emit_i32(tgt->slot);
       } else {
+        gen_expr(s->b);        // 右辺が先。代入先は後で決める
         gen_place(tgt);
         emit(OP_PLACE_DUP);
         emit(OP_PLACE_LOAD);
-        gen_expr(s->b);
+        emit(OP_SWAP);         // [右辺, いまの値] を [いまの値, 右辺] に
         Type* ty = s->type;
         uint8_t op = OP_ADD_INT;
         if (ty && ty->kind == T_Float)
@@ -337,16 +358,26 @@ void CodeGen::gen_call(Node* e) {
   }
 
   int skip = -1;
+  bool args_done = false;
   if (has_recv) {
     Node* recv = callee->a;
     bool lvalue = recv->kind == E_Ident || recv->kind == E_Field || recv->kind == E_Index ||
                   recv->kind == E_This || recv->kind == E_Super;
     bool method = (e->opcode == CK_Func || e->opcode == CK_Virtual);
+    bool by_ref = (e->resolved2 == 1 || (method && lvalue && !opt));
     if (recv->kind == E_This || recv->kind == E_Super) {
       // this は借用で渡す（メソッドの中の書き換えが、呼んだ側の変数に届く）
       if (e->resolved2 == 1 || method) { emit(OP_REF_LOCAL); emit_i32(0); }
       else { emit(OP_LOAD_LOCAL); emit_i32(0); }
-    } else if (e->resolved2 == 1 || (method && lvalue && !opt)) {
+    } else if (by_ref && (recv->kind == E_Index || recv->kind == E_Field) && n > 0) {
+      // 受け手の場所は、引数を作り終えてから決める
+      // （引数の中で同じ配列が伸びると、場所が動いてしまうため）
+      for (int i = 0; i < n; i++) gen_expr(e->list[i]);
+      gen_ref(recv);
+      emit(OP_ROT_UNDER);
+      emit_i32(n);
+      args_done = true;
+    } else if (by_ref) {
       gen_ref(recv);
     } else {
       gen_expr(recv);
@@ -354,7 +385,8 @@ void CodeGen::gen_call(Node* e) {
     if (opt) skip = emit_jump(OP_JUMP_IF_NONE);
   }
   if (e->opcode == CK_Value) gen_expr(callee);
-  for (int i = 0; i < n; i++) gen_expr(e->list[i]);
+  if (!args_done)
+    for (int i = 0; i < n; i++) gen_expr(e->list[i]);
   int total = n + (has_recv ? 1 : 0);
   switch (e->opcode) {
     case CK_Func:

@@ -363,6 +363,20 @@ RunStatus VM::step(int budget) {
       case OP_FALSE: fr0.ip = ip; push(mk_bool(false)); break;
       case OP_POP: { fr0.ip = ip; Value v = pop(); val_release(v); break; }
       case OP_DUP: { fr0.ip = ip; Value v = t->stack[t->sp - 1]; push(val_retain(v)); break; }
+      case OP_SWAP: {
+        fr0.ip = ip;
+        Value tmp = t->stack[t->sp - 1];
+        t->stack[t->sp - 1] = t->stack[t->sp - 2];
+        t->stack[t->sp - 2] = tmp;
+        break;
+      }
+      case OP_ROT_UNDER: {
+        ip += 4; int n = RD_I32(ip); fr0.ip = ip;
+        Value top = t->stack[t->sp - 1];
+        for (int i = 0; i < n; i++) t->stack[t->sp - 1 - i] = t->stack[t->sp - 2 - i];
+        t->stack[t->sp - 1 - n] = top;
+        break;
+      }
 
       case OP_LOAD_LOCAL: {
         ip += 4; int i = RD_I32(ip); fr0.ip = ip;

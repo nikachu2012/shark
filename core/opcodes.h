@@ -12,6 +12,8 @@ enum Op {
   OP_CONST,        // k        定数を積む
   OP_NONE, OP_VOID, OP_TRUE, OP_FALSE,
   OP_POP, OP_DUP,
+  OP_SWAP,         //          上の2つを入れ替える
+  OP_ROT_UNDER,    // n        いちばん上の値を、n 個下に差し込む
 
   OP_LOAD_LOCAL,   // i
   OP_STORE_LOCAL,  // i
