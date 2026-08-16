@@ -1,0 +1,10 @@
+// 入力を読む。右の「入力」に書いた行が input() に渡る
+func main() -> int {
+  print("名前を教えてください");
+  if var name = input() {
+    print(f"こんにちは、{name} さん！");
+  } else {
+    print("入力がありませんでした");
+  }
+  return 0;
+}

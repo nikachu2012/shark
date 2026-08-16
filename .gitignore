@@ -4,3 +4,6 @@
 /examples/embed/game
 /tests/memcheck
 /bench/build/
+/web/dist/
+/web/vendor/
+__pycache__/

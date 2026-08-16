@@ -2,6 +2,7 @@
 #
 #   make            コアと shark コマンドを作る
 #   make test       tests/ を走らせる
+#   make web        ブラウザで動く形（WebAssembly）を作る。Emscripten が要る
 #   make clean
 #
 # 例外と RTTI は使わない（spec/skeleton.md）。外部ライブラリには依存しない。
@@ -50,8 +51,19 @@ tests/memcheck: tests/memcheck.o $(CORE_SRC:.cpp=.o)
 bench: shark
 	@python3 bench/run.py
 
+# ブラウザで動かす（web/README.md）。移植層は core/platform/web.cpp
+web:
+	@sh web/build.sh
+
+web-serve:
+	@sh web/build.sh serve
+
+# 作ったものを node で確かめる（画面は出さない）
+web-test: web
+	@node web/test.js
+
 clean:
 	rm -f $(OBJ) examples/embed/game.o examples/embed/game tests/memcheck.o tests/memcheck shark
-	rm -rf bench/build
+	rm -rf bench/build web/dist
 
-.PHONY: all test clean embed bench
+.PHONY: all test clean embed bench web web-serve web-test

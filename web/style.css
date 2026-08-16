@@ -1,0 +1,323 @@
+/* style.css — プレイグラウンドの見た目。読みに行くのは同じ置き場のものだけ。
+   書くところの見た目は vendor/vs/editor/editor.main.css と web/lang.js のテーマ */
+
+:root {
+  --line: 22px;                 /* 1行の高さ。行番号・下敷き・印はこれで合わせる */
+  --bg: #eef3f7;
+  --panel: #ffffff;
+  --panel-2: #f6f9fb;
+  --ink: #16242f;
+  --ink-dim: #5d7080;
+  --border: #d3dfe8;
+  --accent: #0e7490;
+  --accent-ink: #ffffff;
+  --err: #b42318;
+  --err-bg: #fdeceb;
+  --warn: #92400e;
+  --warn-bg: #fdf3e3;
+  --ok: #0f7a3d;
+  --sel: #cfe8f3;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Noto Sans Mono", monospace;
+  --ui: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c151d;
+    --panel: #111d27;
+    --panel-2: #0f1922;
+    --ink: #dce8f1;
+    --ink-dim: #8ba0b0;
+    --border: #22343f;
+    --accent: #38bdf8;
+    --accent-ink: #06202c;
+    --err: #ff8f85;
+    --err-bg: #2a1614;
+    --warn: #f0c07a;
+    --warn-bg: #2a2113;
+    --ok: #78d69a;
+    --sel: #17394a;
+    --t-com: #7d8f9c;
+    --t-kw: #d2a8ff;
+    --t-type: #79c0ff;
+    --t-str: #7ee787;
+    --t-num: #ffa657;
+    --t-fn: #ffc08a;
+    --t-interp: #56d4dd;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--ui);
+  font-size: 14px;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ 上の帯 */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: baseline; gap: 6px; }
+.logo { font-size: 20px; }
+.name { font-weight: 700; letter-spacing: .02em; }
+.sub { color: var(--ink-dim); font-size: 12px; }
+
+.actions { display: flex; gap: 6px; }
+.settings { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
+.settings label { display: flex; align-items: center; gap: 4px; color: var(--ink-dim); font-size: 12px; }
+
+button, select {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+button:hover:not(:disabled), select:hover { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+button.ghost { background: none; border: none; color: var(--ink-dim); }
+button.ghost:hover { color: var(--ink); }
+#btn-help { padding: 5px 9px; }
+
+/* ------------------------------------------------------------------ 本体 */
+main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  padding: 10px;
+  gap: 0;
+}
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+#pane-editor { flex: 3 1 0; }
+#pane-side { flex: 2 1 0; }
+
+.splitter {
+  flex: 0 0 10px;
+  cursor: col-resize;
+  background: none;
+}
+.splitter::after {
+  content: "";
+  display: block;
+  width: 2px;
+  height: 100%;
+  margin: 0 auto;
+  background: var(--border);
+  border-radius: 2px;
+}
+.splitter:hover::after { background: var(--accent); }
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  font-size: 12px;
+}
+.pane-head .file { font-family: var(--mono); }
+.pane-head .hint { margin-left: auto; color: var(--ink-dim); }
+
+/* ------------------------------------------------------------------ 書くところ */
+/* 中身は Monaco Editor（web/lang.js で Shark を教えている） */
+.editor {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.editor .monaco-editor,
+.editor .monaco-editor .overflow-guard {
+  border-radius: 0 0 10px 10px;
+}
+/* 待っている間 */
+.editor.loading::after {
+  content: "書くところを用意しています…";
+  display: block;
+  padding: 14px;
+  color: var(--ink-dim);
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------------------ 右がわ */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.tab {
+  background: none;
+  border: none;
+  border-radius: 6px 6px 0 0;
+  color: var(--ink-dim);
+  padding: 5px 12px;
+}
+.tab.active { color: var(--ink); background: var(--panel); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+.tab-space { flex: 1; }
+.badge {
+  display: none;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--err);
+  color: #fff;
+  font-size: 11px;
+}
+.badge.on { display: inline-block; }
+.badge.warn-only { background: var(--warn); }
+
+.tab-body { flex: 1; min-height: 0; display: flex; }
+.panel { flex: 1; margin: 0; overflow: auto; padding: 12px 14px; }
+.panel.hidden { display: none; }
+
+.out {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.out .sys { color: var(--ink-dim); }
+.out .err { color: var(--err); }
+.out .ok { color: var(--ok); }
+
+.diag .empty, .in .note { color: var(--ink-dim); }
+.diag pre {
+  margin: 0 0 4px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.item {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--err);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  background: var(--panel-2);
+}
+.item:hover { border-color: var(--accent); }
+.item.warn { border-left-color: var(--warn); }
+.item .top { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
+.item .code { font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); }
+.item .where { margin-left: auto; font-size: 11.5px; color: var(--ink-dim); }
+.item .msg { font-weight: 600; }
+.item .hint { margin: 4px 0 0; padding-left: 18px; color: var(--ink-dim); font-size: 13px; }
+
+.in { display: flex; flex-direction: column; gap: 8px; }
+#stdin {
+  flex: 1;
+  min-height: 120px;
+  resize: none;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.6;
+}
+#btn-send { align-self: flex-start; }
+
+/* ------------------------------------------------------------------ 下の帯 */
+.status {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 5px 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.status .grow { flex: 1; }
+.state { font-weight: 600; color: var(--ink); }
+.state.running { color: var(--accent); }
+.state.error { color: var(--err); }
+.state.done { color: var(--ok); }
+.dim { opacity: .7; }
+
+/* ------------------------------------------------------------------ つかいかた */
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(6, 16, 24, .55);
+  z-index: 10;
+}
+.overlay.hidden { display: none; }
+.help-box {
+  position: relative;
+  max-width: 560px;
+  max-height: 100%;
+  overflow: auto;
+  padding: 20px 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  line-height: 1.7;
+}
+.help-box h2 { margin: 0 0 8px; font-size: 17px; }
+.help-box h3 { margin: 16px 0 4px; font-size: 13px; color: var(--ink-dim); }
+.help-box ul { margin: 0; padding-left: 20px; }
+.help-box code, .help-box kbd { font-family: var(--mono); font-size: 12.5px; }
+.help-box kbd { border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.help-box .mods { font-family: var(--mono); font-size: 12.5px; color: var(--ink-dim); }
+.help-box .close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  border: none;
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--ink-dim);
+}
+
+/* ------------------------------------------------------------------ 狭い画面 */
+@media (max-width: 860px) {
+  main { flex-direction: column; padding: 8px; }
+  .splitter { flex: 0 0 8px; cursor: row-resize; }
+  .splitter::after { width: 100%; height: 2px; margin: 3px 0; }
+  #pane-editor, #pane-side { flex: 1 1 50%; }
+  .settings { width: 100%; margin-left: 0; }
+}

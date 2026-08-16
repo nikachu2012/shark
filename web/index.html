@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shark🦈 プレイグラウンド</title>
+<meta name="description" content="ブラウザの中で Shark を書いて動かす。処理系は WebAssembly にしたもので、外に何も送らない。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%A6%88%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="vendor/vs/editor/editor.main.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">
+    <span class="logo">🦈</span>
+    <span class="name">Shark</span>
+    <span class="sub">プレイグラウンド</span>
+  </div>
+
+  <div class="actions">
+    <button id="btn-run" class="primary" disabled>▶ 実行</button>
+    <button id="btn-stop" disabled>■ 止める</button>
+    <button id="btn-check" disabled>型検査</button>
+    <button id="btn-test" disabled>テスト</button>
+  </div>
+
+  <div class="settings">
+    <label>お手本
+      <select id="sel-example"></select>
+    </label>
+    <label>診断
+      <select id="sel-lang">
+        <option value="ja" selected>日本語</option>
+        <option value="en">English</option>
+      </select>
+    </label>
+    <label>メモリ
+      <select id="sel-memory">
+        <option value="8">8 MB</option>
+        <option value="64" selected>64 MB</option>
+        <option value="256">256 MB</option>
+      </select>
+    </label>
+    <button id="btn-share" title="いまの内容を URL にする">共有</button>
+    <button id="btn-help" title="つかいかた">?</button>
+  </div>
+</header>
+
+<main id="main">
+  <section class="pane" id="pane-editor">
+    <div class="pane-head">
+      <span class="file">playground.shk</span>
+      <span class="hint">Ctrl（⌘）+ Enter で実行</span>
+    </div>
+    <div class="editor" id="editor"></div>
+  </section>
+
+  <div class="splitter" id="splitter" role="separator" aria-orientation="vertical"></div>
+
+  <section class="pane" id="pane-side">
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="out" role="tab">出力</button>
+      <button class="tab" data-tab="diag" role="tab">診断<span class="badge" id="diag-count"></span></button>
+      <button class="tab" data-tab="in" role="tab">入力</button>
+      <div class="tab-space"></div>
+      <button id="btn-clear" class="ghost" title="出力を消す">消す</button>
+    </div>
+
+    <div class="tab-body">
+      <pre id="out" class="panel out" role="tabpanel"></pre>
+
+      <div id="diag" class="panel diag hidden" role="tabpanel">
+        <p class="empty">まだ何も読み込んでいません。</p>
+      </div>
+
+      <div id="in" class="panel in hidden" role="tabpanel">
+        <p class="note"><code>input()</code> が読む行をここに書いておきます。1行が1回ぶんです。</p>
+        <textarea id="stdin" spellcheck="false" placeholder="さめ&#10;42"></textarea>
+        <button id="btn-send">実行中のプログラムに送る</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="status">
+  <span id="st-state" class="state">読み込み中…</span>
+  <span id="st-time"></span>
+  <span id="st-memory"></span>
+  <span id="st-exit"></span>
+  <span class="grow"></span>
+  <span id="st-version" class="dim"></span>
+</footer>
+
+<div id="help" class="overlay hidden">
+  <div class="help-box">
+    <button class="close" id="help-close" aria-label="閉じる">×</button>
+    <h2>つかいかた</h2>
+    <p>左に書いて <b>実行</b>。処理系そのもの（C++ で書いたコア）を WebAssembly にしたものが、
+       このタブの中だけで動きます。書いたものはどこにも送られません。</p>
+    <h3>手数</h3>
+    <ul>
+      <li><b>実行</b> … <code>main</code>（または並べた文）を動かす</li>
+      <li><b>型検査</b> … 動かさずに、誤りだけを見る</li>
+      <li><b>テスト</b> … <code>test_</code> で始まる関数を順に走らせる</li>
+      <li><b>止める</b> … 途中でやめる。止まらない繰り返しでも画面は固まりません</li>
+    </ul>
+    <h3>覚えておくと早い</h3>
+    <ul>
+      <li><kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>Enter</kbd> … 実行</li>
+      <li><kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>.</kbd> … 止める</li>
+      <li><kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>Space</kbd> … 入力候補を出す</li>
+      <li><kbd>F12</kbd> … 定義へ飛ぶ　/　<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> … 関数を探す</li>
+      <li><kbd>F1</kbd> … 書くところでできることを並べる</li>
+    </ul>
+    <h3>入力補完</h3>
+    <ul>
+      <li>標準ライブラリの候補と説明は、この処理系が<b>実際に持っている関数</b>から作ってあります</li>
+      <li><code>math.</code> のように打つと、そのモジュールの関数が出ます。
+          <code>import</code> がまだ無ければ一緒に書き足します</li>
+      <li>変数の後ろの <code>.</code> では、見当をつけた型のメソッドが出ます</li>
+      <li>赤い波線は<b>本物の型検査</b>の結果です（打つ手を止めると走ります）</li>
+    </ul>
+
+    <h3>ブラウザでできないこと</h3>
+    <ul>
+      <li><code>std.file</code> が触るのは、このタブの中だけにある仮の置き場です。閉じると消えます</li>
+      <li><code>os.run()</code>（外のプログラムを呼ぶ）は使えません</li>
+      <li><code>input()</code> は「入力」に書いた行を上から順に読みます。無くなると <code>none</code> です</li>
+    </ul>
+    <h3>この処理系が持つモジュール</h3>
+    <p id="help-modules" class="mods">—</p>
+  </div>
+</div>
+
+<script src="vendor/monaco-paths.js"></script>
+<script src="vendor/vs/loader.js"></script>
+<script src="shark.js"></script>
+<script src="examples.js"></script>
+<script src="api.js"></script>
+<script src="lang.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
