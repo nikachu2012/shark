@@ -47,6 +47,7 @@ static void check_clean(const char* label, const char* src) {
 }
 
 // 読み込みで作るもの（構文木・バイトコード）は上限の対象外
+// （上限は、値スタック 1MB が収まる大きさで渡す）
 static void check_load_not_counted(size_t limit_mb) {
   Str src("func main() -> int {\n  var n = 0;\n");
   for (int i = 0; i < 20000; i++) src += "  n += 1;\n";
@@ -213,7 +214,7 @@ int main() {
     }
   }
 
-  check_load_not_counted(1);
+  check_load_not_counted(8);
 
   check_limit("上限: 配列が増え続ける",
               "func main() -> int {\n"

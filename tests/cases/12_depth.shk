@@ -1,0 +1,36 @@
+// 深さの上限と、深い鎖の片付け
+class Node {
+  public var v: int;
+  public var next: Node?;
+}
+
+func down(n: int) -> int {
+  if n == 0 { return 0; }
+  return down(n - 1) + 1;
+}
+
+// 局所変数が多い関数（値の置き場をたくさん使う）
+func wide() -> int {
+  var a1 = 1; var a2 = 2; var a3 = 3; var a4 = 4; var a5 = 5;
+  var a6 = 6; var a7 = 7; var a8 = 8; var a9 = 9; var a10 = 10;
+  return a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10;
+}
+
+func main() -> int {
+  // 数千段の再帰は通る
+  print(down(3000));
+  print(wide());
+
+  // 長い鎖を作って、まとめて捨てる（片付けで積み上がらないこと）
+  var head: Node? = none;
+  for var i in range(200000) {
+    var n = Node();
+    n.v = i;
+    n.next = head;
+    head = n;
+  }
+  print(head!.v);
+  head = none;
+  print("片付けた");
+  return 0;
+}

@@ -1,0 +1,9 @@
+// 止まる条件を書き忘れた再帰
+func forever(n: int) -> int {
+  return forever(n + 1);
+}
+
+func main() -> int {
+  print(forever(0));
+  return 0;
+}

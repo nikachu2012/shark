@@ -1,0 +1,22 @@
+panic: 呼び出しが深すぎます（深さ 10000）
+  止まる条件（return で抜ける形）を書き忘れていませんか
+  --> too_deep.shk:3
+  呼び出しの経路:
+    too_deep.shk:3  forever
+    too_deep.shk:3  forever
+    too_deep.shk:3  forever
+    too_deep.shk:3  forever
+    too_deep.shk:3  forever
+    too_deep.shk:3  forever
+    too_deep.shk:3  forever
+    too_deep.shk:3  forever
+    ... （9983 段省略）
+    too_deep.shk:3  forever
+    too_deep.shk:3  forever
+    too_deep.shk:3  forever
+    too_deep.shk:3  forever
+    too_deep.shk:3  forever
+    too_deep.shk:3  forever
+    too_deep.shk:3  forever
+    too_deep.shk:3  forever
+    too_deep.shk:7  main
