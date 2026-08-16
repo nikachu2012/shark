@@ -37,6 +37,23 @@ make embed && ./examples/embed/game   # ゲームに組み込む例
   --lang ja|en / --strict  診断の言語 / 警告をエラーとして扱う
 ```
 
+## ブラウザで動かす
+
+同じコアを WebAssembly にしたものが [web/](web/README.md) にある。
+書いて動かすところまで、タブの中だけで完結する（何も外に送らない）。
+
+```
+make web-serve      # 作って http://localhost:8000/ に配る（Emscripten が要る）
+make web-test       # 作ったものを node で確かめる
+```
+
+- 移植層（`core/platform/web.cpp`）を1つ足しただけ。言語も標準ライブラリもそのまま動く
+- 実行は刻んでホストに返るので、**止まらない繰り返しを書いてもブラウザは固まらない**。
+  ゲームに組み込むときと同じ仕組み
+- 書くところは Monaco Editor。入力候補・説明・引数の案内が出て、
+  誤りの波線は**本物の型検査**から引いている
+- `shark.wasm` は 741 KB（gzip 233 KB）。置き場に置くだけで動き、サーバ側の処理は要らない
+
 ## 速さ
 
 同じ内容を C・Python・Shark で書いて測ったもの。**Python と同じくらい**で、
@@ -68,6 +85,7 @@ python3 bench/run.py loop fib   # 選んで測る
 |---|---|
 | [docs/reference.md](docs/reference.md) | 言語の使い方（利用者向け・全17章） |
 | [docs/implementation.md](docs/implementation.md) | 実装メモ（作った範囲・組み込み方・移植の手順） |
+| [web/README.md](web/README.md) | ブラウザで動かす（作り方・ホストの入口・できないこと） |
 | [spec/README.md](spec/README.md) | 思想と仕様書の索引 |
 | [spec/open-questions.md](spec/open-questions.md) | まだ決めていないこと |
 
@@ -78,6 +96,7 @@ core/     実行系（コア）。C++。ファイルも端末も触らない
   platform/   移植層          ← 機種に合わせて差し替える場所
   lib/        標準ライブラリ
 frontend/ shark コマンド（コアとは別実装）
+web/      ブラウザで動かす一式（WebAssembly。これもコアとは別実装）
 examples/ サンプル。embed/ はゲームに組み込む例
 tests/    テスト（make test）
 bench/    C・Python・Shark の速さ比べ（python3 bench/run.py）

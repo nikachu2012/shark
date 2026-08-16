@@ -18,6 +18,7 @@
 make            # コア（静的な .o）と shark コマンドを作る
 make test       # tests/ を走らせる（メモリの検査を含む）
 make embed      # 組み込みの例（examples/embed）を作る
+make web        # ブラウザで動く形（WebAssembly）を作る
 ```
 
 外部ライブラリは要らない。C++ コンパイラだけで通る。
@@ -41,6 +42,7 @@ make embed      # 組み込みの例（examples/embed）を作る
 ```
 core/       実行系。ファイルも端末も触らない。ゲームに組み込む部品
 frontend/   shark コマンド。ファイルを読み、コアを呼び、診断を端末向けに整形する
+web/        ブラウザで動かす一式。コアを WebAssembly にして、画面から呼ぶ
 ```
 
 `core/` はどのホストからも同じように使える。`frontend/main.cpp` は
@@ -61,6 +63,7 @@ core/
   platform/               移植層          ← 差し替える場所
     desktop.cpp             Windows / macOS / Linux
     console.cpp             ファイルも OS も無い機種の雛形
+    web.cpp                 ブラウザ（WebAssembly）→ web/README.md
   lib/                    標準ライブラリ  ← ホスト関数を足す場所でもある
     builtin math time task fmt path file os text json test format
 ```
@@ -187,6 +190,10 @@ for (;;) {
 必須の4つだけでも、`time` `math` `task` と言語のすべてが動く。
 `file` や `os` を持たない移植層では、対応するモジュールは登録されず、
 `import` した時点で E0501 が返る（実行してから失敗するのではない）。
+
+実際に足した例が [core/platform/web.cpp](../core/platform/web.cpp)（ブラウザ）。
+コアには手を入れていない。待てない環境なので `sleep` は何もせず、
+進む量はホストが `step()` の刻みで決める（[web/README.md](../web/README.md)）。
 
 ## メモリの上限
 
