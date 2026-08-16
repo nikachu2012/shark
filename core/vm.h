@@ -83,6 +83,7 @@ struct VM {
 
   void set_program(Program* p, Registry* r);
   void start();                 // 初期化とエントリの呼び出しを準備する
+  void reset();                 // 読み込み直しの前に、抱えているものを離す
   RunStatus step(int budget);   // budget 命令だけ進める
   void abort_run() { aborted = true; }
 

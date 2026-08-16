@@ -214,7 +214,7 @@ bool VM::switch_task() {
   (void)any_timer;
   if (any_waiting && any_timer) { idle_hint = true; return true; }
   if (any_waiting) {
-    // 全部が待ちで、目覚める見込みが無い
+    // 全部が待ちで、目覚める見込みが無い（deadlock）
     cur = 0;
     for (int i = 0; i < n; i++) if (tasks[i]->status == TS_Waiting) { cur = i; break; }
     status = SK_Error;
@@ -222,7 +222,25 @@ bool VM::switch_task() {
     error_trace = build_trace();
     return false;
   }
+  // 動かせるタスクがもう無い＝全部終わった（panic や取り消しで終わった場合を含む）
+  if (status == SK_Running) status = SK_Finished;
   return false;
+}
+
+// 読み込み直しの前に、抱えているものを全部離す
+void VM::reset() {
+  for (int i = 0; i < tasks.size(); i++) task_unref(tasks[i]);
+  tasks.clear();
+  for (int i = 0; i < globals.size(); i++) val_release(globals[i]);
+  globals.clear();
+  boot.clear();
+  boot_pos = 0;
+  prog = 0;
+  cur = 0;
+  has_panic = false;
+  aborted = false;
+  status = SK_Error;
+  error_message = Str("まだ読み込めていません");
 }
 
 // ------------------------------------------------------------------ 命令の実行
@@ -258,6 +276,11 @@ bool VM::call_function(int fidx, int nargs) {
     Value out;
     NativeStatus st = f->native(*this, args, nargs, out);
     if (st == N_Panic) return false;
+    if (st == N_Wait || st == N_Cancel) {
+      // この道すじ（FuncInfo として持つネイティブ）は待てない
+      panic(Str("このメソッドは待ち合わせに使えません"));
+      return false;
+    }
     for (int i = 0; i < nargs; i++) val_release(t->stack[t->sp - 1 - i]);
     t->sp -= nargs;
     push(out);
@@ -298,11 +321,14 @@ int VM::spawn_task(int fidx, int nargs, Value* args) {
 
 RunStatus VM::step(int budget) {
   if (status != SK_Running) return status;
+  if (!prog) return status = SK_Error;
   // 実行中に確保したものだけが、上限の対象になる
   MemRunScope run_scope;
   idle_hint = false;
 
   while (budget > 0) {
+    // os.exit などで終わりが決まったら、その場で戻る
+    if (status != SK_Running) return status;
     if (aborted) {
       status = SK_Error;
       error_message = Str("実行を止めました");

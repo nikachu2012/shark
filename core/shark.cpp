@@ -143,6 +143,8 @@ Unit* Engine::load_unit(const Str& path, const Str& source, const Str& display, 
 const Vec<Diagnostic>& Engine::load(const Str& name, const Str& source) {
   diag_.clear();
   ok_ = false;
+  // 先に仮想マシンを片付ける（この後で Program を捨てるため）
+  vm_.reset();
   if (checker_) { checker_->~Checker(); sk_free(checker_); checker_ = 0; }
   if (prog_) { prog_->~Program(); sk_free(prog_); prog_ = 0; }
   if (arena_) { arena_->~Arena(); sk_free(arena_); arena_ = 0; }
