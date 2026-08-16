@@ -1315,6 +1315,19 @@ Type* Checker::check_unary(Node* e) {
     e->opcode = OP_NOT;
     return t_.t_bool();
   }
+  if (e->name == "~") {
+    if (it && it->kind != T_Int && it->kind != T_Unknown) {
+      Diagnostic& d = diag_.error("E0132", diag_.L(Str("~ は int に付けます（いまは ") + type_name(it) + "）",
+                                                   Str("~ applies to int, found ") + type_name(it)));
+      d.spans.push(Span(e->line, e->col, e->len));
+      if (it->kind == T_Bool)
+        d.help.push(diag_.L("真偽値をひっくり返すのは ! です", "use ! to negate a bool"));
+      else if (it->kind == T_Float)
+        d.help.push(diag_.L("int(...) で整数にしてから使います", "convert with int(...) first"));
+    }
+    e->opcode = OP_BNOT_INT;
+    return t_.t_int();
+  }
   // -x
   if (it && it->kind == T_Int) { e->opcode = OP_NEG_INT; return it; }
   if (it && it->kind == T_Float) { e->opcode = OP_NEG_FLOAT; return it; }
@@ -1525,14 +1538,53 @@ Type* Checker::check_binary(Node* e) {
     return t_.t_bool();
   }
 
+  // ビット演算（int だけ）
+  bool bitop = op == "&" || op == "|" || op == "^" || op == "<<" || op == ">>";
+  if (bitop) {
+    if (unknown) return t_.t_int();
+    if (lt->kind == T_Int && rt->kind == T_Int) {
+      e->opcode = op == "&" ? OP_AND_INT : op == "|" ? OP_OR_INT : op == "^" ? OP_XOR_INT
+                  : op == "<<" ? OP_SHL_INT : OP_SHR_INT;
+      return t_.t_int();
+    }
+    Type* bad = lt->kind == T_Int ? rt : lt;
+    Node* bn = lt->kind == T_Int ? e->b : e->a;
+    Diagnostic& d = diag_.error("E0132", diag_.L(Str("ビット演算 ") + op + " は int にだけ使えます（いまは " +
+                                                     type_name(bad) + "）",
+                                                 Str("bitwise ") + op + " applies to int only, found " +
+                                                     type_name(bad)));
+    d.spans.push(Span(bn->line, bn->col, bn->len, type_name(bad)));
+    if (bad->kind == T_Float) {
+      d.help.push(diag_.L("int(...) で整数にしてから使います。小数のビットは触れません",
+                          "convert with int(...); floats have no bit operations"));
+    } else if (bn->kind == E_Binary &&
+               (bn->name == "==" || bn->name == "!=" || bn->name == "<" || bn->name == "<=" ||
+                bn->name == ">" || bn->name == ">=")) {
+      // C と同じ強さにしてあるので、比較より弱い。よくある書き間違い
+      Str l = expr_text(e->a), r = expr_text(bn->a);
+      Str fix = (l.size() && r.size()) ? (Str("(") + l + " " + op + " " + r + ") " + bn->name + " ...")
+                                       : (Str("(a ") + op + " b) " + bn->name + " c");
+      d.help.push(diag_.L(Str("ビット演算は比較より弱く結び付きます（C と同じ）。先にビットを扱うなら ") +
+                              fix + " のように括弧を書きます",
+                          Str("bitwise operators bind looser than comparisons (as in C). Write ") + fix));
+    } else if (bad->kind == T_Bool) {
+      d.help.push(diag_.L("真偽値をまとめるのは && と || です", "use && and || to combine bool values"));
+    }
+    return t_.t_int();
+  }
+
   // 算術
   if (unknown) return lt->kind == T_Unknown ? rt : lt;
   if (lt->kind == T_Int && rt->kind == T_Int) {
     e->opcode = op == "+" ? OP_ADD_INT : op == "-" ? OP_SUB_INT : op == "*" ? OP_MUL_INT
-                : op == "/" ? OP_DIV_INT : OP_MOD_INT;
+                : op == "/" ? OP_DIV_INT : op == "**" ? OP_POW_INT : OP_MOD_INT;
     return t_.t_int();
   }
   if (lt->kind == T_Float && rt->kind == T_Float) {
+    if (op == "**") {
+      e->opcode = OP_POW_FLOAT;
+      return t_.t_float();
+    }
     if (op == "%") {
       Diagnostic& d = diag_.error("E0129", diag_.L("% は int にだけ使えます", "% applies to int only"));
       d.spans.push(Span(e->line, e->col, e->len));

@@ -15,6 +15,10 @@ enum TokKind : uint8_t {
   TK_Bang, TK_Plus, TK_Minus, TK_Star, TK_Slash, TK_Percent,
   TK_Assign, TK_PlusAssign, TK_MinusAssign, TK_StarAssign, TK_SlashAssign,
   TK_Eq, TK_Ne, TK_Lt, TK_Le, TK_Gt, TK_Ge, TK_AndAnd, TK_OrOr, TK_Amp, TK_Plus2,
+  // ビット演算と冪乗（>> は < > の入れ子と紛れるので、記号としては作らない。
+  // 並んだ 2 つの > を構文解析でまとめる）
+  TK_Pipe, TK_Caret, TK_Tilde, TK_Shl, TK_Star2,
+  TK_AmpAssign, TK_PipeAssign, TK_CaretAssign, TK_ShlAssign,
   // 予約語
   TK_Func, TK_Return, TK_Var, TK_Const, TK_If, TK_Else, TK_While, TK_For, TK_In,
   TK_Break, TK_Continue, TK_Class, TK_This, TK_Super, TK_ThisType,

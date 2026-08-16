@@ -93,6 +93,21 @@ void CodeGen::gen_default(Type* t) {
 }
 
 // ------------------------------------------------------------------ 文
+// 複合代入（x += 1 など）で使う命令。型と演算子から決める
+static uint8_t binop_of(const Str& name, Type* ty) {
+  if (ty && ty->kind == T_String) return OP_CONCAT;
+  if (ty && ty->kind == T_Float)
+    return name == "+" ? OP_ADD_FLOAT : name == "-" ? OP_SUB_FLOAT
+           : name == "*" ? OP_MUL_FLOAT : OP_DIV_FLOAT;
+  if (name == "&") return OP_AND_INT;
+  if (name == "|") return OP_OR_INT;
+  if (name == "^") return OP_XOR_INT;
+  if (name == "<<") return OP_SHL_INT;
+  if (name == ">>") return OP_SHR_INT;
+  return name == "+" ? OP_ADD_INT : name == "-" ? OP_SUB_INT
+         : name == "*" ? OP_MUL_INT : OP_DIV_INT;
+}
+
 void CodeGen::gen_stmt(Node* s) {
   if (!s) return;
   line_ = s->line;
@@ -132,16 +147,7 @@ void CodeGen::gen_stmt(Node* s) {
         emit(tgt->is_global ? OP_LOAD_GLOBAL : OP_LOAD_LOCAL);
         emit_i32(tgt->slot);
         gen_expr(s->b);
-        Type* ty = s->type;
-        uint8_t op = OP_ADD_INT;
-        if (ty && ty->kind == T_Float)
-          op = s->name == "+" ? OP_ADD_FLOAT : s->name == "-" ? OP_SUB_FLOAT
-               : s->name == "*" ? OP_MUL_FLOAT : OP_DIV_FLOAT;
-        else if (ty && ty->kind == T_String)
-          op = OP_CONCAT;
-        else
-          op = s->name == "+" ? OP_ADD_INT : s->name == "-" ? OP_SUB_INT
-               : s->name == "*" ? OP_MUL_INT : OP_DIV_INT;
+        uint8_t op = binop_of(s->name, s->type);
         emit(op);
         if (op == OP_CONCAT) emit_i32(2);
         emit(tgt->is_global ? OP_STORE_GLOBAL : OP_STORE_LOCAL);
@@ -152,16 +158,7 @@ void CodeGen::gen_stmt(Node* s) {
         emit(OP_PLACE_DUP);
         emit(OP_PLACE_LOAD);
         emit(OP_SWAP);         // [右辺, いまの値] を [いまの値, 右辺] に
-        Type* ty = s->type;
-        uint8_t op = OP_ADD_INT;
-        if (ty && ty->kind == T_Float)
-          op = s->name == "+" ? OP_ADD_FLOAT : s->name == "-" ? OP_SUB_FLOAT
-               : s->name == "*" ? OP_MUL_FLOAT : OP_DIV_FLOAT;
-        else if (ty && ty->kind == T_String)
-          op = OP_CONCAT;
-        else
-          op = s->name == "+" ? OP_ADD_INT : s->name == "-" ? OP_SUB_INT
-               : s->name == "*" ? OP_MUL_INT : OP_DIV_INT;
+        uint8_t op = binop_of(s->name, s->type);
         emit(op);
         if (op == OP_CONCAT) emit_i32(2);
         emit(OP_PLACE_STORE);

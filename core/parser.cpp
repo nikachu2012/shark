@@ -420,16 +420,23 @@ Node* Parser::parse_statement() {
   // 代入か式文
   Node* e = parse_expr();
   if (at(TK_Assign) || at(TK_PlusAssign) || at(TK_MinusAssign) || at(TK_StarAssign) ||
-      at(TK_SlashAssign)) {
+      at(TK_SlashAssign) || at(TK_AmpAssign) || at(TK_PipeAssign) || at(TK_CaretAssign) ||
+      at(TK_ShlAssign) || at_shr_assign()) {
     Node* n = node_at(S_Assign, cur());
     n->line = e->line; n->col = e->col;
+    bool shr_assign = at_shr_assign();
     switch (cur().kind) {
       case TK_PlusAssign: n->name = Str("+"); break;
       case TK_MinusAssign: n->name = Str("-"); break;
       case TK_StarAssign: n->name = Str("*"); break;
       case TK_SlashAssign: n->name = Str("/"); break;
-      default: n->name = Str(""); break;
+      case TK_AmpAssign: n->name = Str("&"); break;
+      case TK_PipeAssign: n->name = Str("|"); break;
+      case TK_CaretAssign: n->name = Str("^"); break;
+      case TK_ShlAssign: n->name = Str("<<"); break;
+      default: n->name = Str(shr_assign ? ">>" : ""); break;
     }
+    p_ += shr_assign ? 1 : 0;   // >>= は > と >= の2つに分かれている
     p_++;
     n->a = e;
     n->b = parse_expr();
@@ -473,11 +480,55 @@ Node* Parser::parse_or() {
 }
 
 Node* Parser::parse_and() {
-  Node* l = parse_equality();
+  Node* l = parse_bit_or();
   while (at(TK_AndAnd)) {
     Node* n = node(E_Binary);
     n->name = Str("&&");
     n->line = l->line; n->col = l->col;
+    p_++;
+    n->a = l;
+    n->b = parse_bit_or();
+    l = n;
+  }
+  return l;
+}
+
+// ビット演算の強さは C と同じ。| より ^、^ より & が強く、
+// どれも == や != より弱い（a & b == c は a & (b == c) になる）
+Node* Parser::parse_bit_or() {
+  Node* l = parse_bit_xor();
+  while (at(TK_Pipe)) {
+    Node* n = node(E_Binary);
+    n->name = Str("|");
+    n->line = cur().line; n->col = cur().col; n->len = 1;
+    p_++;
+    n->a = l;
+    n->b = parse_bit_xor();
+    l = n;
+  }
+  return l;
+}
+
+Node* Parser::parse_bit_xor() {
+  Node* l = parse_bit_and();
+  while (at(TK_Caret)) {
+    Node* n = node(E_Binary);
+    n->name = Str("^");
+    n->line = cur().line; n->col = cur().col; n->len = 1;
+    p_++;
+    n->a = l;
+    n->b = parse_bit_and();
+    l = n;
+  }
+  return l;
+}
+
+Node* Parser::parse_bit_and() {
+  Node* l = parse_equality();
+  while (at(TK_Amp)) {
+    Node* n = node(E_Binary);
+    n->name = Str("&");
+    n->line = cur().line; n->col = cur().col; n->len = 1;
     p_++;
     n->a = l;
     n->b = parse_equality();
@@ -500,13 +551,38 @@ Node* Parser::parse_equality() {
   return l;
 }
 
+// > が2つ並んでいれば >>（list<list<int>> と紛れないよう、記号にはしていない）
+bool Parser::at_shr() const {
+  return at(TK_Gt) && peek(1).kind == TK_Gt && peek(1).offset == cur().offset + 1;
+}
+bool Parser::at_shr_assign() const {
+  return at(TK_Gt) && peek(1).kind == TK_Ge && peek(1).offset == cur().offset + 1;
+}
+
 Node* Parser::parse_relational() {
-  Node* l = parse_additive();
-  while (at(TK_Lt) || at(TK_Le) || at(TK_Gt) || at(TK_Ge)) {
+  Node* l = parse_shift();
+  // >> と >>= は比較ではない
+  while (!at_shr() && !at_shr_assign() && (at(TK_Lt) || at(TK_Le) || at(TK_Gt) || at(TK_Ge))) {
     Node* n = node(E_Binary);
     n->name = Str(at(TK_Lt) ? "<" : at(TK_Le) ? "<=" : at(TK_Gt) ? ">" : ">=");
     n->line = l->line; n->col = l->col;
     p_++;
+    n->a = l;
+    n->b = parse_shift();
+    l = n;
+  }
+  return l;
+}
+
+Node* Parser::parse_shift() {
+  Node* l = parse_additive();
+  for (;;) {
+    bool shr = at_shr();
+    if (!shr && !at(TK_Shl)) break;
+    Node* n = node(E_Binary);
+    n->name = Str(shr ? ">>" : "<<");
+    n->line = cur().line; n->col = cur().col; n->len = 2;
+    p_ += shr ? 2 : 1;
     n->a = l;
     n->b = parse_additive();
     l = n;
@@ -543,9 +619,9 @@ Node* Parser::parse_multiplicative() {
 }
 
 Node* Parser::parse_unary() {
-  if (at(TK_Bang) || at(TK_Minus)) {
+  if (at(TK_Bang) || at(TK_Minus) || at(TK_Tilde)) {
     Node* n = node(E_Unary);
-    n->name = Str(at(TK_Bang) ? "!" : "-");
+    n->name = Str(at(TK_Bang) ? "!" : at(TK_Minus) ? "-" : "~");
     p_++;
     n->a = parse_unary();
     return n;
@@ -569,7 +645,23 @@ Node* Parser::parse_unary() {
     n->a = parse_unary();
     return n;
   }
-  return parse_postfix();
+  return parse_power();
+}
+
+// 冪乗は右結合で、単項より強く結び付く（-2 ** 2 は -(2 ** 2)）。
+// 右側は単項から読むので、2.0 ** -1.0 のようにも書ける
+Node* Parser::parse_power() {
+  Node* l = parse_postfix();
+  if (at(TK_Star2)) {
+    Node* n = node(E_Binary);
+    n->name = Str("**");
+    n->line = cur().line; n->col = cur().col; n->len = 2;
+    p_++;
+    n->a = l;
+    n->b = parse_unary();
+    return n;
+  }
+  return l;
 }
 
 void Parser::parse_args(Node* call) {

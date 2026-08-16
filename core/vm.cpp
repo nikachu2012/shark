@@ -1,5 +1,7 @@
 #include "vm.h"
 
+#include <math.h>
+
 #include "opcodes.h"
 #include "platform/platform.h"
 
@@ -566,6 +568,67 @@ RunStatus VM::step(int budget) {
           break;
         }
         push(mk_int(r));
+        break;
+      }
+      // ビット演算。int は 64 ビットの2の補数で、C と同じ結果になる
+      case OP_AND_INT: case OP_OR_INT: case OP_XOR_INT: {
+        fr0.ip = ip;
+        Value b = pop(), a = pop();
+        uint64_t x = (uint64_t)a.i, y = (uint64_t)b.i;
+        push(mk_int((int64_t)(op == OP_AND_INT ? (x & y) : op == OP_OR_INT ? (x | y) : (x ^ y))));
+        break;
+      }
+      case OP_SHL_INT: case OP_SHR_INT: {
+        fr0.ip = ip;
+        Value b = pop(), a = pop();
+        if (b.i < 0 || b.i > 63) {
+          panic(Str("ずらせるのは 0 〜 63 ビットです（int は 64 ビット）。いまは ") +
+                str_from_int(b.i));
+          break;
+        }
+        int sh = (int)b.i;
+        uint64_t x = (uint64_t)a.i;
+        int64_t r;
+        if (op == OP_SHL_INT) {
+          r = (int64_t)(x << sh);            // はみ出した桁は落とす（あふれを見ない）
+        } else if (a.i < 0) {
+          // 右へずらすときは符号を保つ（算術シフト）。C の処理系と同じ動き
+          r = (int64_t)((x >> sh) | (sh ? ~(~(uint64_t)0 >> sh) : 0));
+        } else {
+          r = (int64_t)(x >> sh);
+        }
+        push(mk_int(r));
+        break;
+      }
+      case OP_BNOT_INT: {
+        fr0.ip = ip;
+        Value a = pop();
+        push(mk_int((int64_t)~(uint64_t)a.i));
+        break;
+      }
+      case OP_POW_INT: {
+        fr0.ip = ip;
+        Value b = pop(), a = pop();
+        if (b.i < 0) {
+          panic(Str("int の ** に負の指数は書けません（答えが整数になりません）\n"
+                    "  小数で計算するには float(...) ** float(...) と書きます"));
+          break;
+        }
+        int64_t base = a.i, e2 = b.i, r = 1;
+        bool ovf = false;
+        while (e2 > 0 && !ovf) {
+          if (e2 & 1) ovf = mul_ovf(r, base, &r);
+          e2 >>= 1;
+          if (e2 > 0 && !ovf) ovf = mul_ovf(base, base, &base);
+        }
+        if (ovf) { panic(Str("int の計算があふれました（int は 64 ビットです）")); break; }
+        push(mk_int(r));
+        break;
+      }
+      case OP_POW_FLOAT: {
+        fr0.ip = ip;
+        Value b = pop(), a = pop();
+        push(mk_float(pow(a.f, b.f)));
         break;
       }
       case OP_NEG_INT: {

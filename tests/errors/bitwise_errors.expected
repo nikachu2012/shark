@@ -1,0 +1,32 @@
+error[E0132]: ビット演算 & は int にだけ使えます（いまは float）
+  --> bitwise_errors.shk:4:13
+  4 |   print(n & f);            // E0132（小数にビット演算）
+    |             - float
+  直し方: int(...) で整数にしてから使います。小数のビットは触れません
+
+error[E0132]: ビット演算 | は int にだけ使えます（いまは bool）
+  --> bitwise_errors.shk:5:9
+  5 |   print(true | false);     // E0132（真偽値をまとめるのは ||）
+    |         ---- bool
+  直し方: 真偽値をまとめるのは && と || です
+
+error[E0132]: ~ は int に付けます（いまは float）
+  --> bitwise_errors.shk:6:9
+  6 |   print(~f);               // E0132（~ は int）
+    |         -
+  直し方: int(...) で整数にしてから使います
+
+error[E0132]: ビット演算 & は int にだけ使えます（いまは bool）
+  --> bitwise_errors.shk:7:13
+  7 |   print(n & 3 == 3);       // E0132（C と同じ強さなので括弧が要る）
+    |             -- bool
+  直し方: ビット演算は比較より弱く結び付きます（C と同じ）。先にビットを扱うなら (n & 3) == ... のように括弧を書きます
+
+error[E0102]: int と float は計算できません
+  --> bitwise_errors.shk:8:9
+  8 |   print(2 ** f);           // E0102（int と float は混ぜられない）
+    |         - int
+    |              - float
+  直し方: float(2) ** f と書くと計算できます
+
+5 件の誤りがあります

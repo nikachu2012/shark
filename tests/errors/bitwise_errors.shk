@@ -1,0 +1,10 @@
+func main() -> int {
+  var n = 12;
+  var f = 1.5;
+  print(n & f);            // E0132（小数にビット演算）
+  print(true | false);     // E0132（真偽値をまとめるのは ||）
+  print(~f);               // E0132（~ は int）
+  print(n & 3 == 3);       // E0132（C と同じ強さなので括弧が要る）
+  print(2 ** f);           // E0102（int と float は混ぜられない）
+  return 0;
+}

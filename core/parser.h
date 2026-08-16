@@ -48,12 +48,19 @@ class Parser {
   Node* parse_coalesce();
   Node* parse_or();
   Node* parse_and();
+  Node* parse_bit_or();
+  Node* parse_bit_xor();
+  Node* parse_bit_and();
   Node* parse_equality();
   Node* parse_relational();
+  Node* parse_shift();
   Node* parse_additive();
   Node* parse_multiplicative();
   Node* parse_unary();
+  Node* parse_power();
   Node* parse_postfix();
+  bool at_shr() const;      // 並んだ 2 つの > を >> とみなす
+  bool at_shr_assign() const;
   Node* parse_primary();
   Node* parse_fstring(const Token& t);
   void parse_args(Node* call);

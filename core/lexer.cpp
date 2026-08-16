@@ -75,6 +75,15 @@ const char* tok_name(TokKind k) {
     case TK_OrOr: return "||";
     case TK_Amp: return "&";
     case TK_Plus2: return "+";
+    case TK_Pipe: return "|";
+    case TK_Caret: return "^";
+    case TK_Tilde: return "~";
+    case TK_Shl: return "<<";
+    case TK_Star2: return "**";
+    case TK_AmpAssign: return "&=";
+    case TK_PipeAssign: return "|=";
+    case TK_CaretAssign: return "^=";
+    case TK_ShlAssign: return "<<=";
     default: break;
   }
   for (unsigned i = 0; i < sizeof(kKeywords) / sizeof(kKeywords[0]); i++)
@@ -318,15 +327,20 @@ void Lexer::run(Vec<Token>* out) {
 
     // 記号
     struct Sym { const char* s; TokKind k; };
+    // 長いものから先に見る（"<<=" は "<=" より前）
     static const Sym syms[] = {
+      {"<<=", TK_ShlAssign},
       {"->", TK_Arrow}, {"??", TK_QQ}, {"?.", TK_QDot}, {"==", TK_Eq}, {"!=", TK_Ne},
       {"<=", TK_Le}, {">=", TK_Ge}, {"&&", TK_AndAnd}, {"||", TK_OrOr},
       {"+=", TK_PlusAssign}, {"-=", TK_MinusAssign}, {"*=", TK_StarAssign}, {"/=", TK_SlashAssign},
+      {"&=", TK_AmpAssign}, {"|=", TK_PipeAssign}, {"^=", TK_CaretAssign},
+      {"<<", TK_Shl}, {"**", TK_Star2},
       {"(", TK_LParen}, {")", TK_RParen}, {"{", TK_LBrace}, {"}", TK_RBrace},
       {"[", TK_LBracket}, {"]", TK_RBracket}, {",", TK_Comma}, {";", TK_Semi},
       {":", TK_Colon}, {".", TK_Dot}, {"?", TK_Question}, {"!", TK_Bang},
       {"+", TK_Plus}, {"-", TK_Minus}, {"*", TK_Star}, {"/", TK_Slash}, {"%", TK_Percent},
       {"=", TK_Assign}, {"<", TK_Lt}, {">", TK_Gt}, {"&", TK_Amp},
+      {"|", TK_Pipe}, {"^", TK_Caret}, {"~", TK_Tilde},
     };
     bool matched = false;
     for (unsigned n = 0; n < sizeof(syms) / sizeof(syms[0]); n++) {
