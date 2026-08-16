@@ -14,6 +14,8 @@ Engine::Engine(const Config& cfg)
   diag_.set_lang(cfg.lang);
   diag_.set_strict(cfg.strict);
   vm_.stack_size = cfg.stack_size;
+  vm_.task_stack_size = cfg.task_stack_size;
+  vm_.max_call_depth = cfg.max_call_depth;
   vm_.diag = &diag_;
   // 上限が見るのは、実行中のプログラムが使う量だけ（spec/runtime/memory.md）。
   // 数えるのは確保の口なので、1つのプロセスに1つ

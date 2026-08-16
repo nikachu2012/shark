@@ -44,7 +44,7 @@ void chan_obj_dispose(ChanObj* o) { chan_unref(o->c); }
 // ------------------------------------------------------------------ VM
 VM::VM()
     : prog(0), reg(0), diag(0), cur(0), status(SK_Running), exit_code(0), error_line(0),
-      stack_size(8192), started_at(0), aborted(false), rng_state(0x853c49e6748fea9bull),
+      stack_size(65536), task_stack_size(4096), max_call_depth(10000), started_at(0), aborted(false), rng_state(0x853c49e6748fea9bull),
       steps_since_switch(0), has_panic(false), idle_hint(false), boot_pos(0) {}
 
 VM::~VM() {
@@ -115,7 +115,8 @@ void VM::start(bool with_inits) {
 void VM::push(const Value& v) {
   TaskState* t = tasks[cur];
   if (t->sp >= t->cap) {
-    panic(Str("呼び出しが深すぎます（スタックがいっぱいです）"));
+    panic(Str("値の置き場が足りません（深さ ") + str_from_int(t->frames.size()) +
+          "）\n  変数の多い関数を深くまで呼んでいませんか");
     return;
   }
   t->stack[t->sp++] = v;
@@ -294,8 +295,9 @@ bool VM::call_function(int fidx, int nargs) {
   fr.ip = 0;
   fr.base = t->sp - nargs;
   for (int i = nargs; i < f->nlocals; i++) push(mk_void());
-  if (t->frames.size() > 512) {
-    panic(Str("呼び出しが深すぎます（同じ関数を呼び続けていませんか）"));
+  if (t->frames.size() >= max_call_depth) {
+    panic(Str("呼び出しが深すぎます（深さ ") + str_from_int(max_call_depth) +
+          "）\n  止まる条件（return で抜ける形）を書き忘れていませんか");
     return false;
   }
   t->frames.push(fr);
@@ -304,7 +306,7 @@ bool VM::call_function(int fidx, int nargs) {
 
 int VM::spawn_task(int fidx, int nargs, Value* args) {
   FuncInfo* f = prog->funcs[fidx];
-  TaskState* nt = task_new(*this, stack_size < 4096 ? stack_size : 4096);
+  TaskState* nt = task_new(*this, task_stack_size);
   for (int i = 0; i < nargs; i++) nt->stack[nt->sp++] = val_retain(args[i]);
   for (int i = nargs; i < f->nlocals; i++) nt->stack[nt->sp++] = mk_void();
   Frame fr;

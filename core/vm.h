@@ -73,6 +73,8 @@ struct VM {
   Str error_file;
   HostIO io;
   int stack_size;
+  int task_stack_size;
+  int max_call_depth;
   int64_t started_at;
   bool aborted;
   uint64_t rng_state;
