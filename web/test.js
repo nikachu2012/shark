@@ -111,6 +111,19 @@ createShark().then((M) => {
   const config = run(fs.readFileSync(path.join(root, 'examples/config.shk'), 'utf8'));
   check('config.shk（file / json / os を使う）', config.errors === 0 && config.status === 1, config.out);
 
+  // --- std.crypto（乱数のもとはブラウザの暗号用乱数を借りる）---
+  const crypt = run('import std.crypto;\n' +
+                    'func main() -> int {\n' +
+                    '  print(crypto.sha256("abc").to_hex());\n' +
+                    '  print(crypto.source());\n' +
+                    '  print(crypto.random_bytes(32).len());\n' +
+                    '  return 0;\n' +
+                    '}\n');
+  check('std.crypto（ハッシュと、ブラウザから借りる乱数）',
+        crypt.out === 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n' +
+                      'secure\n32\n',
+        crypt.out);
+
   // --- 入力（端末と同じで、打たれるまで待つ）---
   const askSrc = fs.readFileSync(path.join(root, 'web/examples/ask.shk'), 'utf8');
   const ask = run(askSrc, 'さめ\n');

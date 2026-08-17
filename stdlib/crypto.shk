@@ -1,0 +1,155 @@
+// crypto.shk — std.crypto の宣言。実装は core/lib/crypto.cpp。
+
+/// std.crypto
+///
+/// ハッシュと、安全な乱数。
+///
+/// ハッシュは、元に戻せない短い指紋を作る。中身が同じか比べたり、
+/// 覚えておいて後で見比べたりするのに使う。
+/// 乱数は、当てられては困るもの（合言葉、鍵、印）に使う。
+/// さいころのような、当てられてもよい乱数は std.math の方が速い。
+///
+/// ハッシュは bytes で返る。目に見える形にするには bytes の to_hex() を使い、
+/// 戻すには string の from_hex() を使う。
+///
+/// 例:
+///   import std.crypto;
+///   print(crypto.sha256("さめ").to_hex());
+///   // b413c5bcae54c44566a68120d42e6f4801fa98d375ff61442d2f628e69cdf6b6
+module std.crypto;
+
+/// SHA-256 のハッシュ。32 バイト返す。
+///
+/// 迷ったらこれを使う。string を渡すと、その UTF-8 の並びをそのまま数える。
+///
+/// 引数:
+///   data   ハッシュにしたいもの
+///
+/// 例:
+///   print(crypto.sha256("abc").to_hex());
+///   // ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+func sha256(data: bytes) -> bytes;
+func sha256(data: string) -> bytes;
+
+/// SHA-512 のハッシュ。64 バイト返す。
+///
+/// 例:
+///   print(crypto.sha512("abc").to_hex().len());   // 128
+func sha512(data: bytes) -> bytes;
+func sha512(data: string) -> bytes;
+
+/// SHA-1 のハッシュ。20 バイト返す。
+///
+/// 例:
+///   print(crypto.sha1("abc").to_hex());
+///   // a9993e364706816aba3e25717850c26c9cd0d89d
+///
+/// 注意:
+///   もう安全ではない。中身が違うのに同じ指紋になるものを、人が作れてしまう。
+///   古い決まりに合わせるときだけ使い、新しく作るものには sha256 を使う。
+func sha1(data: bytes) -> bytes;
+func sha1(data: string) -> bytes;
+
+/// MD5 のハッシュ。16 バイト返す。
+///
+/// 例:
+///   print(crypto.md5("abc").to_hex());
+///   // 900150983cd24fb0d6963f7d28e17f72
+///
+/// 注意:
+///   sha1 よりもっと安全ではない。取り違えを見つけるためだけに使う。
+///   合言葉や署名には使わない。
+func md5(data: bytes) -> bytes;
+func md5(data: string) -> bytes;
+
+/// 鍵つきのハッシュ（HMAC-SHA-256）。32 バイト返す。
+///
+/// 鍵を知っている人だけが同じ値を作れる。「確かに自分が作った」という印になる。
+/// 鍵を知らずに sha256 で作り直すことはできない。
+///
+/// 引数:
+///   key    合言葉。人に見せない
+///   data   印を付けたいもの
+///
+/// 例:
+///   print(crypto.hmac_sha256("key", "さめ").to_hex());
+///   // 77cef4ed2af2a6624a09211542a025748180c17022b7eeb0b5880fd03dcab152
+func hmac_sha256(key: bytes, data: bytes) -> bytes;
+func hmac_sha256(key: bytes, data: string) -> bytes;
+func hmac_sha256(key: string, data: bytes) -> bytes;
+func hmac_sha256(key: string, data: string) -> bytes;
+
+/// 鍵つきのハッシュ（HMAC-SHA-512）。64 バイト返す。
+///
+/// 例:
+///   print(crypto.hmac_sha512("key", "さめ").len());   // 64
+func hmac_sha512(key: bytes, data: bytes) -> bytes;
+func hmac_sha512(key: bytes, data: string) -> bytes;
+func hmac_sha512(key: string, data: bytes) -> bytes;
+func hmac_sha512(key: string, data: string) -> bytes;
+
+/// 同じ中身かどうかを、時間の差が出ない形で比べる。
+///
+/// == と結果は同じだが、掛かる時間が中身で変わらない。
+/// 合言葉や印を見比べるときは、こちらを使う。
+/// 途中まで合っているほど返事が遅い、という差から中身を当てられるため。
+///
+/// 例:
+///   var a = crypto.hmac_sha256("key", "さめ");
+///   var b = crypto.hmac_sha256("key", "さかな");
+///   print(crypto.equal(a, a));   // true
+///   print(crypto.equal(a, b));   // false
+func equal(a: bytes, b: bytes) -> bool;
+func equal(a: string, b: string) -> bool;
+
+/// 当てられては困る乱数を、n バイト取る。
+///
+/// 機器の真の乱数を先に試し、取れなければ暗号学的に安全な乱数で埋める。
+/// どちらから取れたかは source() で分かる。
+/// 弱い乱数で埋めてごまかすことはしない（もとが無ければ実行時エラー）。
+///
+/// 引数:
+///   n   ほしいバイト数。0 から 1048576 まで
+///
+/// 例:
+///   print(crypto.random_bytes(16).len());   // 16
+///
+/// 注意:
+///   乱数のもとを持たない処理系では実行時エラーになる。
+///   先に source() を見れば、持っているかどうかが分かる。
+func random_bytes(n: int) -> bytes;
+
+/// lo 以上 hi 以下の乱数を1つ。random_bytes と同じもとから取る。
+///
+/// どの数も同じ出やすさになるよう、偏る分は引き直している。
+///
+/// 引数:
+///   lo   下限。この数も出る
+///   hi   上限。この数も出る
+///
+/// 例:
+///   var d = crypto.random_int(1, 6);
+///   print(d >= 1 && d <= 6);   // true
+func random_int(lo: int, hi: int) -> int;
+
+/// 重ならない名前を作る。UUID の版4（乱数から作る形）で、36 文字の文字列。
+///
+/// 名前に 4 が付いているのは、この形が版4だという意味。
+/// 時刻や機器の番号からは作らないので、いつどこで作ったかは残らない。
+///
+/// 例:
+///   print(crypto.uuid4().len());                  // 36
+///   print(crypto.uuid4() == crypto.uuid4());      // false
+func uuid4() -> string;
+
+/// 乱数がどこから取れているかを返す。呼ぶたびに、その場で確かめる。
+///
+/// 戻り値:
+///   "true"     機器の真の乱数。雑音から作っていて、先が読めない
+///   "secure"   暗号学的に安全な乱数。真の乱数が取れないときの受け皿
+///   "none"     もとが無い。乱数の関数は実行時エラーになる
+///
+/// 例:
+///   var s = crypto.source();
+///   print(s == "true" || s == "secure");   // true（乱数を使える処理系）
+func source() -> string;

@@ -34,6 +34,7 @@ s.bytes().len();  // 10
 | `trim()` `upper()` `lower()` | 整形 |
 | `replace(from, to)` | 置換 |
 | `bytes()` | `bytes` に変換 |
+| `from_hex()` | 16 進として読み `bytes?` に変換 |
 
 ## bytes
 
@@ -44,6 +45,7 @@ var b = b"\x01\x02";
 b.push(0x03);
 b.len();          // 3
 b.to_string();    // UTF-8 として解釈。不正なら none
+b.to_hex();       // "010203" 16 進の文字列へ
 ```
 
 ## list&lt;T&gt;

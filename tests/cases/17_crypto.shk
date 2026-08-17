@@ -1,0 +1,58 @@
+// std.crypto — ハッシュと、当てられては困る乱数
+import std.crypto;
+
+func main() -> int {
+  // 答えの決まっているもの（FIPS 180 / RFC 4231 の見本）
+  print(crypto.sha256("").to_hex());
+  print(crypto.sha256("abc").to_hex());
+  // 締めが2つ目のまとまりにはみ出す長さ
+  print(crypto.sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq").to_hex());
+  print(crypto.sha512("abc").to_hex());
+  print(crypto.sha1("abc").to_hex());
+  print(crypto.md5("The quick brown fox jumps over the lazy dog").to_hex());
+  print(crypto.hmac_sha256("key", "The quick brown fox jumps over the lazy dog").to_hex());
+  print(crypto.hmac_sha512("key", "The quick brown fox jumps over the lazy dog").to_hex());
+
+  // 鍵がまとまり（64 バイト）より長いときは、鍵を先にハッシュする
+  var long_key = b"";
+  for var i in range(131) { long_key.push(0xaa); }
+  print(crypto.hmac_sha256(long_key, "Test Using Larger Than Block-Size Key - Hash Key First").to_hex());
+
+  // string と bytes は同じ結果になる
+  print(crypto.equal(crypto.sha256("さめ"), crypto.sha256("さめ".bytes())));
+  print("さめ".bytes().to_hex());   // string は UTF-8 の並びをそのまま渡している
+
+  // 16 進の行き来
+  var d = crypto.sha256("さめ");
+  print(crypto.equal(d.to_hex().from_hex()!, d));
+  print(b"\x00\x0f\xff".to_hex());
+  print("00FF".from_hex()!.len());
+  print("0".from_hex() == none);
+  print("zz".from_hex() == none);
+
+  // 長さ
+  print(crypto.sha256("a").len());
+  print(crypto.sha512("a").len());
+  print(crypto.sha1("a").len());
+  print(crypto.md5("a").len());
+  print(crypto.hmac_sha256("k", "a").len());
+  print(crypto.hmac_sha512("k", "a").len());
+
+  // 中身が1バイト違えば、まったく違う指紋になる
+  print(crypto.equal(crypto.sha256("さめ"), crypto.sha256("さめ！")));
+
+  // 乱数。値は毎回変わるので、形だけを見る
+  var s = crypto.source();
+  print(s == "true" || s == "secure");
+  print(crypto.random_bytes(0).len());
+  print(crypto.random_bytes(1000).len());
+  var n = crypto.random_int(1, 6);
+  print(n >= 1 && n <= 6);
+  print(crypto.random_int(5, 5));
+  var u = crypto.uuid4();
+  print(u.len());
+  print(u.sub(14, 15));
+  print(crypto.uuid4() == crypto.uuid4());
+  print(crypto.equal(crypto.random_bytes(16), crypto.random_bytes(16)));
+  return 0;
+}

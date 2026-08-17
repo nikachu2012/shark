@@ -34,6 +34,7 @@ Engine::Engine(const Config& cfg)
   if (cfg.with_text) register_text(reg_);
   if (cfg.with_json) register_json(reg_);
   if (cfg.with_os) register_os(reg_);
+  if (cfg.with_crypto) register_crypto(reg_);
   if (cfg.with_test) register_test(reg_);
 }
 

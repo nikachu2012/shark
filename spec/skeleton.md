@@ -24,7 +24,7 @@
 | 区分 | 中身 |
 |---|---|
 | 必ず入れる | 字句解析、構文解析、型検査、バイトコード生成、仮想マシン、値と参照カウント、メモリの上限、診断、必須ライブラリ（`time` `math` `task`） |
-| 入れておく | 実行時コンパイル、`file` `path` `text` `fmt` `json` `net` `http` `os` `ui` `test` |
+| 入れておく | 実行時コンパイル、`file` `path` `text` `fmt` `json` `net` `http` `os` `crypto` `ui` `test` |
 | 入れない | コマンドライン、ファイルの読み込み、端末への出力（[frontend.md](frontend.md)） |
 
 標準ライブラリは**全部入れた状態**で配る。
@@ -65,7 +65,7 @@ core/
     web
   lib/       標準ライブラリ        ← 全部入れておく
     time  math  task
-    file  text  json  ui  ...
+    file  text  json  crypto  ui  ...
 ```
 
 - `platform/` は1つ選んで使う。新しい機種に載せるときは、ここに1つ足す

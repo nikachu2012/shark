@@ -1,6 +1,10 @@
 // desktop.cpp — Windows / macOS / Linux 向けの移植層
 //
 // ここを自分の機種のものに差し替える（spec/skeleton.md）。
+#if defined(_WIN32)
+#define _CRT_RAND_S   // 暗号用の乱数 rand_s を使う。stdlib.h より前に要る
+#endif
+
 #include "platform.h"
 
 #include <stdio.h>
@@ -14,10 +18,27 @@
 #else
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
+
+#if defined(__APPLE__)
+#include <sys/random.h>   // getentropy
+#endif
+
+// 真の乱数は機種の道具に頼る。x86 の RDSEED は雑音源から直に取る命令で、
+// 待たずに「いま取れる分」を返す（spec/runtime/platform.md）
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#define SHARK_X86 1
+#if defined(_MSC_VER)
+#include <immintrin.h>
+#include <intrin.h>
+#else
+#include <cpuid.h>
+#endif
 #endif
 
 namespace shark {
@@ -294,11 +315,94 @@ bool o_run(const char* cmd, const Vec<Str>& args, int* code, Str* out, Str* err)
 }
 const PlatformOS kOS = {o_name, o_env, o_set_env, o_cwd, o_chdir, o_temp_dir, o_run};
 
+// --- 乱数のもと ---
+// std.crypto が使う。真の乱数（機器の雑音）と、OS の暗号用乱数の2つを渡す。
+#if defined(SHARK_X86)
+// RDSEED を持っているか。CPUID の 7 番、EBX の 18 ビット目。一度だけ調べて覚える
+bool has_rdseed() {
+  static int known = -1;
+  if (known >= 0) return known != 0;
+  unsigned int a = 0, b = 0, c = 0, d = 0;
+#if defined(_MSC_VER)
+  int regs[4];
+  __cpuid(regs, 0);
+  if (regs[0] < 7) { known = 0; return false; }
+  __cpuidex(regs, 7, 0);
+  b = (unsigned int)regs[1];
+#else
+  if (__get_cpuid_max(0, 0) < 7) { known = 0; return false; }
+  __cpuid_count(7, 0, a, b, c, d);
+#endif
+  (void)a; (void)c; (void)d;
+  known = (b & (1u << 18)) ? 1 : 0;
+  return known != 0;
+}
+// 雑音源が追いつかないと失敗する。少しだけ待ち直して、それでも駄目なら諦める
+bool rdseed64(uint64_t* out) {
+  for (int retry = 0; retry < 32; retry++) {
+#if defined(_MSC_VER)
+    unsigned long long v = 0;
+    if (_rdseed64_step(&v)) { *out = (uint64_t)v; return true; }
+#else
+    uint64_t v = 0;
+    unsigned char ok = 0;
+    __asm__ volatile("rdseed %0; setc %1" : "=r"(v), "=qm"(ok)::"cc");
+    if (ok) { *out = v; return true; }
+#endif
+  }
+  return false;
+}
+#endif
+
+bool r_true(unsigned char* buf, int n) {
+#if defined(SHARK_X86)
+  if (!has_rdseed()) return false;
+  for (int i = 0; i < n; i += 8) {
+    uint64_t v = 0;
+    if (!rdseed64(&v)) return false;
+    for (int k = 0; k < 8 && i + k < n; k++) buf[i + k] = (unsigned char)(v >> (k * 8));
+  }
+  return true;
+#else
+  (void)buf; (void)n;   // 真の乱数を出す道具が無い機種
+  return false;
+#endif
+}
+
+bool r_secure(unsigned char* buf, int n) {
+#if defined(_WIN32)
+  for (int i = 0; i < n; i += 4) {   // rand_s は OS の暗号用乱数を返す
+    unsigned int v = 0;
+    if (rand_s(&v) != 0) return false;
+    for (int k = 0; k < 4 && i + k < n; k++) buf[i + k] = (unsigned char)(v >> (k * 8));
+  }
+  return true;
+#elif defined(__APPLE__)
+  for (int i = 0; i < n; i += 256) {   // getentropy は一度に 256 バイトまで
+    int m = n - i < 256 ? n - i : 256;
+    if (getentropy(buf + i, (size_t)m) != 0) return false;
+  }
+  return true;
+#else
+  int fd = open("/dev/urandom", O_RDONLY);
+  if (fd < 0) return false;
+  int got = 0;
+  while (got < n) {
+    int r = (int)read(fd, buf + got, (size_t)(n - got));
+    if (r <= 0) { if (r < 0 && errno == EINTR) continue; close(fd); return false; }
+    got += r;
+  }
+  close(fd);
+  return true;
+#endif
+}
+const PlatformRandom kRandom = {r_true, r_secure};
+
 const Platform kDesktop = {
     d_alloc, d_realloc, d_free, d_fatal,
     d_now, d_mono, d_sleep, d_local_offset,
     d_write_out, d_write_err, d_read_line, d_exit,
-    &kFile, &kOS};
+    &kFile, &kOS, &kRandom};
 
 }  // namespace
 

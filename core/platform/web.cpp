@@ -24,6 +24,7 @@ void web_set_sink(WebSink fn, void* ud) { g_sink = fn; g_sink_ud = ud; }
 #if defined(__EMSCRIPTEN__)
 
 #include <dirent.h>
+#include <emscripten.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -170,11 +171,31 @@ bool o_run(const char* cmd, const Vec<Str>& args, int* code, Str* out, Str* err)
 }
 const PlatformOS kOS = {o_name, o_env, o_set_env, o_cwd, o_chdir, o_temp_dir, o_run};
 
+// --- 乱数のもと ---
+// ブラウザの暗号用乱数（crypto.getRandomValues）を借りる。
+// 雑音源そのものには手が届かないので、真の乱数は持たない
+bool w_secure(unsigned char* buf, int n) {
+  int ok = EM_ASM_INT({
+    var c = (typeof crypto !== 'undefined' && crypto.getRandomValues) ? crypto : null;
+    if (!c && typeof require === 'function') {          // node で動かすとき
+      try { c = require('crypto').webcrypto; } catch (e) { c = null; }
+    }
+    if (!c || !c.getRandomValues) return 0;
+    for (var i = 0; i < $1; i += 65536) {               // 一度に 65536 バイトまで
+      var end = Math.min(i + 65536, $1);
+      c.getRandomValues(HEAPU8.subarray($0 + i, $0 + end));
+    }
+    return 1;
+  }, (int)(size_t)buf, n);
+  return ok != 0;
+}
+const PlatformRandom kRandom = {0, w_secure};
+
 const Platform kWeb = {
     w_alloc, w_realloc, w_free, w_fatal,
     w_now, w_mono, w_sleep, w_local_offset,
     w_write_out, w_write_err, w_read_line, w_exit,
-    &kFile, &kOS};
+    &kFile, &kOS, &kRandom};
 
 }  // namespace
 

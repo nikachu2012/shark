@@ -364,6 +364,41 @@ static NativeStatus b_sub(VM& vm, Value* a, int n, Value& out) {
   out = mk_bytes(s.sub((int)st, (int)(en - st)));
   return N_Ok;
 }
+// 16 進の行き来。バイト列は目に見えないので、見せたり書き残したりするのに使う
+static NativeStatus b_to_hex(VM& vm, Value* a, int n, Value& out) {
+  (void)vm; (void)n;
+  static const char* kDigits = "0123456789abcdef";
+  const Str& s = S(a, 0);
+  Str r;
+  r.reserve(s.size() * 2);
+  for (int i = 0; i < s.size(); i++) {
+    unsigned char v = (unsigned char)s[i];
+    r.push(kDigits[v >> 4]);
+    r.push(kDigits[v & 15]);
+  }
+  out = mk_str(r);
+  return N_Ok;
+}
+static int hex_value(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+static NativeStatus s_from_hex(VM& vm, Value* a, int n, Value& out) {
+  (void)vm; (void)n;
+  const Str& s = S(a, 0);
+  if (s.size() % 2 != 0) { out = mk_none(); return N_Ok; }
+  Str r;
+  r.reserve(s.size() / 2);
+  for (int i = 0; i < s.size(); i += 2) {
+    int hi = hex_value(s[i]), lo = hex_value(s[i + 1]);
+    if (hi < 0 || lo < 0) { out = mk_none(); return N_Ok; }
+    r.push((char)(hi * 16 + lo));
+  }
+  out = mk_bytes(r);
+  return N_Ok;
+}
 static NativeStatus i_to_bytes(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)n;
   Str s;
@@ -550,6 +585,8 @@ void register_methods(Registry& r) {
   r.add_untyped("bytes.to_string", b_to_string);
   r.add_untyped("bytes.list", b_list);
   r.add_untyped("bytes.sub", b_sub);
+  r.add_untyped("bytes.to_hex", b_to_hex);
+  r.add_untyped("string.from_hex", s_from_hex);
 
   r.add_untyped("int.to_bytes", i_to_bytes);
   r.add_untyped("int.wrapping_add", i_wadd);

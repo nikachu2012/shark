@@ -159,6 +159,7 @@ func main() -> int {
 | [library/file.md](library/file.md) | `std.file` ファイル |
 | [library/path.md](library/path.md) | `std.path` パス |
 | [library/math.md](library/math.md) | `std.math` 数学と乱数 |
+| [library/crypto.md](library/crypto.md) | `std.crypto` ハッシュと安全な乱数 |
 | [library/text.md](library/text.md) | `std.text` Unicode と正規表現 |
 | [library/fmt.md](library/fmt.md) | `std.fmt` 桁揃え |
 | [library/json.md](library/json.md) | `std.json` JSON |

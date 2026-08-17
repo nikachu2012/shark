@@ -18,6 +18,7 @@
 | `std.file` | ファイルの読み書き | [file.md](file.md) |
 | `std.path` | パスの組み立てと分解 | [path.md](path.md) |
 | `std.math` | 数学、丸め、乱数 | [math.md](math.md) |
+| `std.crypto` | ハッシュと、当てられては困る乱数 | [crypto.md](crypto.md) |
 | `std.text` | Unicode、正規表現、文字コード | [text.md](text.md) |
 | `std.fmt` | 桁揃え、桁区切り | [fmt.md](fmt.md) |
 | `std.json` | JSON の読み書き | [json.md](json.md) |
@@ -41,10 +42,11 @@
 | 区分 | モジュール |
 |---|---|
 | 必須 | `time` `math` `task` |
-| 任意 | `file` `path` `text` `fmt` `json` `net` `http` `os` `ui` `test` |
+| 任意 | `file` `path` `text` `fmt` `json` `net` `http` `os` `crypto` `ui` `test` |
 
 `text` と `json` は OS の支援こそ要らないが、Unicode の表を抱えるため任意にする。
-組み込み向けでは外せる。
+組み込み向けでは外せる。`crypto` はハッシュだけなら必須項目で足りるが、
+乱数のもとを移植層に頼るため任意にする（[crypto.md](crypto.md)）。
 
 どのモジュールを入れるかは、**使う側が選ぶ**。
 雛形は全部入れた状態で配るので、要らないものは**ビルドに含めない**

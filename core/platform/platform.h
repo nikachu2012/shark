@@ -40,6 +40,18 @@ struct PlatformOS {
   bool (*run)(const char* cmd, const Vec<Str>& args, int* code, Str* out, Str* err);
 };
 
+// --- 任意機能：乱数のもと -------------------------------------------------
+//
+// std.crypto が使う。2つとも 0 でよく、その場合 crypto の乱数は使えない。
+// 埋める順は true_bytes が先で、取れなければ secure_bytes に落ちる。
+// どちらから取れたかは crypto.source() で分かる（spec/library/crypto.md）。
+struct PlatformRandom {
+  // 機器の雑音から作る真の乱数。無い機種や、雑音が足りないときは false
+  bool (*true_bytes)(unsigned char* buf, int n);
+  // OS が渡す暗号学的に安全な乱数。取れなければ false
+  bool (*secure_bytes)(unsigned char* buf, int n);
+};
+
 // --- 必須 ----------------------------------------------------------------
 struct Platform {
   void* (*alloc)(size_t n);
@@ -57,8 +69,9 @@ struct Platform {
   bool (*read_line)(Str* out);  // false は終端
   void (*exit_process)(int code);
 
-  const PlatformFile* file;  // 無ければ 0
-  const PlatformOS*   os;    // 無ければ 0
+  const PlatformFile*   file;    // 無ければ 0
+  const PlatformOS*     os;      // 無ければ 0
+  const PlatformRandom* random;  // 無ければ 0
 };
 
 // いま使っている移植層。差し替えるときは platform_set() を呼ぶ

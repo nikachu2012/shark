@@ -43,6 +43,7 @@ $root/core/lib/format.cpp $root/core/lib/builtin.cpp $root/core/lib/math.cpp \
 $root/core/lib/time.cpp $root/core/lib/task.cpp $root/core/lib/fmt.cpp \
 $root/core/lib/path.cpp $root/core/lib/file.cpp $root/core/lib/os.cpp \
 $root/core/lib/text.cpp $root/core/lib/json.cpp $root/core/lib/test.cpp \
+$root/core/lib/crypto.cpp \
 $here/shark_web.cpp"
 
 # ---------------------------------------------------------------- Monaco Editor

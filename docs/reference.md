@@ -159,6 +159,8 @@ var n = int("123");      // 失敗しうるので int? が返る
 var f = float(1);        // 1.0
 var s = string(42);      // "42"
 var b = s.bytes();       // バイト列へ
+var h = b.to_hex();      // 16 進の文字列へ（"e38195..."）
+var b2 = h.from_hex();   // 16 進から戻す。読めなければ none
 ```
 
 → [spec/types/primitive.md](../spec/types/primitive.md) / [collection.md](../spec/types/collection.md) / [conversion.md](../spec/types/conversion.md)
@@ -673,6 +675,7 @@ int(s);  float(s);  string(v);  bool(s);// 型変換
 | `std.file` | ファイルの読み書き | [file.md](../spec/library/file.md) |
 | `std.path` | パスの組み立てと分解 | [path.md](../spec/library/path.md) |
 | `std.math` | 数学、丸め、乱数 | [math.md](../spec/library/math.md) |
+| `std.crypto` | ハッシュと安全な乱数 | [crypto.md](../spec/library/crypto.md) |
 | `std.text` | Unicode、正規表現 | [text.md](../spec/library/text.md) |
 | `std.fmt` | 桁揃え、桁区切り | [fmt.md](../spec/library/fmt.md) |
 | `std.json` | JSON の読み書き | [json.md](../spec/library/json.md) |

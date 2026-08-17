@@ -30,7 +30,9 @@ const Platform kConsole = {
     c_now, c_mono, c_sleep, c_local_offset,
     c_write_out, c_write_err, c_read_line, c_exit,
     0,  // file なし
-    0   // os なし
+    0,  // os なし
+    0   // 乱数のもとなし（機種の乱数器を持っているなら PlatformRandom を埋める。
+        //   埋めるまで std.crypto の乱数は実行時エラーになる。ハッシュは使える）
 };
 
 }  // namespace

@@ -2302,6 +2302,7 @@ bool Checker::resolve_builtin_method(Node* call, Type* recv, const Str& name, Ve
       else if (name == "lower" && n == 0) { nat = "string.lower"; ret = ts; }
       else if (name == "replace" && n == 2) { nat = "string.replace"; ret = ts; want.push(ts); want.push(ts); }
       else if (name == "bytes" && n == 0) { nat = "string.bytes"; ret = t_.t_bytes(); }
+      else if (name == "from_hex" && n == 0) { nat = "string.from_hex"; ret = t_.optional_of(t_.t_bytes()); }
       else if (name == "chars" && n == 0) { nat = "string.chars"; ret = t_.list_of(ts); }
       else if (name == "compare" && n == 1) { want.push(ts); ret = ti; call->opcode = CK_CmpDyn; }
       break;
@@ -2311,6 +2312,7 @@ bool Checker::resolve_builtin_method(Node* call, Type* recv, const Str& name, Ve
       else if (name == "to_string" && n == 0) { nat = "bytes.to_string"; ret = t_.optional_of(ts); }
       else if (name == "list" && n == 0) { nat = "bytes.list"; ret = t_.list_of(ti); }
       else if (name == "sub" && n == 2) { nat = "bytes.sub"; ret = t_.t_bytes(); want.push(ti); want.push(ti); }
+      else if (name == "to_hex" && n == 0) { nat = "bytes.to_hex"; ret = ts; }
       else if (name == "compare" && n == 1) { want.push(t_.t_bytes()); ret = ti; call->opcode = CK_CmpDyn; }
       break;
     case T_List: {

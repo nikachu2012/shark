@@ -92,6 +92,16 @@ class string {
   ///   print("さめ".bytes().len());   // 6
   func bytes() -> bytes;
 
+  /// 16 進の文字列として読み、バイト列にする。
+  ///
+  /// 大文字と小文字のどちらでも読める。
+  /// 16 進でない字が混じっていたり、長さが奇数なら none。
+  ///
+  /// 例:
+  ///   print("01ff".from_hex()!.len());   // 2
+  ///   print("xyz".from_hex() == none);   // true
+  func from_hex() -> bytes?;
+
   /// 1文字ずつの配列にする。
   ///
   /// 例:
@@ -142,6 +152,16 @@ class bytes {
   /// 例:
   ///   print("さめ".bytes().sub(0, 3).to_string() ?? "");   // さ
   func sub(start: int, end: int) -> bytes;
+
+  /// 16 進の文字列にする。小文字で、1バイトが2文字になる。
+  ///
+  /// バイト列はそのままでは目に見えないので、
+  /// 見せたり書き残したりするときに使う。from_hex() で元に戻せる。
+  ///
+  /// 例:
+  ///   print(b"\x01\xff".to_hex());              // 01ff
+  ///   print("さめ".bytes().to_hex().from_hex()! == "さめ".bytes());   // true
+  func to_hex() -> string;
 
   /// 並べ替えのための比較。
   ///

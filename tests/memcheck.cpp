@@ -181,6 +181,18 @@ int main() {
               "  var a = may(\"x\") ?? \"\";\n"
               "  if var b = may(\"\") { return b.len(); } else var e { return a.len() + e.message().len(); }\n"
               "}");
+  check_clean("ハッシュと乱数",
+              "import std.crypto;\n"
+              "func main() -> int {\n"
+              "  var d = crypto.sha256(\"さめ\");\n"
+              "  var h = d.to_hex();\n"
+              "  var back = h.from_hex() ?? b\"\";\n"
+              "  var m = crypto.hmac_sha256(\"key\", d);\n"
+              "  var r = crypto.random_bytes(64);\n"
+              "  var u = crypto.uuid4();\n"
+              "  if crypto.equal(back, d) { return m.len() + r.len() + u.len(); }\n"
+              "  return 0;\n"
+              "}");
   check_clean("実行時エラーで止まったあと",
               "func main() -> int { var xs = [1]; var s = \"ながい文字列\" + \"ですよ\"; return xs[5] + s.len(); }");
 

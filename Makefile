@@ -22,7 +22,8 @@ CORE_SRC = \
   core/platform/desktop.cpp core/platform/console.cpp \
   core/lib/format.cpp core/lib/builtin.cpp core/lib/math.cpp core/lib/time.cpp \
   core/lib/task.cpp core/lib/fmt.cpp core/lib/path.cpp core/lib/file.cpp \
-  core/lib/os.cpp core/lib/text.cpp core/lib/json.cpp core/lib/test.cpp
+  core/lib/os.cpp core/lib/text.cpp core/lib/json.cpp core/lib/test.cpp \
+  core/lib/crypto.cpp
 
 FRONT_SRC = frontend/main.cpp
 

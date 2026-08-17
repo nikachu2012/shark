@@ -57,6 +57,7 @@ class Registry {
 // 標準ライブラリの登録（lib/ の各ファイル）
 void register_builtin(Registry& r);   // import なしで使えるもの
 void register_math(Registry& r);
+void register_crypto(Registry& r);
 void register_time(Registry& r);
 void register_task(Registry& r);
 void register_fmt(Registry& r);

@@ -30,11 +30,12 @@ struct Config {
   int max_call_depth;   // 呼び出しの深さの上限
   size_t memory_limit;  // 実行中のプログラムが使ってよい量（バイト）。超えたら実行時エラー。0 は上限なし
   // 入れるモジュール（必須の time / math / task は常に入る）
-  bool with_file, with_path, with_text, with_fmt, with_json, with_os, with_test;
+  bool with_file, with_path, with_text, with_fmt, with_json, with_os, with_crypto, with_test;
   Config()
       : lang(LANG_JA), strict(false), stack_size(65536), task_stack_size(4096),
         max_call_depth(10000), memory_limit(64u << 20), with_file(true), with_path(true),
-        with_text(true), with_fmt(true), with_json(true), with_os(true), with_test(true) {}
+        with_text(true), with_fmt(true), with_json(true), with_os(true), with_crypto(true),
+        with_test(true) {}
 };
 
 // import を解決するとき、ホストにソースを尋ねる

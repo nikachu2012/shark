@@ -32,11 +32,16 @@ var m = int("12") ?? 0;  // 12
 |---|---|---|---|---|---|
 | `int` | — | `float(n)` | `string(n)` | `n.to_bytes()` | — |
 | `float` | `int(f)` 切り捨て | — | `string(f)` | — | — |
-| `string` | `int(s)` → `int?` | `float(s)` → `float?` | — | `s.bytes()` | `s.chars()` |
-| `bytes` | — | — | `b.to_string()` → `string?` | — | `b.list()` |
+| `string` | `int(s)` → `int?` | `float(s)` → `float?` | — | `s.bytes()` / `s.from_hex()` → `bytes?` | `s.chars()` |
+| `bytes` | — | — | `b.to_string()` → `string?` / `b.to_hex()` | — | `b.list()` |
 | `list<T>` | — | — | `xs.join(sep)`（`T` が `string` のとき） | — | — |
 
 `bytes` → `string` が `string?` なのは、UTF-8 として不正なバイト列がありうるため。
+
+`to_hex()` と `from_hex()` は 16 進の行き来。`s.bytes()` が文字の並びをそのまま渡すのに対し、
+`s.from_hex()` は文字を**16 進の数として読む**（`"01ff"` → 2 バイト）。
+16 進でない字や奇数の長さなら `none`。ハッシュや鍵を目に見える形にするのに使う
+（[../library/crypto.md](../library/crypto.md)）。
 
 ## クラスの変換
 
