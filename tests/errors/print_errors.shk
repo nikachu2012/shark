@@ -1,0 +1,18 @@
+// print に渡せないもの
+
+class Priv {
+  var n: int;
+  func init(n: int) { this.n = n; }
+  // public が無いので、外からは呼べない
+  func to_string() -> string { return f"priv({this.n})"; }
+}
+
+func nothing() -> void { }
+
+func main() -> int {
+  print(nothing());     // 値がない
+  print(Priv(1));       // to_string() が見えない
+  print();              // 引数が足りない
+  print(1, 2);          // 多すぎる
+  return 0;
+}

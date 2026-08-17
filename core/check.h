@@ -95,6 +95,10 @@ class Checker {
                         Vec<Node*>& args, const Str& shown_name,
                         const Vec<Str>* cls_gparams = 0, const Vec<Type*>* cls_targs = 0);
   bool resolve_convert(Node* call, const Str& name, Vec<Node*>& args);
+  // クラスに引数なしの to_string() があるか（誤りは出さない）
+  bool has_to_string(Type* recv);
+  // print(v) の v を v.to_string() に置き換える。置き換えたら true
+  bool wrap_to_string(Node* call, Type* recv);
   bool resolve_ctor(Node* call, ClassInfo* c, Vec<Node*>& args, const Vec<Type*>& targs);
 
   // --- 変数 ---

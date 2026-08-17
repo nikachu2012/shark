@@ -8,28 +8,27 @@ module builtin;
 
 /// 標準出力に出して、改行する。
 ///
-/// この4つ以外の型（クラスなど）は string(v) で文字列にしてから渡す。
+/// どんな型でも渡せる（`Any` は「どんな型でも」の意味で、ここだけの書き方。
+/// 変数の型には書けない）。クラスは `to_string()` があればそれを呼び、
+/// 無ければ `クラス名(メンバ: 値, ...)` の形で出す。
 ///
 /// 例:
 ///   print("さめ");      // さめ
 ///   print(42);          // 42
 ///   print(3.5);         // 3.5
 ///   print(true);        // true
-func print(v: string) -> void;
-func print(v: int) -> void;
-func print(v: float) -> void;
-func print(v: bool) -> void;
+///   print([1, 2]);      // [1, 2]
+func print(v: Any) -> void;
 
 /// 標準出力に出す。改行しない。
+///
+/// print と同じで、どんな型でも渡せる。
 ///
 /// 例:
 ///   write("名前: ");
 ///   write("さめ");
 ///   print("");          // ここで改行する
-func write(v: string) -> void;
-func write(v: int) -> void;
-func write(v: float) -> void;
-func write(v: bool) -> void;
+func write(v: Any) -> void;
 
 /// 標準入力から1行読む。改行は含まない。
 ///

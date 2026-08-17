@@ -6,8 +6,8 @@
 
 | 関数 | 説明 |
 |---|---|
-| `print(v: string)` `print(v: int)` `print(v: float)` `print(v: bool)` | 標準出力に出して改行する |
-| `write(v: string)` `write(v: int)` `write(v: float)` `write(v: bool)` | 改行せずに出す |
+| `print(v: Any)` | 標準出力に出して改行する。どんな型でも渡せる |
+| `write(v: Any)` | 改行せずに出す。どんな型でも渡せる |
 | `input() -> string?` | 標準入力から1行読む。まだ無ければ来るまで待つ。終端なら `none` |
 
 ```shark
@@ -20,13 +20,26 @@ var name = input() ?? "";
 `input()` は行が打たれるまで待つ。待っている間もホストは止まらない
 （[../runtime/embedding.md](../runtime/embedding.md)）。
 
-`print` は型ごとのオーバーロード（[../syntax.md](../syntax.md)）。
-クラスなど上の4つ以外は `string(v)` で文字列にしてから渡す。
-`string()` はクラスの `to_string()` を使う（[../types/conversion.md](../types/conversion.md)）。
+`print` と `write` はどんな型でも受け取る（`Any` は「どんな型でも」の意味で、
+ここだけの書き方。変数の型には書けない）。クラスを渡したときは、
+
+- `to_string()` があればそれを呼ぶ。`virtual` なら実際の型のものが呼ばれる
+- 無ければ `クラス名(メンバ: 値, ...)` の形で出す
 
 ```shark
-print(string(fish));
+print(fish);        // さめ(400cm)      to_string() があるとき
+print(rock);        // Rock(w: 3)       無いとき
 ```
+
+`T?` を渡したときは、値があれば同じように `to_string()` を呼び、無ければ `none` と出す。
+
+`to_string()` を外から呼べるようにするには `public` を付ける。
+呼び出しの差し替えは検査のときに決まるので、静的な型がクラスのときに働く。
+型引数のときは、制約に `to_string()` を持つインタフェースを書けば同じように呼ばれる。
+
+文字列そのものが要るときは `string(v)` を使う。
+`string()` はクラスの `to_string()` が無いと誤りになる
+（[../types/conversion.md](../types/conversion.md)）。
 
 ## 待つ・止める
 
@@ -82,5 +95,7 @@ for var i in range_step(10, 0, -2) { print(i); } // 10 8 6 4 2
 
 ## 注意
 
-`print` や `len` は、型ごとのオーバーロードとして定義されている。
+`len` は型ごとのオーバーロードとして定義されている。
 処理系だけの特別な仕組みは使っておらず、同じものをユーザーが書ける。
+
+`print` と `write` だけは例外で、どんな型でも受け取る。同じものはユーザーには書けない。

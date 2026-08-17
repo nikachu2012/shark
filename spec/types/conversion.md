@@ -41,11 +41,16 @@ var m = int("12") ?? 0;  // 12
 ## クラスの変換
 
 ユーザー定義のクラスを `string` にしたいときは `to_string()` メソッドを定義する。
-定義してあれば `string(obj)` と `f"{obj}"` の両方で使われる。
+定義してあれば `string(obj)`、`f"{obj}"`、`print(obj)` のどれでも使われる。
+外から呼ばせるので `public` を付ける。
 
 ```shark
 class Fish {
   var name: string;
-  func to_string() -> string { return this.name; }
+  public func to_string() -> string { return this.name; }
 }
 ```
+
+`string()` と `f"{}"` は `to_string()` が無いと誤りになる（E0127）。
+`print` と `write` だけは誤りにせず、`クラス名(メンバ: 値, ...)` の形で出す
+（[../library/builtin.md](../library/builtin.md)）。

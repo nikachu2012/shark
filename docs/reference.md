@@ -611,7 +611,21 @@ print(f"{name:*<10}");  // "さめ******" 埋め文字を指定
 幅は表示幅で数えます（全角は 2）。`{` `}` そのものは `{{` `}}` と書きます。
 日付は書式指定では扱わず、`time` の `format()` を使います。
 
-クラスに `to_string()` を定義すると、`string(obj)` で使われます。
+クラスに `public func to_string() -> string` を定義すると、`string(obj)` と
+`f"{obj}"` と `print(obj)` で使われます。`print` は `to_string()` が無いクラスでも渡せて、
+そのときは `クラス名(メンバ: 値, ...)` の形で出ます。
+
+```shark
+class Fish {
+  var name: string;
+  func init(n: string) { this.name = n; }
+  public func to_string() -> string { return this.name; }
+}
+class Rock { var w: int; func init(w: int) { this.w = w; } }
+
+print(Fish("さめ"));   // さめ
+print(Rock(3));        // Rock(w: 3)
+```
 
 → [spec/types/collection.md](../spec/types/collection.md)
 

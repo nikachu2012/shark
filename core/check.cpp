@@ -2212,6 +2212,69 @@ bool Checker::resolve_class_method(Node* call, Type* recv, const Str& name, Vec<
   return true;
 }
 
+// クラス（と、そのインタフェース）に引数なしの to_string() があるか。
+// 見えるかどうかまでは見ない。誤りは出さない
+bool Checker::has_to_string(Type* recv) {
+  if (!recv) return false;
+  if (is_optional(recv)) return has_to_string(recv->a);
+  // 型引数は、制約に書いたインタフェースが持っていれば呼べる
+  if (recv->kind == T_Generic) {
+    for (int i = 0; i < recv->constraints.size(); i++) {
+      ClassInfo* ic = recv->constraints[i];
+      for (int k = 0; k < ic->methods.size(); k++) {
+        FuncInfo* f = prog_.funcs[ic->methods[k].func];
+        if (f->name == "to_string" && f->params.size() == 0) return true;
+      }
+    }
+    return false;
+  }
+  if (recv->kind != T_Class || !recv->cls) return false;
+  for (ClassInfo* p = recv->cls; p; p = p->base) {
+    for (int i = 0; i < p->methods.size(); i++) {
+      FuncInfo* f = prog_.funcs[p->methods[i].func];
+      if (f->name == "to_string" && f->params.size() == 0) return true;
+    }
+    for (int i = 0; i < p->interfaces.size(); i++) {
+      ClassInfo* ic = p->interfaces[i];
+      for (int k = 0; k < ic->methods.size(); k++) {
+        FuncInfo* f = prog_.funcs[ic->methods[k].func];
+        if (f->name == "to_string" && f->params.size() == 0) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// print(v) の引数を v.to_string() の呼び出しに差し替える。
+// 呼び出しの節を新しく作って引数の場所に置くので、print 自体はそのまま残る。
+// T? のときは v?.to_string() にするので、値が無ければ none がそのまま出る
+bool Checker::wrap_to_string(Node* call, Type* recv) {
+  bool opt = is_optional(recv);
+  Type* base = opt ? recv->a : recv;
+  Node* obj = call->list[0];
+  Node* fld = arena_.make<Node>();
+  fld->kind = E_Field;
+  fld->name = Str("to_string");
+  fld->line = obj->line; fld->col = obj->col; fld->len = obj->len;
+  fld->a = obj;
+  fld->type = base;
+  fld->optional_chain = opt;
+
+  Node* mc = arena_.make<Node>();
+  mc->kind = E_Call;
+  mc->line = obj->line; mc->col = obj->col; mc->len = obj->len;
+  mc->a = fld;
+  mc->slot2 = 1;   // 受け手つきの呼び出し
+  Vec<Node*> no_args;
+  bool ok = base->kind == T_Generic
+                ? resolve_builtin_method(mc, base, Str("to_string"), no_args)
+                : resolve_class_method(mc, base, Str("to_string"), no_args, false);
+  if (!ok) return false;
+  if (opt && mc->type) mc->type = t_.optional_of(mc->type);
+  call->list[0] = mc;
+  return true;
+}
+
 // ------------------------------------------------------------------ 型ごとのメソッド
 bool Checker::resolve_builtin_method(Node* call, Type* recv, const Str& name, Vec<Node*>& args) {
   int n = args.size();
@@ -2547,22 +2610,24 @@ Type* Checker::check_call(Node* e) {
         err("E0140", diag_.L(name + "(...) には値を1つ渡します", name + "(...) takes one value"), e);
         return t_.t_void();
       }
+      // どんな型でも受け取る。クラスは to_string() があれば自動で呼び、
+      // 無ければ実行時に クラス名(メンバ: 値, ...) の形で出す
       Type* at = args[0]->type;
-      bool ok = at && (at->kind == T_Int || at->kind == T_Float || at->kind == T_Bool ||
-                       at->kind == T_String || at->kind == T_Bytes || at->kind == T_List ||
-                       at->kind == T_Map || at->kind == T_Unknown);
-      if (!ok) {
-        Diagnostic& d = diag_.error("E0148", diag_.L(name + " に " + type_name(at) + " はそのままでは渡せません",
-                                                     name + " cannot print " + type_name(at)));
+      if (at && at->kind == T_Void) {
+        Diagnostic& d = diag_.error("E0148", diag_.L(name + " に渡せる値がありません",
+                                                     name + " needs a value"));
         d.spans.push(Span(args[0]->line, args[0]->col, args[0]->len));
-        if (at && at->kind == T_Class)
-          d.help.push(diag_.L(Str("string(...) で文字列にしてから渡します: ") + name + "(string(v))\n"
-                              "  クラスには to_string() を定義します",
-                              Str("convert first: ") + name + "(string(v))"));
-        else if (at && is_optional(at))
-          note_optional(d, Str());
-        else
-          d.help.push(diag_.L("string(...) で文字列にしてから渡します", "convert with string(...) first"));
+        d.help.push(diag_.L("この呼び出しは何も返しません。返す関数を書くか、値を渡します",
+                            "this call returns nothing; pass a value instead"));
+      } else if (at && has_to_string(at)) {
+        // to_string() が見えないなど、差し替えに失敗したときのために、
+        // なぜ to_string() の話になったのかを添える
+        int before = diag_.size();
+        wrap_to_string(e, at);
+        for (int i = before; i < diag_.size(); i++)
+          diag_.items()[i].help.push(
+              diag_.L(name + " はクラスを出すとき to_string() を呼びます",
+                      name + " calls to_string() to show a class"));
       }
       e->opcode = CK_Native;
       e->resolved = reg_.find(name == "print" ? "print" : "write");
