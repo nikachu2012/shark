@@ -196,13 +196,188 @@ createShark().then((M) => {
         find(api2.modules.math.members, 'sqrt').doc.length > 0,
         JSON.stringify(find(api2.modules.math.members, 'sqrt')));
   check('型のメソッドが型検査の表から入っている',
-        find(api2.methods.list, 'push').sig === 'push(T) -> void' &&
-        find(api2.methods.map, 'get').sig === 'get(K) -> V?' &&
+        find(api2.methods.list, 'push').sig === 'push(v: T) -> void' &&
+        find(api2.methods.map, 'get').sig === 'get(k: K) -> V?' &&
         !!find(api2.methods.list, 'sort'),
         JSON.stringify(find(api2.methods.list, 'push')));
   check('組み込みのオーバーロードも拾えている',
-        (find(api2.builtins, 'print').overloads || []).length >= 3,
-        JSON.stringify(find(api2.builtins, 'print')));
+        (find(api2.builtins, 'len').overloads || []).length >= 3,
+        JSON.stringify(find(api2.builtins, 'len')));
+  check('print はどんな型でも受け取る',
+        find(api2.builtins, 'print').sig === 'print(v: Any) -> void',
+        JSON.stringify(find(api2.builtins, 'print').sig));
+
+  // --- 補完（lang.js）が、継承元の関数の雛形を出すか ---
+  // Monaco の代わりに、lang.js が使うところだけを持った偽物を渡す
+  function install() {
+    global.window = {};
+    delete require.cache[require.resolve('./lang.js')];
+    require('./lang.js');
+    var kinds = {};
+    ('Text Method Function Constructor Field Variable Class Module Property Keyword Snippet Constant Event')
+      .split(' ').forEach(function (k, i) { kinds[k] = i; });
+    var providers = {};
+    function keep(name) { return function (id, p) { providers[name] = p; }; }
+    global.window.SharkLang.install({
+      Range: function (a, b, c, d) {
+        this.startLineNumber = a; this.startColumn = b; this.endLineNumber = c; this.endColumn = d;
+      },
+      languages: {
+        CompletionItemKind: kinds, SymbolKind: kinds,
+        CompletionItemInsertTextRule: { InsertAsSnippet: 4 },
+        register: function () {}, setLanguageConfiguration: function () {},
+        setMonarchTokensProvider: function () {},
+        registerCompletionItemProvider: keep('completion'),
+        registerHoverProvider: keep('hover'),
+        registerSignatureHelpProvider: keep('signature'),
+        registerDefinitionProvider: keep('definition'),
+        registerDocumentSymbolProvider: keep('symbol')
+      },
+      editor: { defineTheme: function () {} }
+    }, loadApi());
+    return providers;
+  }
+
+  var modelCount = 0;
+  function model(text) {
+    var lines = text.split('\n');
+    var id = 'test' + (++modelCount);          // lang.js は id と版で覚えるので、毎回変える
+    return {
+      id: id, uri: id,
+      getValue: function () { return text; },
+      getVersionId: function () { return 1; },
+      getLineContent: function (n) { return lines[n - 1]; },
+      getValueInRange: function (r) {
+        if (r.startLineNumber === r.endLineNumber) {
+          return lines[r.startLineNumber - 1].slice(r.startColumn - 1, r.endColumn - 1);
+        }
+        var out = [lines[r.startLineNumber - 1].slice(r.startColumn - 1)];
+        for (var i = r.startLineNumber; i < r.endLineNumber - 1; i++) out.push(lines[i]);
+        out.push(lines[r.endLineNumber - 1].slice(0, r.endColumn - 1));
+        return out.join('\n');
+      },
+      getWordUntilPosition: function (p) {
+        var w = (/[A-Za-z_]\w*$/.exec(lines[p.lineNumber - 1].slice(0, p.column - 1)) || [''])[0];
+        return { word: w, startColumn: p.column - w.length, endColumn: p.column };
+      },
+      getWordAtPosition: function (p) {
+        var w = this.getWordUntilPosition(p);
+        return w.word ? w : null;
+      }
+    };
+  }
+
+  const lang = install();
+
+  function complete(src, line, column) {
+    return lang.completion.provideCompletionItems(
+      model(src), { lineNumber: line, column: column }).suggestions;
+  }
+  function stubs(list) {       // 雛形は、いちばん上に出るように sortText が 0 で始まる
+    return list.filter(function (s) { return (s.sortText || '')[0] === '0'; });
+  }
+  function stub(list, name) {
+    return stubs(list).filter(function (s) { return s.label === name; })[0];
+  }
+
+  //  1 class Shape {
+  //  2   virtual func area() -> float;
+  //  3   virtual func label() -> string;
+  //  4   virtual func draw() -> void { print("○"); }
+  //  5   func id() -> int { return 1; }
+  //  6 }
+  //  8 class Circle : Shape, Comparable {
+  // 10   override func label() -> string {
+  // 13   ←ここで補完する
+  const shapes = [
+    'class Shape {',
+    '  virtual func area() -> float;',
+    '  virtual func label() -> string;',
+    '  virtual func draw() -> void { print("○"); }',
+    '  func id() -> int { return 1; }',
+    '}',
+    '',
+    'class Circle : Shape, Comparable {',
+    '  var r: float;',
+    '  override func label() -> string {',
+    '    return "円";',
+    '  }',
+    '  ',
+    '}'
+  ].join('\n');
+
+  const inClass = complete(shapes, 13, 3);
+  const names = stubs(inClass).map(function (s) { return s.label; }).sort();
+  check('継承元の virtual が雛形として出る（書いたものと virtual でないものは出ない）',
+        names.join(' ') === 'area compare draw', names.join(' '));
+  check('純粋仮想は空の本体と、戻り値に合う値',
+        (stub(inClass, 'area') || {}).insertText === 'override func area() -> float {\n\t$0\n\treturn 0.0;\n}',
+        JSON.stringify((stub(inClass, 'area') || {}).insertText));
+  check('実装のある親は super を呼ぶところまで書く',
+        (stub(inClass, 'draw') || {}).insertText === 'override func draw() -> void {\n\t$0\n\tsuper.draw();\n}',
+        JSON.stringify((stub(inClass, 'draw') || {}).insertText));
+  check('インタフェースの This は自分のクラスになり、親の public も引き継ぐ',
+        (stub(inClass, 'compare') || {}).insertText ===
+        'public override func compare(other: Circle) -> int {\n\t$0\n\treturn 0;\n}',
+        JSON.stringify((stub(inClass, 'compare') || {}).insertText));
+
+  const typed = complete(shapes.replace('\n  \n}', '\n  override \n}'), 13, 12);
+  check('override と打った後は、雛形だけを出して override を重ねない',
+        typed.length > 0 && typed.length === stubs(typed).length &&
+        (stub(typed, 'area') || {}).insertText === 'func area() -> float {\n\t$0\n\treturn 0.0;\n}',
+        typed.length + ' 件 ' + JSON.stringify((stub(typed, 'area') || {}).insertText));
+
+  const withPublic = complete(shapes.replace('\n  \n}', '\n  public \n}'), 13, 10);
+  check('public と打った後は、public を重ねない',
+        (stub(withPublic, 'compare') || {}).insertText ===
+        'override func compare(other: Circle) -> int {\n\t$0\n\treturn 0;\n}',
+        JSON.stringify((stub(withPublic, 'compare') || {}).insertText));
+
+  check('メソッドの中では雛形を出さない', stubs(complete(shapes, 11, 5)).length === 0,
+        stubs(complete(shapes, 11, 5)).map(function (s) { return s.label; }).join(' '));
+
+  //  1 class Dog {
+  //  2   public var name: string;
+  //  3   var secret: int;
+  //  6   public func walk() -> void { }
+  //  7   func hidden() -> void { }
+  //  9 class Pup : Dog {
+  // 13   p. ←ここで補完する
+  const dogs = [
+    'class Dog {',
+    '  public var name: string;',
+    '  var secret: int;',
+    '  func init() { }',
+    '  public virtual func bark() -> string { return "wan"; }',
+    '  public func walk() -> void { }',
+    '  func hidden() -> void { }',
+    '}',
+    'class Pup : Dog {',
+    '  public func nap() -> void { }',
+    '  public override func bark() -> string { return "kyan"; }',
+    '}',
+    'func main() -> int {',
+    '  var p = Pup();',
+    '  p.',
+    '  return 0;',
+    '}'
+  ].join('\n');
+
+  const dot = complete(dogs, 15, 5).map(function (x) { return x.label; }).sort();
+  check('「.」の後ろに、親から受け継いだ public なメンバも出る',
+        dot.join(' ') === 'bark name nap walk', dot.join(' '));
+
+  const fishSrc = fs.readFileSync(path.join(root, 'examples/fish.shk'), 'utf8');
+  const fishLines = fishSrc.split('\n');
+  const sharkLine = fishLines.indexOf('class Shark : Fish {') + 2;
+  const inShark = complete(fishSrc.replace('class Shark : Fish {', 'class Shark : Fish {\n  '), sharkLine, 3);
+  // Shark は describe をもう上書きしている。親をたどると Fish の compare が残る
+  check('お手本（fish.shk）でも、親をたどった compare が雛形として出る',
+        (stub(inShark, 'compare') || {}).insertText ===
+        'override func compare(other: Fish) -> int {\n\t$0\n\treturn super.compare(other);\n}' &&
+        !stub(inShark, 'describe') && !stub(inShark, 'to_string'),
+        stubs(inShark).map(function (x) { return x.label; }).join(' ') + ' / ' +
+        JSON.stringify((stub(inShark, 'compare') || {}).insertText));
 
   // --- 補完の一覧と、実際に持っているモジュールがずれていないか ---
   api.config(64, 0, 0);

@@ -124,6 +124,92 @@ window.SharkLang = (function () {
     return out;
   }
 
+  // { } を数えながら1行ずつ進む。文字列と（入れ子にできる）コメントの中は数えない。
+  // visit(行, 行の前の深さ, 行の後の深さ, その行での最大の深さ) が false を返すと止まる
+  function braceWalk(lines, from, visit) {
+    var depth = 0, comment = 0;
+    for (var i = from; i < lines.length; i++) {
+      var s = lines[i], j = 0, before = depth, peak = depth;
+      while (j < s.length) {
+        var c = s[j], d = s[j + 1];
+        if (comment > 0) {
+          if (c === '/' && d === '*') { comment++; j += 2; continue; }
+          if (c === '*' && d === '/') { comment--; j += 2; continue; }
+          j++;
+          continue;
+        }
+        if (c === '/' && d === '*') { comment++; j += 2; continue; }
+        if (c === '/' && d === '/') break;
+        if (c === '"') {                          // 文字列（f" b" もここに来る）
+          j++;
+          while (j < s.length && s[j] !== '"') j += (s[j] === '\\' ? 2 : 1);
+          j++;
+          continue;
+        }
+        if (c === '{') { depth++; if (depth > peak) peak = depth; }
+        else if (c === '}') depth--;
+        j++;
+      }
+      if (visit(i + 1, before, depth, peak) === false) return;
+    }
+  }
+
+  // 1行ずつに分けたもの。scan のたびに作り直す
+  function linesOf(info) {
+    if (!info.lines) info.lines = info.text.split('\n');
+    return info.lines;
+  }
+
+  // クラスの本体が閉じる行
+  function classEnd(info, cls) {
+    if (cls.end) return cls.end;
+    var lines = linesOf(info);
+    cls.end = lines.length;
+    braceWalk(lines, cls.line - 1, function (ln, before, after, peak) {
+      if (peak > 0 && after <= 0) { cls.end = ln; return false; }
+    });
+    return cls.end;
+  }
+
+  // その行が入っているクラス
+  function classAt(info, line) {
+    for (var i = info.classes.length - 1; i >= 0; i--) {
+      var c = info.classes[i];
+      if (c.line <= line && classEnd(info, c) >= line) return c;
+    }
+    return null;
+  }
+
+  // クラスの本体の直下か（メソッドの中ではないか）
+  function atMemberLevel(info, cls, line) {
+    var depth = 0;
+    braceWalk(linesOf(info), cls.line - 1, function (ln, before) {
+      if (ln === line) { depth = before; return false; }
+    });
+    return depth === 1;
+  }
+
+  var MEMBER_FUNC = /^\s*((?:(?:public|private|virtual|override)\s+)*)func\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*(?:->\s*([^\s{;]+))?\s*(.*)$/;
+
+  // クラスの中に書かれたメソッド。上書きしてよいか（virtual / override）と、
+  // 本体が無いか（純粋仮想）も見る
+  function methodsIn(info, cls) {
+    if (cls.methods) return cls.methods;
+    var lines = linesOf(info);
+    var end = classEnd(info, cls);
+    cls.methods = [];
+    for (var i = cls.line - 1; i < end && i < lines.length; i++) {
+      var m = MEMBER_FUNC.exec(lines[i]);
+      if (!m) continue;
+      cls.methods.push({
+        name: m[2], params: splitTop(m[3]), ret: m[4] || '',
+        virtual: /\b(?:virtual|override)\b/.test(m[1]), pub: /\bpublic\b/.test(m[1]),
+        pure: /^;/.test((m[5] || '').trim()), line: i + 1
+      });
+    }
+    return cls.methods;
+  }
+
   // ============================================================ 型を見当づける
   function head(type) {
     if (!type) return '';
@@ -275,8 +361,7 @@ window.SharkLang = (function () {
     if (!ps.length) return e.name + '()';
     var parts = [];
     for (var i = 0; i < ps.length; i++) {
-      var nm = /^([A-Za-z_]\w*)\s*:/.exec(ps[i]);
-      parts.push('${' + (i + 1) + ':' + (nm ? nm[1] : ps[i].replace(/[${}]/g, '')) + '}');
+      parts.push('${' + (i + 1) + ':' + paramName(ps[i]).replace(/[${}]/g, '') + '}');
     }
     return e.name + '(' + parts.join(', ') + ')';
   }
@@ -387,6 +472,14 @@ window.SharkLang = (function () {
       return { suggestions: out };
     }
 
+    // クラスの本体。親から受け継いだ関数は override の雛形として出す
+    var mem = memberContext(info, position, line, word);
+    if (mem) {
+      var stubs = overrideItems(info, mem.cls, range, mem.typed);
+      if (mem.typed.override) return { suggestions: stubs };   // override と打った後は、雛形だけ
+      out = out.concat(stubs);
+    }
+
     // ふつうの位置
     for (var s = 0; s < SNIPPETS.length; s++) {
       out.push({
@@ -444,28 +537,154 @@ window.SharkLang = (function () {
     return { suggestions: out };
   }
 
+  var MEMBER_VAR = /^\s*(public\s+|private\s+)?var\s+([A-Za-z_]\w*)\s*:\s*([^=;]+)/;
+
   function classMembers(info, name, range) {
-    // クラスの中で書かれた func と var を、そのまま候補にする
-    var out = [];
-    var lines = info.text.split('\n');
+    // クラスの中で書かれた func と var を、そのまま候補にする。
+    // 親から受け継いだものは public だけ（spec/types/class.md）
+    var out = [], seen = {};
     var cls = classOf(info, name);
     if (!cls) return out;
-    for (var i = cls.line; i < lines.length; i++) {
-      var l = lines[i];
-      if (/^\S/.test(l) && i > cls.line && !/^\s/.test(l) && l.trim() === '}') break;
-      var fm = /^\s*(?:(?:public|private|virtual|override)\s+)*func\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*(?:->\s*([^\s{;]+))?/.exec(l);
-      if (fm && fm[1] !== 'init') {
-        out.push(item({ name: fm[1], params: splitTop(fm[2]), ret: fm[3] || 'void',
-                        sig: fm[1] + '(' + fm[2] + ')' + (fm[3] ? ' -> ' + fm[3] : ''), doc: name + ' のメソッド' },
+    var chain = [cls], up = ancestors(info, cls);
+    for (var a = 0; a < up.length; a++) if (up[a].cls) chain.push(up[a].cls);
+
+    for (var c = 0; c < chain.length; c++) {
+      var owner = chain[c], from = c > 0;
+      var ms = methodsIn(info, owner);
+      for (var i = 0; i < ms.length; i++) {
+        var m = ms[i];
+        if (m.name === 'init' || seen[m.name] || (from && !m.pub)) continue;
+        seen[m.name] = true;
+        out.push(item({ name: m.name, params: m.params, ret: m.ret || 'void',
+                        sig: m.name + '(' + m.params.join(', ') + ')' + (m.ret ? ' -> ' + m.ret : ''),
+                        doc: from ? owner.name + ' から受け継いだメソッド' : name + ' のメソッド' },
                       range, 'method', 'a'));
       }
-      var vm = /^\s*(?:public\s+|private\s+)?var\s+([A-Za-z_]\w*)\s*:\s*([^=;]+)/.exec(l);
-      if (vm) {
-        out.push({ label: vm[1], kind: kindFor('field'), detail: vm[2].trim(),
-                   insertText: vm[1], range: range, sortText: 'a' + vm[1] });
+      var lines = linesOf(info);
+      var end = classEnd(info, owner);
+      for (var j = owner.line; j < end && j < lines.length; j++) {
+        var vm = MEMBER_VAR.exec(lines[j]);
+        if (!vm || seen[vm[2]] || (from && !/public/.test(vm[1] || ''))) continue;
+        seen[vm[2]] = true;
+        out.push({ label: vm[2], kind: kindFor('field'),
+                   detail: vm[3].trim() + (from ? '（' + owner.name + '）' : ''),
+                   insertText: vm[2], range: range, sortText: 'a' + vm[2] });
       }
     }
     return out;
+  }
+
+  // ============================================================ 親の関数の雛形
+  // 親をたどる。1番目が実装を持つ親、2番目以降はインタフェース（spec/types/class.md）
+  function ancestors(info, cls, seen) {
+    seen = seen || {};
+    seen[cls.name] = true;
+    var out = [], bases = splitTop(cls.base || '');
+    for (var i = 0; i < bases.length; i++) {
+      var name = head(bases[i]);
+      if (!name || seen[name]) continue;
+      seen[name] = true;
+      var parent = classOf(info, name);
+      out.push({ name: name, type: bases[i].trim(), cls: parent });
+      if (parent) out = out.concat(ancestors(info, parent, seen));
+    }
+    return out;
+  }
+
+  // 親から受け継いで上書きできるメソッド。もう書いたものは外す
+  function inherited(info, cls) {
+    var own = {}, mine = methodsIn(info, cls);
+    for (var i = 0; i < mine.length; i++) own[mine[i].name] = true;
+    var chain = ancestors(info, cls), out = [], seen = {};
+    for (var b = 0; b < chain.length; b++) {
+      var base = chain[b];
+      var list = base.cls ? methodsIn(info, base.cls) : (api.methods[base.name] || []);
+      for (var j = 0; j < list.length; j++) {
+        var m = list[j];
+        if (base.cls && !m.virtual) continue;        // 画面のクラスは virtual だけ上書きできる
+        if (m.name === 'init' || own[m.name] || seen[m.name]) continue;
+        seen[m.name] = true;
+        out.push({ name: m.name, params: m.params || [], ret: m.ret || '', doc: m.doc || '',
+                   // 宣言だけの型（Comparable など）はインタフェースで、中身はすべて public な純粋仮想
+                   pure: base.cls ? m.pure : true, pub: base.cls ? m.pub : true,
+                   from: base.name, base: base.type });
+      }
+    }
+    return out;
+  }
+
+  var ZERO = { int: '0', float: '0.0', bool: 'false', string: '""', bytes: 'b""' };
+
+  // 戻り値の型に合う、とりあえずの値
+  function zeroOf(type) {
+    var t = (type || '').trim();
+    if (!t || t === 'void') return '';
+    if (t.slice(-1) === '?') return 'none';
+    var h = head(t);
+    if (h === 'list') return '[]';
+    if (h === 'map') return '{}';
+    return ZERO[h] || '';
+  }
+
+  function paramName(p) {
+    var m = /^\s*(?:ref\s+)?([A-Za-z_]\w*)\s*:/.exec(p || '');
+    return m ? m[1] : (p || '').trim();
+  }
+
+  // 親の書き方を子に合わせる。インタフェースの This と、総称の T を置き換える
+  function forChild(text, baseType, child) {
+    return substitute((text || '').replace(/\bThis\b/g, child), baseType);
+  }
+
+  // override の雛形。純粋仮想は空の本体、実装がある親は super を呼ぶところまで書く。
+  // 親の public は引き継ぐ（落とすと、その関数は子の中からしか呼べなくなる）
+  function overrideStub(m, child, typed) {
+    var params = [];
+    for (var i = 0; i < m.params.length; i++) params.push(forChild(m.params[i], m.base, child));
+    var ret = forChild(m.ret, m.base, child);
+    var core = 'func ' + m.name + '(' + params.join(', ') + ')' + (ret ? ' -> ' + ret : '');
+    var value = ret && ret !== 'void';
+    var tail = '';
+    if (!m.pure) {
+      var call = 'super.' + m.name + '(' + m.params.map(paramName).join(', ') + ')';
+      tail = '\n\t' + (value ? 'return ' + call + ';' : call + ';');
+    } else if (value && zeroOf(ret)) {
+      tail = '\n\treturn ' + zeroOf(ret) + ';';
+    }
+    var mods = (m.pub && !typed.vis ? 'public ' : '') + (typed.override ? '' : 'override ');
+    return { sig: (m.pub ? 'public ' : '') + 'override ' + core,
+             text: mods + core + ' {\n\t$0' + tail + '\n}' };
+  }
+
+  // クラスの中で出す、親から受け継いだ関数の雛形
+  function overrideItems(info, cls, range, typed) {
+    var list = inherited(info, cls), out = [];
+    for (var i = 0; i < list.length; i++) {
+      var m = list[i];
+      var stub = overrideStub(m, cls.name, typed);
+      var md = ['```shark\n' + stub.sig + '\n```'];
+      md.push(m.pure ? '`' + m.from + '` の純粋仮想。上書きするまで、このクラスも抽象クラスのまま'
+                     : '`' + m.from + '` の virtual を上書きする');
+      if (m.doc) md.push(m.doc);
+      out.push({
+        label: m.name, kind: kindFor('method'), detail: stub.sig, filterText: m.name,
+        documentation: { value: md.join('\n\n'), isTrusted: false },
+        insertText: stub.text,
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range, sortText: '0' + (m.pure ? '0' : '1') + m.name
+      });
+    }
+    return out;
+  }
+
+  // 「クラスの本体で、修飾子まで打ったところ」なら、そのクラスと、打ってある修飾子を返す
+  function memberContext(info, position, line, word) {
+    var before = line.slice(0, word.startColumn - 1);
+    if (!/^\s*(?:(?:public|private|override)\s+)*$/.test(before)) return null;   // virtual は新しく作る側
+    var cls = classAt(info, position.lineNumber);
+    if (!cls || !cls.base || !atMemberLevel(info, cls, position.lineNumber)) return null;
+    return { cls: cls,
+             typed: { override: /\boverride\b/.test(before), vis: /\b(?:public|private)\b/.test(before) } };
   }
 
   function memberList(mod) {
@@ -578,7 +797,7 @@ window.SharkLang = (function () {
         var cl = classOf(info, name);
         if (cl) {
           var init = null;
-          var lines = info.text.split('\n');
+          var lines = linesOf(info);
           for (var k = cl.line; k < lines.length; k++) {
             var im2 = /^\s*func\s+init\s*\(([^)]*)\)/.exec(lines[k]);
             if (im2) { init = splitTop(im2[1]); break; }
