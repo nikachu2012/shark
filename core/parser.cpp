@@ -22,11 +22,28 @@ Node* Parser::node_at(NodeKind k, const Token& t) {
 }
 
 void Parser::error_here(const Str& msg, const Str& help) {
+  error_here("E0001", msg, help);
+}
+
+void Parser::error_here(const char* code, const Str& msg, const Str& help) {
   if (panic_depth_ > 0) return;  // 同じ原因の派生は出さない
-  Diagnostic& d = diag_.error("E0001", msg);
+  Diagnostic& d = diag_.error(code, msg);
   d.spans.push(Span(cur().line, cur().col, cur().len > 0 ? cur().len : 1));
   if (help.size()) d.help.push(help);
   panic_depth_ = 1;
+}
+
+// 予約語は名前にできない。綴りはそのまま名前として使い、そこから先は
+// ふつうに読み進める。こうすると「見つかりません」のような派生が後に続かない
+Str Parser::keyword_as_name(const char* role_ja, const char* role_en) {
+  Str w = cur().text;
+  error_here("E0003",
+             diag_.L(w + " は予約語です。" + role_ja + "としては使えません",
+                     w + " is a reserved word; it cannot be used as " + role_en),
+             diag_.L(Str("予約語ではない名前を付けます: 例 ") + w + "_",
+                     Str("pick a name that is not reserved, e.g. ") + w + "_"));
+  p_++;
+  return w;
 }
 
 bool Parser::expect(TokKind k, const char* what_ja, const char* what_en) {
@@ -67,8 +84,9 @@ TypeExpr* Parser::parse_type() {
     if (eat(TK_Arrow)) t->fn_ret = parse_type();
     return t;
   }
-  if (at(TK_Ident) || at(TK_ThisType) ||
-      (cur().kind >= TK_Func && cur().kind <= TK_None && cur().text.size() > 0)) {
+  // task.Task のように、モジュール名が予約語と同じ綴りのことがある
+  bool kw_module = at_keyword() && peek(1).kind == TK_Dot;
+  if (at(TK_Ident) || at(TK_ThisType) || kw_module) {
     t->name = cur().text;
     p_++;
     while (at(TK_Dot) && peek(1).kind == TK_Ident) {
@@ -77,10 +95,14 @@ TypeExpr* Parser::parse_type() {
       t->name += cur().text;
       p_++;
     }
+  } else if (at_keyword()) {
+    t->bad = true;
+    t->name = keyword_as_name("型の名前", "a type name");
   } else {
     error_here(diag_.L("型の名前がここに要ります", "expected a type name"),
                diag_.L("int float bool string などの型名か、クラス名を書きます",
                        "write a type such as int, float, string, or a class name"));
+    t->bad = true;
     t->name = Str("?");
     return t;
   }
@@ -115,10 +137,12 @@ void Parser::parse_generic_params(Vec<GenericParam>* out) {
   do {
     GenericParam g;
     if (at(TK_Ident)) { g.name = cur().text; p_++; }
+    else if (at_keyword()) { g.name = keyword_as_name("型引数の名前", "a type parameter name"); }
     else { error_here(diag_.L("型引数の名前が要ります", "expected a type parameter name"), Str()); p_++; }
     if (eat(TK_Colon)) {
       do {
         if (at(TK_Ident)) { g.constraints.push(cur().text); p_++; }
+        else if (at_keyword()) { g.constraints.push(keyword_as_name("インタフェースの名前", "an interface name")); }
         else { error_here(diag_.L("制約にはインタフェース名を書きます", "expected an interface name"), Str()); p_++; }
       } while (eat(TK_Plus));
     }
@@ -160,6 +184,7 @@ void Parser::parse_import() {
   im.col = start_col;
   if (eat(TK_As)) {
     if (at(TK_Ident)) { im.alias = cur().text; p_++; }
+    else if (at_keyword()) { im.alias = keyword_as_name("別名", "an alias"); }
     else error_here(diag_.L("as の後ろに別名が要ります", "expected an alias after as"), Str());
   }
   expect(TK_Semi, "import の終わりに ; が要ります", "expected ; after import");
@@ -181,6 +206,12 @@ FuncDecl* Parser::parse_func(bool is_public, bool is_virtual, bool is_override, 
     f->len = cur().len;
     p_++;
   }
+  else if (at_keyword()) {
+    f->line = cur().line;
+    f->col = cur().col;
+    f->len = cur().len;
+    f->name = keyword_as_name("関数の名前", "a function name");
+  }
   else {
     error_here(diag_.L("func の後ろに関数名が要ります", "expected a function name"),
                diag_.L("例: func add(a: int, b: int) -> int { }", "example: func add(a: int) -> int { }"));
@@ -193,6 +224,7 @@ FuncDecl* Parser::parse_func(bool is_public, bool is_virtual, bool is_override, 
       pd.line = cur().line; pd.col = cur().col; pd.len = cur().len;
       if (eat(TK_Ref)) pd.is_ref = true;
       if (at(TK_Ident)) { pd.name = cur().text; p_++; }
+      else if (at_keyword()) { pd.name = keyword_as_name("引数の名前", "a parameter name"); }
       else { error_here(diag_.L("引数の名前が要ります", "expected a parameter name"), Str()); p_++; }
       if (!expect(TK_Colon, "引数には型注釈が要ります", "a parameter needs a type annotation")) break;
       pd.type = parse_type();
@@ -212,6 +244,7 @@ ClassDecl* Parser::parse_class(bool is_public) {
   c->line = cur().line; c->col = cur().col;
   p_++;  // class
   if (at(TK_Ident)) { c->name = cur().text; c->len = cur().len; p_++; }
+  else if (at_keyword()) { c->len = cur().len; c->name = keyword_as_name("クラスの名前", "a class name"); }
   else error_here(diag_.L("class の後ろにクラス名が要ります", "expected a class name"), Str());
   if (at(TK_Lt)) parse_generic_params(&c->gparams);
   if (eat(TK_Colon)) {
@@ -222,6 +255,11 @@ ClassDecl* Parser::parse_class(bool is_public) {
         c->base_cols.push(cur().col);
         c->base_lens.push(cur().len);
         p_++;
+      } else if (at_keyword()) {
+        c->base_lines.push(cur().line);
+        c->base_cols.push(cur().col);
+        c->base_lens.push(cur().len);
+        c->bases.push(keyword_as_name("親クラスの名前", "a base class name"));
       } else {
         error_here(diag_.L("親クラスかインタフェースの名前が要ります", "expected a base class name"), Str());
         p_++;
@@ -249,6 +287,12 @@ ClassDecl* Parser::parse_class(bool is_public) {
         fd.name = cur().text;
         fd.len = cur().len;
         p_++;
+      }
+      else if (at_keyword()) {
+        fd.line = cur().line;
+        fd.col = cur().col;
+        fd.len = cur().len;
+        fd.name = keyword_as_name("メンバ変数の名前", "a field name");
       }
       else { error_here(diag_.L("メンバ変数の名前が要ります", "expected a field name"), Str()); p_++; }
       if (expect(TK_Colon, "メンバ変数には型注釈が要ります（省略できません）",
@@ -282,6 +326,7 @@ GlobalDecl* Parser::parse_global(bool is_public, bool is_const) {
   g->line = cur().line; g->col = cur().col;
   p_++;  // var / const
   if (at(TK_Ident)) { g->name = cur().text; g->len = cur().len; p_++; }
+  else if (at_keyword()) { g->len = cur().len; g->name = keyword_as_name("変数の名前", "a variable name"); }
   else error_here(diag_.L("変数の名前が要ります", "expected a variable name"), Str());
   if (eat(TK_Colon)) g->type = parse_type();
   if (eat(TK_Assign)) g->init = parse_expr();
@@ -308,6 +353,10 @@ Node* Parser::parse_var_stmt(bool is_const) {
   n->is_const = is_const;
   p_++;  // var / const
   if (at(TK_Ident)) { n->name = cur().text; n->len = cur().len; n->col = cur().col; p_++; }
+  else if (at_keyword()) {
+    n->len = cur().len; n->col = cur().col;
+    n->name = keyword_as_name("変数の名前", "a variable name");
+  }
   else error_here(diag_.L("変数の名前が要ります", "expected a variable name"), Str());
   if (eat(TK_Colon)) n->tann = parse_type();
   if (eat(TK_Assign)) n->a = parse_expr();
@@ -321,6 +370,10 @@ Node* Parser::parse_if() {
   if (at(TK_Var)) {
     p_++;
     if (at(TK_Ident)) { n->bind = cur().text; n->col = cur().col; n->len = cur().len; p_++; }
+    else if (at_keyword()) {
+      n->col = cur().col; n->len = cur().len;
+      n->bind = keyword_as_name("変数の名前", "a variable name");
+    }
     else error_here(diag_.L("if var の後ろに変数名が要ります", "expected a name after if var"), Str());
     expect(TK_Assign, "if var 名 = 式 と書きます", "expected = in if var");
     n->a = parse_expr();
@@ -336,6 +389,7 @@ Node* Parser::parse_if() {
       if (at(TK_Var)) {
         p_++;
         if (at(TK_Ident)) { n->bind2 = cur().text; p_++; }
+        else if (at_keyword()) { n->bind2 = keyword_as_name("変数の名前", "a variable name"); }
         else error_here(diag_.L("else var の後ろに変数名が要ります", "expected a name after else var"), Str());
       }
       n->c = parse_block();
@@ -350,6 +404,10 @@ Node* Parser::parse_while() {
   if (at(TK_Var)) {
     p_++;
     if (at(TK_Ident)) { n->bind = cur().text; n->col = cur().col; n->len = cur().len; p_++; }
+    else if (at_keyword()) {
+      n->col = cur().col; n->len = cur().len;
+      n->bind = keyword_as_name("変数の名前", "a variable name");
+    }
     else error_here(diag_.L("while var の後ろに変数名が要ります", "expected a name after while var"), Str());
     expect(TK_Assign, "while var 名 = 式 と書きます", "expected = in while var");
     n->a = parse_expr();
@@ -368,6 +426,10 @@ Node* Parser::parse_for() {
                diag_.L("繰り返しの変数には var が要ります", "the loop variable needs var"));
   }
   if (at(TK_Ident)) { n->bind = cur().text; n->col = cur().col; n->len = cur().len; p_++; }
+  else if (at_keyword()) {
+    n->col = cur().col; n->len = cur().len;
+    n->bind = keyword_as_name("繰り返しの変数名", "a loop variable name");
+  }
   else error_here(diag_.L("繰り返しの変数名が要ります", "expected a loop variable name"), Str());
   expect(TK_In, "for var 名 in 式 と書きます", "expected in");
   n->a = parse_expr();
@@ -681,6 +743,7 @@ Node* Parser::parse_postfix() {
       n->line = cur().line; n->col = cur().col;
       n->optional_chain = opt;
       p_++;
+      // . の後ろは名前の別の並びなので、予約語と同じ綴りでもよい（json.none() など）
       if (at(TK_Ident) || (cur().text.size() > 0 && cur().kind != TK_EOF)) {
         n->name = cur().text;
         n->len = cur().len;
@@ -930,12 +993,18 @@ Node* Parser::parse_primary() {
     }
     default: break;
   }
-  // 型名（int / list / map ...）も名前として扱う。型変換の呼び出しに使う
-  if (t.text.size() > 0) {
+  // task.yield() のように、モジュール名が予約語と同じ綴りのことがある
+  if (at_keyword() && (peek(1).kind == TK_Dot || peek(1).kind == TK_QDot)) {
     Node* n = node(E_Ident);
     n->name = t.text;
     n->len = t.len;
     p_++;
+    return n;
+  }
+  if (at_keyword()) {
+    Node* n = node(E_Ident);
+    n->len = t.len;
+    n->name = keyword_as_name("値", "a value");
     return n;
   }
   error_here(diag_.L("ここに式が要ります", "expected an expression"),

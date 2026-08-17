@@ -1,0 +1,85 @@
+error[E0003]: 名前は数字で始められません
+  --> name_errors.shk:20:7
+  20 |   var 2fast = 3;
+     |       -----
+  直し方: 先頭は英字か _ にします: 例 fast2
+
+error[E0003]: 名前は数字で始められません
+  --> name_errors.shk:21:9
+  21 |   print(2fast);
+     |         -----
+  直し方: 先頭は英字か _ にします: 例 fast2
+
+error[E0003]: 名前は数字で始められません
+  --> name_errors.shk:23:7
+  23 |   var 3.5x = 4;
+     |       ----
+  直し方: 先頭は英字か _ にします。数字は 2 文字目からなら使えます
+
+error[E0003]: 名前は数字で始められません
+  --> name_errors.shk:24:9
+  24 |   print(3.5x);
+     |         ----
+  直し方: 先頭は英字か _ にします。数字は 2 文字目からなら使えます
+
+error[E0003]: if は予約語です。クラスの名前としては使えません
+  --> name_errors.shk:3:7
+  3 | class if {
+    |       --
+  直し方: 予約語ではない名前を付けます: 例 if_
+
+error[E0003]: for は予約語です。メンバ変数の名前としては使えません
+  --> name_errors.shk:4:7
+  4 |   var for: int;
+    |       ---
+  直し方: 予約語ではない名前を付けます: 例 for_
+
+error[E0003]: class は予約語です。関数の名前としては使えません
+  --> name_errors.shk:7:6
+  7 | func class(var: int) -> int {
+    |      -----
+  直し方: 予約語ではない名前を付けます: 例 class_
+
+error[E0003]: var は予約語です。引数の名前としては使えません
+  --> name_errors.shk:7:12
+  7 | func class(var: int) -> int {
+    |            ---
+  直し方: 予約語ではない名前を付けます: 例 var_
+
+error[E0003]: var は予約語です。値としては使えません
+  --> name_errors.shk:8:10
+  8 |   return var;
+    |          ---
+  直し方: 予約語ではない名前を付けます: 例 var_
+
+error[E0003]: while は予約語です。変数の名前としては使えません
+  --> name_errors.shk:12:7
+  12 |   var while = 1;
+     |       -----
+  直し方: 予約語ではない名前を付けます: 例 while_
+
+error[E0003]: while は予約語です。値としては使えません
+  --> name_errors.shk:13:9
+  13 |   print(while);
+     |         -----
+  直し方: 予約語ではない名前を付けます: 例 while_
+
+error[E0003]: in は予約語です。繰り返しの変数名としては使えません
+  --> name_errors.shk:15:11
+  15 |   for var in in range(2) { print(in); }
+     |           --
+  直し方: 予約語ではない名前を付けます: 例 in_
+
+error[E0003]: in は予約語です。値としては使えません
+  --> name_errors.shk:15:34
+  15 |   for var in in range(2) { print(in); }
+     |                                  --
+  直し方: 予約語ではない名前を付けます: 例 in_
+
+error[E0003]: return は予約語です。型の名前としては使えません
+  --> name_errors.shk:17:10
+  17 |   var x: return = 2;
+     |          ------
+  直し方: 予約語ではない名前を付けます: 例 return_
+
+14 件の誤りがあります

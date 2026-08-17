@@ -21,6 +21,11 @@ class Parser {
   bool eat(TokKind k) { if (at(k)) { p_++; return true; } return false; }
   bool expect(TokKind k, const char* what_ja, const char* what_en);
   void error_here(const Str& msg, const Str& help);
+  void error_here(const char* code, const Str& msg, const Str& help);
+  // いま見ているのが予約語か（func 〜 none）
+  bool at_keyword() const { return cur().kind >= TK_Func && cur().kind <= TK_None; }
+  // 名前が要るところに来た予約語。誤りを出し、綴りをそのまま名前として返して読み進める
+  Str keyword_as_name(const char* role_ja, const char* role_en);
   void sync_to_statement();
 
   Node* node(NodeKind k);

@@ -33,6 +33,11 @@ static const Explain kExplain[] = {
   {"E0001",
    "書き方が構文の規則に合っていません。かっこや ; の閉じ忘れがよくある原因です。",
    "The code does not match the grammar. A missing bracket or ';' is the usual cause."},
+  {"E0003",
+   "名前として使えないものが書かれています。if や class のような予約語はそのままでは名前にできず、\n"
+   "名前の先頭に数字も置けません。予約語ではない、英字か _ で始まる名前を付けます。",
+   "This cannot be used as a name. Reserved words such as if or class are not names, and a name\n"
+   "cannot start with a digit. Pick a non-reserved name that starts with a letter or _."},
   {"E0101",
    "変数の型と、入れようとした値の型が違います。Shark は暗黙の型変換をしません。\n"
    "変換は int(x) float(x) string(x) のように必ず書きます。",

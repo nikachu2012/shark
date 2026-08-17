@@ -44,6 +44,8 @@ class Lexer {
 
  private:
   void push(Vec<Token>* out, TokKind k, int line, int col, int start);
+  // 1abc のように数で始まる名前。ひとつの名前として読み切り、誤りを出す
+  bool digit_led_name(Vec<Token>* out, int line, int col, int start);
   bool read_escape(Str* out, bool bytes_mode);
   const Str& s_;
   DiagBag& diag_;

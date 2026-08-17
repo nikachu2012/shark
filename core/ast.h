@@ -73,8 +73,9 @@ struct TypeExpr {
   bool optional;            // 末尾の ?
   Vec<TypeExpr*> fn_params; // func のとき
   TypeExpr* fn_ret;
+  bool bad;                 // 型名として読めなかった。誤りは構文解析でもう出ている
   int line, col, len;
-  TypeExpr() : optional(false), fn_ret(0), line(0), col(0), len(0) {}
+  TypeExpr() : optional(false), fn_ret(0), bad(false), line(0), col(0), len(0) {}
 };
 
 struct Node;

@@ -249,6 +249,8 @@ Type* Checker::resolve_type(TypeExpr* te, Unit* u, FuncCtx* fc, ClassInfo* cls) 
       ClassInfo* c = find_class(n, u);
       if (c) {
         base = args.size() ? t_.class_type_args(c, args) : t_.class_type(c);
+      } else if (te->bad) {
+        return t_.t_unknown();   // 読めなかった型。誤りは構文解析でもう出ている
       } else {
         Diagnostic& d = diag_.error("E0106", diag_.L(Str("型 ") + n + " が見つかりません",
                                                      Str("unknown type: ") + n));

@@ -113,6 +113,34 @@ void Lexer::push(Vec<Token>* out, TokKind k, int line, int col, int start) {
   out->push(t);
 }
 
+// 1abc のように、数のすぐ後ろに英字が続いたとき。
+// 名前のつもりで書かれたものとみて、ひとつの名前として読み切る。
+// こうすると「1 と abc が並んでいる」という的外れな誤りが後から続かない
+bool Lexer::digit_led_name(Vec<Token>* out, int line, int col, int start) {
+  if (i_ >= s_.size() || !is_alpha(s_[i_])) return false;
+  while (i_ < s_.size() && (is_alpha(s_[i_]) || is_digit(s_[i_]))) { i_++; col_++; }
+  Str w = s_.sub(start, i_ - start);
+  // 数の側と名前の側に分ける（1abc なら "1" と "abc"）
+  int a = 0;
+  while (a < w.size() && !is_alpha(w[a])) a++;
+  Str head = w.sub(0, a), tail = w.sub(a, w.size() - a);
+  bool plain = head.size() > 0;
+  for (int k = 0; k < head.size(); k++) if (!is_digit(head[k])) plain = false;
+
+  Diagnostic& d = diag_.error("E0003", diag_.L("名前は数字で始められません",
+                                               "a name cannot start with a digit"));
+  d.spans.push(Span(line, col, i_ - start));
+  if (plain)
+    d.help.push(diag_.L(Str("先頭は英字か _ にします: 例 ") + (tail + head),
+                        Str("start it with a letter or _, e.g. ") + (tail + head)));
+  else
+    d.help.push(diag_.L("先頭は英字か _ にします。数字は 2 文字目からなら使えます",
+                        "start it with a letter or _; digits are fine after that"));
+  push(out, TK_Ident, line, col, start);
+  out->back().text = w;
+  return true;
+}
+
 bool Lexer::read_escape(Str* out, bool bytes_mode) {
   // s_[i_] は '\\' の次の文字
   char c = s_[i_];
@@ -227,6 +255,7 @@ void Lexer::run(Vec<Token>* out) {
           if (s_[i_] != '_') v = v * 16 + (uint64_t)hex_val(s_[i_]);
           i_++; col_++;
         }
+        if (digit_led_name(out, line, col, start)) continue;
         push(out, TK_Int, line, col, start);
         out->back().ival = (int64_t)v;
         continue;
@@ -238,6 +267,7 @@ void Lexer::run(Vec<Token>* out) {
           if (s_[i_] != '_') v = v * 2 + (uint64_t)(s_[i_] - '0');
           i_++; col_++;
         }
+        if (digit_led_name(out, line, col, start)) continue;
         push(out, TK_Int, line, col, start);
         out->back().ival = (int64_t)v;
         continue;
@@ -267,6 +297,7 @@ void Lexer::run(Vec<Token>* out) {
           is_float = true;
         } else { i_ = save; col_ = savec; }
       }
+      if (digit_led_name(out, line, col, start)) continue;
       push(out, is_float ? TK_Float : TK_Int, line, col, start);
       if (is_float) {
         double d = 0;

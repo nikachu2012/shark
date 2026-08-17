@@ -1,0 +1,26 @@
+// 名前として使えないもの（予約語・数字始まり）
+
+class if {
+  var for: int;
+}
+
+func class(var: int) -> int {
+  return var;
+}
+
+func main() -> int {
+  var while = 1;
+  print(while);
+
+  for var in in range(2) { print(in); }
+
+  var x: return = 2;
+  print(x);
+
+  var 2fast = 3;
+  print(2fast);
+
+  var 3.5x = 4;
+  print(3.5x);
+  return 0;
+}
