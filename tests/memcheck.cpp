@@ -6,6 +6,7 @@
 #include <stdio.h>
 
 #include "../core/platform/platform.h"
+#include "../core/runtime.h"
 #include "../core/shark.h"
 
 using namespace shark;
@@ -35,6 +36,61 @@ static void check_clean(const char* label, const char* src) {
   size_t left = sk_mem_used() - before;
   if (!loaded) {
     printf("  fail  %s（読み込めなかった）\n", label);
+    g_fail++;
+    return;
+  }
+  if (left != 0) {
+    printf("  fail  %s（%lu バイト残った）\n", label, (unsigned long)left);
+    g_fail++;
+    return;
+  }
+  printf("  ok    %s\n", label);
+}
+
+// バイトコードに保存して、実行装置（Runtime）だけで動かしたあとの残りを見る。
+// 読み戻しで作ったもの（型・クラス・関数）も、捨てたときに戻ること
+static void check_bytecode_clean(const char* label, const char* src) {
+  size_t before = sk_mem_used();
+  bool wrote = false, ran = false;
+  {
+    Str code;
+    Config cfg;
+    cfg.memory_limit = 0;
+    {
+      Engine e(cfg);
+      HostIO io;
+      io.write_out = ignore_out;
+      e.set_io(io);
+      const Vec<Diagnostic>& ds = e.load(Str("memcheck"), Str(src));
+      for (int i = 0; i < ds.size(); i++)
+        if (ds[i].severity == SEV_ERROR) printf("      %s\n", ds[i].message.c_str());
+      if (e.ok()) {
+        BytecodeHeader h;
+        h.main_file = Str("memcheck");
+        h.memory_mb = 0;
+        h.modules = modules_bits(cfg);
+        Str err;
+        wrote = bytecode_write(*e.program(), e.registry(), h, &code, &err);
+        if (!wrote) printf("      %s\n", err.c_str());
+      }
+    }
+    if (wrote) {
+      Runtime rt(cfg);
+      HostIO io;
+      io.write_out = ignore_out;
+      rt.set_io(io);
+      Str err;
+      if (rt.load(code, &err)) {
+        while (rt.step(200000) == SK_Running) {}
+        ran = true;
+      } else {
+        printf("      %s\n", err.c_str());
+      }
+    }
+  }
+  size_t left = sk_mem_used() - before;
+  if (!wrote || !ran) {
+    printf("  fail  %s（%s）\n", label, wrote ? "実行装置が読めなかった" : "保存できなかった");
     g_fail++;
     return;
   }
@@ -225,6 +281,39 @@ int main() {
       g_fail++;
     }
   }
+
+  // 保存したバイトコードを、実行装置だけで動かしたとき（spec/runtime/bytecode.md）
+  check_bytecode_clean("バイトコード: 基本の値",
+                       "func main() -> int { var s = \"さめ\" + \"だ\"; return s.len(); }");
+  check_bytecode_clean("バイトコード: クラスと並べ替え",
+                       "class Fish : Comparable {\n"
+                       "  public var name: string;\n"
+                       "  public var size: int;\n"
+                       "  func init(n: string, s: int) { this.name = n; this.size = s; }\n"
+                       "  override func compare(o: Fish) -> int {\n"
+                       "    if this.size < o.size { return -1; }\n"
+                       "    if this.size > o.size { return 1; }\n"
+                       "    return 0;\n"
+                       "  }\n"
+                       "}\n"
+                       "func main() -> int {\n"
+                       "  var xs = [Fish(\"a\", 3), Fish(\"b\", 1)];\n"
+                       "  xs.sort();\n"
+                       "  return xs[0].size;\n"
+                       "}");
+  check_bytecode_clean("バイトコード: タスクと Error",
+                       "func work(c: channel<int>) -> void { for var i in range(10) { _ = c.send(i); } c.close(); }\n"
+                       "func may(p: string) -> Result<string> {\n"
+                       "  if p == \"\" { return Error(\"だめ\"); }\n"
+                       "  return p + \"!\";\n"
+                       "}\n"
+                       "func main() -> int {\n"
+                       "  var c = channel<int>(4);\n"
+                       "  task work(c);\n"
+                       "  var sum = 0;\n"
+                       "  while var v = c.recv() { sum += v; }\n"
+                       "  if var b = may(\"\") { return b.len(); } else var e { return sum + e.message().len(); }\n"
+                       "}");
 
   check_load_not_counted(8);
 

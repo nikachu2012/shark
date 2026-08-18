@@ -9,13 +9,14 @@
 | [作ったもの](#作ったもの) | コアと `shark` コマンドの関係 |
 | [入っているもの](#入っているもの) / [入れていないもの](#入れていないもの) | どこまで動くか |
 | [組み込む](#ゲームに組み込む) | 自分のゲームで使う手順 |
+| [バイトコードと単一バイナリ](#バイトコードと単一バイナリ) | 保存した形と、1つで動く実行ファイル |
 | [移植する](#新しい機種に移植する) | 新しい機種に載せる手順 |
 | [中身の作り](#中身の作り) | コアの内部 |
 
 ## ビルドと実行
 
 ```
-make            # コア（静的な .o）と shark コマンドを作る
+make            # コア（静的な .o）と shark コマンド、実行装置（sharkvm）を作る
 make test       # tests/ を走らせる（メモリの検査を含む）
 make docs       # 標準ライブラリのリファレンス（docs/reference/）を作る
 make docs-check # リファレンスに載る例を、ぜんぶ動かして確かめる
@@ -32,6 +33,10 @@ make web        # ブラウザで動く形（WebAssembly）を作る
 ./shark test                        # いまの場所の *_test.shk を全部（--filter 名前 で絞る）
 ./shark explain E0102               # エラーの詳しい説明
 ./shark modules                     # この処理系が持つモジュールの一覧
+
+./shark build examples/hello.shk    # 1つで動く実行ファイルにする（→ ./hello）
+./shark build --bytecode main.shk   # バイトコードだけ保存（→ main.shkc）
+./sharkvm main.shkc                 # 実行装置だけで動かす
 ```
 
 `--lang en` で診断を英語に、`--strict` で警告をエラーとして扱う。
@@ -43,7 +48,7 @@ make web        # ブラウザで動く形（WebAssembly）を作る
 
 ```
 core/       実行系。ファイルも端末も触らない。ゲームに組み込む部品
-frontend/   shark コマンド。ファイルを読み、コアを呼び、診断を端末向けに整形する
+frontend/   shark コマンドと sharkvm（実行装置）。ファイルを読み、コアを呼ぶ
 web/        ブラウザで動かす一式。コアを WebAssembly にして、画面から呼ぶ
 ```
 
@@ -54,6 +59,9 @@ web/        ブラウザで動かす一式。コアを WebAssembly にして、�
 ```
 core/
   shark.h / shark.cpp     組み込みの入口（Engine）
+  runtime                 バイトコードだけを動かす入口（Runtime）
+  bytecode                バイトコードの保存と読み戻し
+  config.h                設定（Engine と Runtime で同じものを使う）
   lexer   parser          字句解析・構文解析
   types   check           型と型検査
   codegen opcodes         バイトコード生成
@@ -68,6 +76,10 @@ core/
     web.cpp                 ブラウザ（WebAssembly）→ web/README.md
   lib/                    標準ライブラリ  ← ホスト関数を足す場所でもある
     builtin math time task fmt path file os text json test format
+frontend/
+  main.cpp                shark コマンド（ソースを読む側）
+  vm_main.cpp             sharkvm（バイトコードだけを動かす側）
+  host.h                  両方で使う道具（ファイル・自分の居場所・端末への出し方）
 ```
 
 `host` という名前のファイルは作らず、**`Engine::register_host()`** に集めた
@@ -146,7 +158,6 @@ core/
 | `std.net` `std.http` | 移植層のノンブロッキング通信から作る必要がある。`import` すると E0501 が返る |
 | `std.ui` | 画面の実装が要る。GUI はホスト側で用意して `register_host` で渡す形にしてある |
 | 実行時コンパイル（JIT） | 仕様でも任意機能。いまは常に仮想マシンで実行する。結果は変わらない |
-| `shark build` / `.shkc` | バイトコードの保存と読み込み。形式は変えてよい決まりなので後回しにした |
 | `shark fmt` | 整形の規則がまだ決まっていない（[spec/open-questions.md](../spec/open-questions.md)） |
 | 言語サーバ | 同上。`shark check` の出力をそのまま使う形にしてある |
 | `std.text` の一部 | 正規化は仮名の濁点の合成・分解だけ。文字コード変換は `utf-8` のみ（それ以外は失敗を返す） |
@@ -189,6 +200,43 @@ for (;;) {
 - 止めたいときは `engine.abort_run()`
 - 診断は構造化データ（`Diagnostic`）で返る。整形はホストの仕事。
   端末向けの整形例として `format_diagnostic()` を置いてある
+
+### バイトコードを焼き込んで渡す
+
+プレイヤーが書くコードはその場で読むしかないが、**作者が用意したステージ**は
+先にバイトコードにしておける。ゲーム側は前側（字句解析から型検査まで）を持たずに済む。
+
+動く例が [examples/embed/play_stage.cpp](../examples/embed/play_stage.cpp) にある（`make embed`）。
+
+```
+stage.shk ──build_stage（開発機）──▶ stage_bytecode.h ──▶ play_stage（ゲーム機）
+```
+
+```cpp
+Runtime rt(game_config());
+register_game_hosts(rt);        // 作ったときと同じ順で登録する
+
+Str code((const char*)kStageBytecode, (int)sizeof kStageBytecode);
+Str err;
+if (!rt.load(code, &err)) { /* 版や関数の表が食い違えば、ここで分かる */ }
+
+for (;;) {
+  RunStatus st = rt.step(60);   // ここから先は Engine と同じ
+  if (st != SK_Running) break;
+  draw_frame();
+}
+```
+
+- 変わるのは `load()` の1行だけ。刻み方も入出力もホスト関数も Engine と同じ
+- ホスト関数は**同じものを同じ順に**登録する。番号がずれると、読むときに指紋が合わずに止まる。
+  例では設定と登録を [game_hosts.h](../examples/embed/game_hosts.h) 1つにまとめて、
+  作る側と動かす側の両方から呼んでいる
+- バイトコードは C の配列として焼いてあるので、ファイルを開く必要もない
+
+| | 大きさ（macOS arm64、-O2） |
+|---|---|
+| `examples/embed/game`（その場で読む形） | 878 KB |
+| `examples/embed/play_stage`（焼き込む形） | 427 KB |
 
 ## 新しい機種に移植する
 
@@ -330,6 +378,36 @@ panic: メモリを使いすぎました
 - 取り消しは要求を立てるだけ。待つ関数が要求を見て、その場でタスクを終える
 - どのタスクも進めない状態が続いたら、時計を持つタスクがあれば「待ち」として
   ホストに戻り、無ければ「すべてのタスクが待ったままになりました」と止める
+
+### バイトコードと単一バイナリ
+
+`shark build` は、型検査を通した `Program` をそのままバイト列にする
+（`core/bytecode.cpp`。[spec/runtime/bytecode.md](../spec/runtime/bytecode.md)）。
+
+- 保存するのは、命令の並び・定数・行番号・関数・クラス・グローバル・走らせる順。
+  構文木とソースは入らない
+- 数は可変長で入れる。位置を指すもの（型・クラス・関数）は番号で、「無い」は `-1`
+- 型は**指す先が先に来る順**に並べるので、読むときは前から順に組み立てられる
+  （`TypeTable` の作る口をそのまま使うため、同じ型は1つにまとまる）
+- 処理系が持つ関数は番号で指す。番号は登録の順で決まるので、
+  登録は `register_modules()` 1か所にまとめ、**表の指紋**をファイルに入れて突き合わせる。
+  合わなければ読まずに止める
+- `Error.message` のような処理系が持つメソッドだけは関数ポインタを書けないので、
+  名前で保存し、読むときに `builtin_native_method()` でつなぎ直す
+
+コアは2つに分かれている。`RT_SRC`（実行装置）と `FE_SRC`（前側）で、
+Makefile の中でも分けてある。`sharkvm` は前者だけをリンクしたもので、
+`Runtime` が `Engine` の実行だけを取り出した入口になっている。
+
+| | 大きさ（macOS arm64、-O2） |
+|---|---|
+| `shark`（前側を含む） | 912 KB |
+| `sharkvm`（実行装置だけ） | 427 KB |
+| hello のバイトコード | 2 KB |
+
+単一バイナリは、実行装置のうしろにバイトコードを足し、末尾に 16 バイトの目印
+（`"SHARKPK1"` ＋ 長さ）を置いたもの。動くときは自分自身の末尾を見て、
+あればそれを読む（`frontend/host.h`）。
 
 ### 診断（core/diag.h）
 

@@ -52,6 +52,51 @@ if [ -x "$root/tests/memcheck" ]; then
   fi
 fi
 
+# 単一バイナリと、保存したバイトコード（spec/runtime/bytecode.md）。
+# tests/cases を build して、ソースから動かしたときと同じ出力になることを見る
+sharkvm="$root/sharkvm"
+tmp="${TMPDIR:-/tmp}/shark_build_test.$$"
+if [ -x "$sharkvm" ]; then
+  mkdir -p "$tmp"
+  cd "$root/tests/cases" || exit 1
+  for f in *.shk; do
+    exp="${f%.shk}.expected"
+    [ -f "$exp" ] || continue
+    if ! "$shark" build --no-color -o "$tmp/app" "$f" > "$tmp/build.log" 2>&1; then
+      fail=$((fail + 1))
+      echo "fail  build tests/cases/$f"
+      sed -n '1,6p' "$tmp/build.log"
+      continue
+    fi
+    got=$(NO_COLOR=1 "$tmp/app" 2>&1)
+    if [ "$got" = "$(cat "$exp")" ]; then
+      pass=$((pass + 1))
+    else
+      fail=$((fail + 1))
+      echo "fail  単一バイナリ tests/cases/$f"
+      printf '%s\n' "$got" | diff -u "$exp" - | sed -n '3,12p'
+    fi
+  done
+  # バイトコードだけ保存したものを、実行装置と shark run の両方で動かす
+  f=01_basics.shk
+  exp="${f%.shk}.expected"
+  "$shark" build --no-color --bytecode -o "$tmp/one.shkc" "$f" > "$tmp/build.log" 2>&1
+  for how in "$sharkvm --no-color" "$shark run --no-color"; do
+    got=$($how "$tmp/one.shkc" 2>&1)
+    if [ "$got" = "$(cat "$exp")" ]; then
+      pass=$((pass + 1))
+    else
+      fail=$((fail + 1))
+      echo "fail  $how $tmp/one.shkc"
+      printf '%s\n' "$got" | diff -u "$exp" - | sed -n '3,12p'
+    fi
+  done
+  cd "$root/tests" || exit 1
+  rm -rf "$tmp"
+else
+  echo "skip  単一バイナリ（sharkvm がありません。make sharkvm）"
+fi
+
 # std.test の走らせ方も見る
 out=$("$shark" test unit_test.shk 2>&1)
 if [ "$out" = "$(cat unit_test.expected)" ]; then

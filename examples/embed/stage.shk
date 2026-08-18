@@ -1,0 +1,19 @@
+// stage.shk — ステージ3のお手本の動き。
+// move / turn / at_goal はゲーム側が足した関数（examples/embed/game_hosts.h）。
+//
+// このファイルは開発機で build_stage がバイトコードにする。
+// ゲーム機に載るのはバイトコードだけで、このソースは持っていかない。
+func main() -> int {
+  var steps = 0;
+  while !at_goal() {
+    move("forward");
+    steps += 1;
+    if steps % 2 == 0 { turn("right"); }
+    if steps > 20 {
+      print("迷ってしまった\n");
+      return 1;
+    }
+  }
+  print(f"ゴール！ {steps} 歩でした\n");
+  return 0;
+}

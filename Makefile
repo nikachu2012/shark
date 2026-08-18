@@ -1,6 +1,6 @@
 # Shark🦈 — コアと shark コマンドをビルドする
 #
-#   make            コアと shark コマンドを作る
+#   make            コアと shark コマンド、実行装置（sharkvm）を作る
 #   make test       tests/ を走らせる
 #   make docs       stdlib/ の宣言から HTML のリファレンスを作る
 #   make docs-check 宣言に書いた例を、ぜんぶ本物の shark で動かす
@@ -15,40 +15,67 @@ CXXSTD   ?= -std=c++17
 CXXFLAGS ?= -O2 -Wall -Wextra -Wno-unused-parameter
 CORE_FLAGS = $(CXXSTD) $(CXXFLAGS) -fno-exceptions -fno-rtti
 
-CORE_SRC = \
+# コアは2つに分かれる。
+#   RT_SRC  バイトコードを動かすのに要るもの（＝実行装置。sharkvm はこれだけ）
+#   FE_SRC  ソースからバイトコードを作るところ（字句解析・構文解析・型検査・コード生成）
+RT_SRC = \
   core/support.cpp core/value.cpp core/program.cpp core/types.cpp core/diag.cpp \
-  core/lexer.cpp core/parser.cpp core/check.cpp core/codegen.cpp core/vm.cpp \
-  core/registry.cpp core/shark.cpp \
+  core/vm.cpp core/registry.cpp core/bytecode.cpp core/runtime.cpp \
   core/platform/desktop.cpp core/platform/console.cpp \
   core/lib/format.cpp core/lib/builtin.cpp core/lib/math.cpp core/lib/time.cpp \
   core/lib/task.cpp core/lib/fmt.cpp core/lib/path.cpp core/lib/file.cpp \
   core/lib/os.cpp core/lib/text.cpp core/lib/json.cpp core/lib/test.cpp \
   core/lib/crypto.cpp
 
+FE_SRC = \
+  core/lexer.cpp core/parser.cpp core/check.cpp core/codegen.cpp core/shark.cpp
+
+CORE_SRC = $(RT_SRC) $(FE_SRC)
+
 FRONT_SRC = frontend/main.cpp
+VM_FRONT_SRC = frontend/vm_main.cpp
 
 OBJ = $(CORE_SRC:.cpp=.o) $(FRONT_SRC:.cpp=.o)
-HDR = $(wildcard core/*.h core/platform/*.h core/lib/*.inc)
+VM_OBJ = $(RT_SRC:.cpp=.o) $(VM_FRONT_SRC:.cpp=.o)
+HDR = $(wildcard core/*.h core/platform/*.h core/lib/*.inc frontend/*.h)
 
-all: shark
+all: shark sharkvm
 
 # Shark 自身で書いた部分（並べ替え）。コアはファイルを読まないので埋め込む
 core/prelude.h: stdlib/prelude.shk tools/prelude.py
 	@python3 tools/prelude.py
 
 # ゲームに組み込む例（spec/runtime/embedding.md）
-embed: examples/embed/game
+#   game        プレイヤーが書いたコードを、その場で読んで動かす
+#   play_stage  作者のステージを、バイトコードにして焼き込んだもの
+embed: examples/embed/game examples/embed/play_stage
 examples/embed/game: examples/embed/game.o $(CORE_SRC:.cpp=.o)
+	$(CXX) $(CORE_FLAGS) -o $@ $^
+
+# バイトコードを焼き込む例（spec/runtime/bytecode.md）。
+#   build_stage  開発機で動かす道具。stage.shk → C の配列
+#   play_stage   ゲーム機に載る側。実行装置（RT_SRC）だけをリンクする
+examples/embed/build_stage: examples/embed/build_stage.o $(CORE_SRC:.cpp=.o)
+	$(CXX) $(CORE_FLAGS) -o $@ $^
+examples/embed/stage_bytecode.h: examples/embed/build_stage examples/embed/stage.shk
+	@./examples/embed/build_stage examples/embed/stage.shk $@
+examples/embed/play_stage.o: examples/embed/stage_bytecode.h
+examples/embed/play_stage: examples/embed/play_stage.o $(RT_SRC:.cpp=.o)
 	$(CXX) $(CORE_FLAGS) -o $@ $^
 
 shark: $(OBJ)
 	$(CXX) $(CORE_FLAGS) -o $@ $(OBJ)
 
+# バイトコードだけを動かす実行装置（spec/runtime/bytecode.md）。
+# shark build がこれを土台にして単一バイナリを作るので、shark と一緒に作る
+sharkvm: $(VM_OBJ)
+	$(CXX) $(CORE_FLAGS) -o $@ $(VM_OBJ)
+
 # ヘッダを直したら全部を作り直す（型の並びが変わるため）
 %.o: %.cpp $(HDR)
 	$(CXX) $(CORE_FLAGS) -c $< -o $@
 
-test: shark tests/memcheck
+test: shark sharkvm tests/memcheck
 	@sh tests/run.sh
 
 # メモリの後始末と上限を見る（tests/run.sh から呼ばれる）
@@ -83,7 +110,9 @@ web-test: web
 	@node web/test.js
 
 clean:
-	rm -f $(OBJ) examples/embed/game.o examples/embed/game tests/memcheck.o tests/memcheck shark
+	rm -f $(OBJ) $(VM_OBJ) examples/embed/game.o examples/embed/game tests/memcheck.o tests/memcheck shark sharkvm
+	rm -f examples/embed/build_stage.o examples/embed/build_stage examples/embed/play_stage.o \
+	      examples/embed/play_stage examples/embed/stage_bytecode.h
 	rm -rf docs/reference
 	rm -rf bench/build web/dist
 

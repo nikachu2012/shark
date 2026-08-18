@@ -21,21 +21,8 @@ Engine::Engine(const Config& cfg)
   // 数えるのは確保の口なので、1つのプロセスに1つ
   sk_mem_set_limit(cfg.memory_limit);
 
-  // 必ず入るもの
-  register_builtin(reg_);
-  register_methods(reg_);
-  register_math(reg_);
-  register_time(reg_);
-  register_task(reg_);
-  // 選べるもの（spec/library/overview.md）
-  if (cfg.with_fmt) register_fmt(reg_);
-  if (cfg.with_path) register_path(reg_);
-  if (cfg.with_file) register_file(reg_);
-  if (cfg.with_text) register_text(reg_);
-  if (cfg.with_json) register_json(reg_);
-  if (cfg.with_os) register_os(reg_);
-  if (cfg.with_crypto) register_crypto(reg_);
-  if (cfg.with_test) register_test(reg_);
+  // 標準ライブラリ。番号の並びは registry.cpp が決める（バイトコードがその番号を指す）
+  register_modules(reg_, cfg);
 }
 
 Engine::~Engine() {

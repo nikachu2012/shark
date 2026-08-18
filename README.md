@@ -20,15 +20,17 @@ print("Hello, Shark!");
 ## 動かす
 
 ```
-make                              # コアと shark コマンドを作る（外部依存なし）
+make                              # コアと shark コマンド、実行装置を作る（外部依存なし）
 ./shark run examples/hello.shk    # Hello, Shark!
 make test                         # tests/ を走らせる
 make embed && ./examples/embed/game   # ゲームに組み込む例
+./examples/embed/play_stage           # バイトコードを焼き込んだ例（前側を持たない）
 ```
 
 ```
-./shark run <file.shk>     実行する
+./shark run <file.shk>     実行する（.shkc を渡すと、保存したバイトコードを動かす）
 ./shark check <file.shk>   型検査だけ
+./shark build <file.shk>   処理系ごと1つにまとめる（下の「1つのファイルにして配る」）
 ./shark test [file.shk]    test_ で始まる関数を走らせる（省くと *_test.shk 全部）
 ./shark explain E0102      エラーの詳しい説明
 ./shark modules            この処理系が持つモジュールの一覧
@@ -56,6 +58,42 @@ make web-test       # 作ったものを node で確かめる
 - 出し入れは**端末とおなじ**。出力も打った文字も1本の流れに並び、`input()` は打たれるまで待つ。
   出る形（診断・panic・テストの結果）も `shark` コマンドと同じ
 - `shark.wasm` は 741 KB（gzip 233 KB）。置き場に置くだけで動き、サーバ側の処理は要らない
+
+## 1つのファイルにして配る
+
+`shark build` は、書いたプログラムを**それだけで動く1つの実行ファイル**にする。
+渡す相手に処理系を入れてもらう必要はなく、`.shk` も要らない
+（[spec/runtime/bytecode.md](spec/runtime/bytecode.md)）。
+
+```
+./shark build examples/hello.shk   # → ./hello（429 KB）
+./hello                            # Hello, Shark!
+```
+
+- 中身は**バイトコード実行装置＋バイトコード**。
+  字句解析・構文解析・型検査・コード生成は入らないので、`shark` 自身（912 KB）より小さい
+  （実行装置 427 KB ＋ hello のバイトコード 2 KB。gzip で 146 KB）
+- 型検査は作るときに済んでいる。動かすときはバイトコードを読んで走らせるだけ
+- `import` したモジュールも中に入る。作ったファイルはどの場所からでも動く
+- メモリの上限（`--memory`）と診断の言語（`--lang`）は、**作るときに**決まる
+- 引数と標準入力はそのままプログラムに届く（`os.args()` と `input()`）
+
+```
+./shark build --bytecode main.shk   # バイトコードだけ保存する（main.shkc）
+./sharkvm main.shkc                 # 実行装置で動かす
+./shark run main.shkc               # shark からも動かせる
+```
+
+`sharkvm` は仮想マシンだけを持つ実行装置で、`make` で一緒に作られる。
+`shark build` はこれを土台にして単一バイナリを組み立てる。
+
+- 起動の速さは `shark run` とほぼ変わらない（型検査はもともと 1 ミリ秒ほど）。
+  縮むのは**配るものの大きさと、要るもの**
+- 保存したバイトコードは、同じ版の処理系で作り直せる前提。
+  版や関数の表が食い違うファイルは、動かす前に気づいて止まる
+- macOS では、足したぶんが実行ファイルの形の外に出るので、`codesign -v` は
+  「うしろに余りがある」として通らない（そのままでは動く。人に配って
+  Gatekeeper や公証を通すには、`.app` に包むなど別の手当てが要る）
 
 ## 速さ
 
@@ -100,9 +138,11 @@ python3 bench/run.py loop fib   # 選んで測る
 core/     実行系（コア）。C++。ファイルも端末も触らない
   platform/   移植層          ← 機種に合わせて差し替える場所
   lib/        標準ライブラリ
-frontend/ shark コマンド（コアとは別実装）
+  bytecode    バイトコードの保存と読み戻し
+  runtime     バイトコードだけを動かす実行装置（前側を持たない Engine）
+frontend/ shark コマンドと sharkvm（実行装置）。どちらもコアとは別実装
 web/      ブラウザで動かす一式（WebAssembly。これもコアとは別実装）
-examples/ サンプル。embed/ はゲームに組み込む例
+examples/ サンプル。embed/ はゲームに組み込む例（その場で読む形と、焼き込む形）
 tests/    テスト（make test）
 bench/    C・Python・Shark の速さ比べ（python3 bench/run.py）
 stdlib/   標準ライブラリの宣言（名前・型・説明・例）。リファレンスと補完のもと

@@ -188,6 +188,19 @@ NativeStatus n_error_init2(VM& vm, Value* a, int n, Value& out) {
   return N_Ok;
 }
 
+// 処理系が持つクラスのメソッドは、Program の中に関数ポインタとして入っている。
+// バイトコードにはポインタを書けないので、読み戻すときは名前でここを引く
+// （書くときの並びは check.cpp の make_builtin_classes と揃えてある）
+NativeFn builtin_native_method(const Str& cls, const Str& name, int nparams) {
+  if (cls == "Error") {
+    if (name == "message" && nparams == 0) return n_error_message;
+    if (name == "code" && nparams == 0) return n_error_code;
+    if (name == "init" && nparams == 1) return n_error_init1;
+    if (name == "init" && nparams == 2) return n_error_init2;
+  }
+  return 0;
+}
+
 // ------------------------------------------------------------------ string
 static NativeStatus s_len(VM& vm, Value* a, int n, Value& out) { (void)vm; (void)n; out = mk_int(utf8_len(S(a, 0))); return N_Ok; }
 static NativeStatus s_sub(VM& vm, Value* a, int n, Value& out) {

@@ -5,6 +5,7 @@
 #ifndef SHARK_REGISTRY_H
 #define SHARK_REGISTRY_H
 
+#include "config.h"
 #include "program.h"
 #include "types.h"
 
@@ -69,6 +70,20 @@ void register_text(Registry& r);
 void register_test(Registry& r);
 // 型に付くメソッド（string.len など）。名前で引ける形で入れておく
 void register_methods(Registry& r);
+
+// 設定にある標準ライブラリを、決まった順で全部入れる。
+// バイトコードは関数を**番号**で指すので、この順が表の番号を決める。
+// ソースから作るとき（Engine）と、保存したバイトコードを動かすとき（Runtime）で
+// 同じものを呼ぶことで、番号が食い違わないようにしている。
+void register_modules(Registry& r, const Config& cfg);
+
+// 表の指紋。並びと名前と引数の数から作る。
+// 保存したバイトコードが、いまの処理系の表と合っているかを見るのに使う
+uint64_t registry_signature(const Registry& r);
+
+// 処理系が持つクラス（Error）のメソッドの本体を、名前で引く（本体は lib/builtin.cpp）。
+// 保存したバイトコードを読み戻すとき、関数ポインタをつなぎ直すのに使う
+NativeFn builtin_native_method(const Str& cls, const Str& name, int nparams);
 
 // std.test の記録（フロントエンドが読む）
 void test_begin();

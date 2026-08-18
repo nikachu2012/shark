@@ -12,7 +12,8 @@
         ├── ファイルを読む
         ├── コアに文字列として渡す        load()
         ├── 診断を端末の形に整形して出す
-        └── 少しずつ動かす                step()
+        ├── 少しずつ動かす                step()
+        └── バイトコードとして保存する     build（下の「単一バイナリにする」）
                     ↓
               実行系（コア）
 ```
@@ -25,7 +26,8 @@
 ```
 shark run main.shk        # 実行
 shark check main.shk      # 型検査だけ
-shark build main.shk      # バイトコードを .shkc に保存
+shark build main.shk      # 実行装置ごと1つにまとめる（→ ./main。どこでも動く）
+shark build --bytecode main.shk   # バイトコードを .shkc に保存するだけ
 shark run main.shkc       # 保存したバイトコードを実行
 shark test                # テスト（library/test.md）
 shark explain E0102       # エラーの詳しい説明
@@ -38,6 +40,32 @@ shark fmt main.shk        # 整形
 - `--memory <MB>` で、**動かすときに**使ってよいメモリの量を渡す（`0` で上限なし）。
   コアはこれを超えたところで実行時エラーにする。
   型検査までに使う量は数えない（[runtime/memory.md](runtime/memory.md)）
+- `run` に渡されたファイルがバイトコードだった場合は、型検査をせずそのまま動かす
+
+## 単一バイナリにする（build）
+
+`shark build` は、型検査を通したプログラムをバイトコードにして
+（[runtime/bytecode.md](runtime/bytecode.md)）、
+**バイトコードだけを動かす実行装置**のうしろに埋め、1つの実行ファイルにする。
+
+```
+       shark build main.shk
+        ├── ソースを読む → コアに渡す      load()
+        ├── バイトコードにする             bytecode_write()
+        ├── 実行装置（sharkvm）を探して読む
+        └── うしろに足して、実行できる形で書き出す
+```
+
+- 実行装置は**別の実行ファイル**として先に作っておく（`make sharkvm`）。
+  探す順は `--runtime <path>` → 環境変数 `SHARK_RUNTIME` →
+  `shark` 自身と同じ場所 → いまいる場所
+- 渡されたファイルが実行装置かどうかは、その中の目印を見て確かめる。
+  違うものを土台にしようとしたら、作らずに知らせる
+- **作るときに決まるもの**は、メモリの上限（`--memory`）と診断の言語（`--lang`）。
+  できたファイルは引数をぜんぶプログラムに渡すので、あとから渡す口がない
+- 保存したバイトコードを動かすとき、フロントエンドは**型検査を持つ必要がない**。
+  実行装置は `Runtime`（[runtime/bytecode.md](runtime/bytecode.md)）を呼ぶだけの、
+  `shark` より小さいフロントエンドになる
 
 ## 診断の整形
 

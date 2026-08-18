@@ -1,7 +1,11 @@
 # ビルドでできるもの
 *.o
 /shark
+/sharkvm
 /examples/embed/game
+/examples/embed/build_stage
+/examples/embed/play_stage
+/examples/embed/stage_bytecode.h
 /tests/memcheck
 /bench/build/
 /docs/reference/
