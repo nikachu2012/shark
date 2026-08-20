@@ -302,6 +302,13 @@ void CodeGen::gen_place(Node* e) {
       emit_i32(e->slot);
       break;
     case E_Field:
+      // ほかのモジュールの var（state.name）。中身は一番外側の var なので、
+      // 実体を持たない入れ物（モジュール名）をたどらず、番号で直に指す
+      if (e->is_global) {
+        emit(OP_PLACE_GLOBAL);
+        emit_i32(e->slot);
+        break;
+      }
       gen_place(e->a);
       emit(OP_PLACE_FIELD);
       emit_i32(e->resolved);
