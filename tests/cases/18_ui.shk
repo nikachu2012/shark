@@ -1,0 +1,239 @@
+// std.ui — 画面が無いところでも、描いた結果は面に残る（spec/library/ui.md）
+import std.ui;
+
+// 宣言的な入り口（ui.run）に渡すもの
+var t_count = 0;
+func t_view() -> list<Widget> {
+  return [ui.label(f"n={t_count}"), ui.button("ふやす", "inc")];
+}
+func t_update(hit: string) -> void {
+  if hit == "inc" { t_count += 1; }
+}
+
+// 部品に関数を持たせる形
+var t_acted = 0;
+func t_act() -> void { t_acted += 1; }
+func t_view2() -> list<Widget> {
+  return [ui.button("ふやす", t_act), ui.checkbox("いれる", t_act, true)];
+}
+// 押された部品の関数を呼ぶ（ui.run が中でしているのと同じこと）
+func t_call() -> void {
+  if ui.has_action() {
+    var act = ui.action();
+    act();
+  }
+}
+
+func hits(x0: int, y0: int, x1: int, y1: int) -> int {
+  var n = 0;
+  for var y in range(y0, y1) {
+    for var x in range(x0, x1) {
+      if ui.get(x, y) != 0 { n += 1; }
+    }
+  }
+  return n;
+}
+
+func main() -> int {
+  // --- 面 ---
+  print(ui.width());              // まだ開いていない
+  ui.open("ためし", 32, 24);
+  print(f"{ui.width()}x{ui.height()}");
+  print(ui.visible());            // 出力を受けているので画面は無い
+
+  // --- 色 ---
+  var red = ui.rgb(255, 0, 0);
+  var white = ui.rgb(255, 255, 255);
+  print(red);
+  print(f"{ui.red(red)} {ui.green(red)} {ui.blue(red)}");
+  print(ui.rgb(300, -5, 128));    // 端で止める
+  print(ui.mix(ui.rgb(0, 0, 0), ui.rgb(200, 100, 50), 0.5));
+
+  // --- 塗る・打つ ---
+  ui.clear(ui.rgb(0, 0, 1));
+  print(ui.get(0, 0));
+  print(ui.get(31, 23));
+  print(ui.get(32, 0));           // 面の外は 0
+  ui.set(5, 5, red);
+  print(ui.get(5, 5) == red);
+  ui.set(-1, 0, red);             // 外に打っても何も起きない
+  ui.set(0, 99, red);
+
+  // --- 線と四角 ---
+  ui.clear(0);
+  ui.hline(2, 3, 5, white);
+  print(hits(0, 3, 32, 4));
+  ui.clear(0);
+  ui.vline(2, 3, 5, white);
+  print(hits(2, 0, 3, 24));
+  ui.clear(0);
+  ui.line(0, 0, 5, 5, white);
+  print(hits(0, 0, 32, 24));
+  ui.clear(0);
+  ui.rect(1, 1, 4, 4, white);
+  print(hits(0, 0, 32, 24));      // 枠だけ
+  ui.clear(0);
+  ui.fill_rect(1, 1, 4, 4, white);
+  print(hits(0, 0, 32, 24));      // 中まで
+
+  // --- 円 ---
+  ui.clear(0);
+  ui.circle(10, 10, 4, white);
+  print(ui.get(10, 6) == white);
+  print(ui.get(10, 10) == white);
+  ui.fill_circle(10, 10, 4, white);
+  print(ui.get(10, 10) == white);
+
+  // --- 切り抜き ---
+  ui.clear(0);
+  ui.clip(0, 0, 8, 8);
+  ui.clear(white);
+  print(hits(0, 0, 32, 24));      // 8x8 だけ
+  ui.clip_off();
+  ui.clear(0);
+  print(hits(0, 0, 32, 24));
+
+  // --- 画素の並びを置く ---
+  var art = [red, 0, 0, white];
+  ui.blit(3, 3, 2, art);
+  print(ui.get(3, 3) == red);
+  print(ui.get(4, 3) == 0);
+  print(ui.get(4, 4) == white);
+
+  // --- 文字 ---
+  var w1 = ui.text_width("abc");
+  var w2 = ui.text_width("abc", 2);
+  var w3 = ui.text_width("a\nbcd");   // 長い方の行で数える
+  print(f"{w1} {w2} {w3} {ui.text_height()} {ui.text_height(2)}");
+  ui.clear(0);
+  ui.text(0, 0, "l", white);
+  var one = hits(0, 0, 32, 24);
+  ui.clear(0);
+  ui.text(0, 0, "l", white, 2);
+  print(hits(0, 0, 32, 24) == one * 4);   // 倍にすると点は4倍
+  ui.clear(0);
+  ui.text(0, 0, "さめ", white);            // 内蔵の字形に無い字は □ になる
+  print(hits(0, 0, 32, 24) > 0);
+
+  // --- 入力（画面が無いので、何も起きないまま） ---
+  var n = 0;
+  while ui.poll() && n < 3 { n += 1; }
+  print(n);
+  var k1 = ui.key("space");
+  var k2 = ui.pressed("a");
+  var k3 = ui.released("left");
+  print(f"{k1} {k2} {k3}");
+  var t = ui.typed();
+  print(f"[{t}] {ui.mouse_x()} {ui.mouse_y()} {ui.mouse(1)} {ui.clicked(0)}");
+  ui.quit();
+  print(ui.poll());
+
+  // --- 宣言的な層（Widget を配列にして返す）---
+  ui.open(120, 80);
+  ui.theme(ui.rgb(20, 20, 28), ui.rgb(230, 230, 230), ui.rgb(76, 155, 232));
+  ui.clear(0);
+  var v: list<Widget> = [
+    ui.label("hi"),
+    ui.row([ui.button("ok", "ok"), ui.button("no", "no")]),
+    ui.checkbox("on", "on", true),
+    ui.slider("vol", 50, 0, 100),
+    ui.field("name", "abc"),
+    ui.space(4),
+    ui.column([ui.label("a"), ui.label("b")]),
+  ];
+  var hit = ui.show(v);
+  print(f"[{hit}] {ui.value()} [{ui.text_value()}]");   // 誰も触っていない
+  print(ui.get(4, 4) != 0);      // 左上に文字が出ている（h の左の縦棒）
+  print(hits(0, 0, 120, 80) > 100);
+
+  ui.clear(0);
+  print(hits(0, 0, 120, 80));    // 消えている
+  var hit2 = ui.show([ui.label("l")], 40, 30);   // 置く場所を決める
+  print(f"[{hit2}] {ui.get(41, 30) != 0} {ui.get(4, 4) != 0}");
+
+  // --- フォント（機種のものが読めるかは機種次第なので、内蔵の側だけ見る）---
+  ui.font_builtin();
+  var fw = ui.text_width("ab");
+  print(f"[{ui.font_name()}] {ui.text_height()} {fw}");
+  print(ui.font("そんなファイルはありません.ttf", 16));   // 読めない
+  var notfont = "これはフォントの中身ではありません".bytes();
+  print(ui.font(notfont, 16));                            // 中身が違う
+  print(f"[{ui.font_name()}] {ui.text_height()}");         // 内蔵のまま
+
+  // --- 見た目を鎖でつないで変える ---
+  ui.open(100, 60);
+  ui.clear(0);
+  var base = ui.label("l");
+  var painted = base.color(ui.rgb(255, 0, 0)).background(ui.rgb(0, 0, 255)).padding(3);
+  _ = ui.show([base], 0, 0);
+  print(f"{ui.get(1, 0)} {ui.get(0, 0)}");        // 既定の色 / 下地なし
+  ui.clear(0);
+  _ = ui.show([painted], 0, 0);
+  print(f"{ui.get(4, 3)} {ui.get(0, 0)}");        // 変えた色 / 下地は塗られている
+  ui.clear(0);
+  _ = ui.show([ui.label("l").width(40).height(20).background(ui.rgb(0, 255, 0))], 0, 0);
+  print(f"{ui.get(39, 19) != 0} {ui.get(40, 19) != 0} {ui.get(39, 20) != 0}");
+
+  // --- 寄せ方と、新しい部品 ---
+  ui.clear(0);
+  _ = ui.show([ui.center([ui.label("l")])], 0, 0);
+  print(hits(0, 0, 46, 8) + hits(54, 0, 100, 8));   // 真ん中に寄っている（両端は空）
+  ui.clear(0);
+  _ = ui.show([ui.label("l").align("right")], 0, 0);
+  print(hits(0, 0, 90, 8));                        // 右に寄っている
+  ui.clear(0);
+  _ = ui.show([ui.divider()], 0, 0);
+  print(hits(0, 0, 100, 20));                      // 幅いっぱいの線
+
+  // --- 文字入力（画面が無いので、変換は任せられない）---
+  ui.open(120, 40);
+  print(ui.has_ime());                    // false
+  var nm = ui.input(4, 4, 16, "さめ");    // 打たれた文字が無いので変わらない
+  print(f"[{nm}] [{ui.marked()}]");
+  ui.input_off();
+  print(f"[{ui.marked()}]");
+
+  // --- 選ぶ・切り貼り・メニュー（画面が無いので、置き場は持たないことがある）---
+  ui.open(160, 60);
+  ui.clear(0);
+  print(f"[{ui.selected()}]");            // まだ何も選んでいない
+  print(ui.menu_open());                  // 出ていない
+  ui.menu(4, 4, ["ひとつめ", "ふたつめ"]);
+  print(f"{ui.menu_open()} {ui.menu_pick()}");
+  ui.menu_close();
+  print(ui.menu_open());
+  // メニューは、いちばん上に描かれる
+  ui.menu(0, 0, ["あ"]);
+  ui.clear(0);
+  _ = ui.show([ui.label("l")], 0, 0);
+  print(hits(0, 0, 160, 30) > 4);         // 部品より上にメニューが出ている
+  ui.menu_close();
+
+  // --- 宣言的な入り口（画面が無いので、1回だけ描いて返る）---
+  ui.font_builtin();
+  ui.run("ためし", 100, 60, t_view, t_update);
+  print(f"{ui.width()}x{ui.height()} {t_count}");   // 面は残る／押されていないので 0
+  print(hits(0, 0, 100, 30) > 0);                   // 何か描かれている
+
+  // --- 部品に持たせた関数 ---
+  ui.open(120, 60);
+  ui.clear(0);
+  _ = ui.show(t_view2());
+  print(f"{ui.has_action()} {t_acted}");   // 押していないので false / 0
+  t_call();
+  print(t_acted);                          // 何もしない関数が呼ばれるだけ
+  var act = ui.action();                   // 変数に入れてから呼べる
+  act();
+  print(f"{t_acted} {hits(0, 0, 120, 60) > 0}");   // 何もしない関数／描かれている
+
+  // --- PNG ---
+  ui.open(4, 4);
+  ui.clear(red);
+  var png = ui.to_png();
+  print(png.to_hex().starts_with("89504e47"));
+  print(png.len());
+
+  ui.close();
+  print(f"{ui.width()} {ui.visible()}");
+  return 0;
+}

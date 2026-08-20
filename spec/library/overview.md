@@ -26,10 +26,10 @@
 | `std.http` | HTTP でのやり取り | [http.md](http.md) |
 | `std.os` | 引数、環境変数、外部プログラム | [os.md](os.md) |
 | `std.task` | タスクとチャネル | [task.md](task.md) |
-| `std.ui` | GUI | [ui.md](ui.md) |
+| `std.ui` | 画面に描く（点・線・文字・入力と、部品の配列） | [ui.md](ui.md) |
 | `std.test` | テスト | [test.md](test.md) |
 
-`std.ui` と `std.task` は、`ui.` `task` `parallel` が構文と結び付いているため、
+`std.task` は `task` と `parallel` が構文と結び付いているため、
 使うファイルでは `import` を省略できる。
 
 ## 必須と任意
@@ -75,7 +75,8 @@ error[E0501]: この処理系は std.net を持っていません
 ## 決めごと
 
 - 外部ライブラリには依存しない。必要な表（Unicode、乱数、圧縮）は処理系に埋め込む
-  （[../runtime/platform.md](../runtime/platform.md)）
+  （[../runtime/platform.md](../runtime/platform.md)）。
+  唯一の例外が `std.ui` のフォント（FreeType）で、これも任意（[ui.md](ui.md)）
 - 失敗しうる関数は `Result<T>`、理由が1つしかない失敗は `T?` を返す
   （[../runtime/error.md](../runtime/error.md)）
 - 待つ関数は、そのタスクだけを止める（[../runtime/concurrency.md](../runtime/concurrency.md)）

@@ -26,6 +26,7 @@ Engine::Engine(const Config& cfg)
 }
 
 Engine::~Engine() {
+  ui_shutdown();   // 面を捨て、画面を開いたままなら閉じる（lib/ui.cpp）
   if (checker_) { checker_->~Checker(); sk_free(checker_); }
   if (prog_) { prog_->~Program(); sk_free(prog_); }
   if (arena_) { arena_->~Arena(); sk_free(arena_); }
@@ -157,6 +158,18 @@ const Vec<Diagnostic>& Engine::load(const Str& name, const Str& source) {
     loaded_.push(Str("@prelude"));
     checker_->collect(pu);
   }
+  // 宣言的に書くときの入り口（ui.run）。これも Shark で書いてある。
+  // std.ui を持つときだけ読み、モジュールは std.ui にする。
+  // こうすると ui.run(...) が、ふつうのモジュールの関数として解決される
+  if (reg_.has_module(Str("std.ui"))) {
+    Parser p(Str(kUiRunSource), Str("@std.ui"), *arena_, diag_);
+    Unit* uu = p.parse();
+    uu->display = Str("@std.ui");
+    uu->module = Str("std.ui");
+    units_.push(uu);
+    loaded_.push(Str("@std.ui"));
+    checker_->collect(uu);
+  }
 
   load_unit(Str("@entry"), source, name, true, 0);
   checker_->check_all();
@@ -171,7 +184,9 @@ const Vec<Diagnostic>& Engine::load(const Str& name, const Str& source) {
   // 前奏の中の警告は利用者に見せない
   Vec<Diagnostic>& items = diag_.items();
   for (int i = items.size() - 1; i >= 0; i--)
-    if (items[i].file == "@prelude" && items[i].severity == SEV_WARNING) items.remove(i);
+    if ((items[i].file == "@prelude" || items[i].file == "@std.ui") &&
+        items[i].severity == SEV_WARNING)
+      items.remove(i);
   return diag_.items();
 }
 

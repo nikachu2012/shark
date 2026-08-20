@@ -249,6 +249,26 @@ int main() {
               "  if crypto.equal(back, d) { return m.len() + r.len() + u.len(); }\n"
               "  return 0;\n"
               "}");
+  // 面（生のメモリ）と、宣言的な層の部品（クラスの実体と配列）
+  check_clean("画面と部品",
+              "import std.ui;\n"
+              "func act() -> void {}\n"
+              "func view(n: int) -> list<Widget> {\n"
+              "  return [ui.label(\"n\"), ui.row([ui.button(\"ok\", act),\n"
+              "          ui.checkbox(\"c\", \"c\", true)]), ui.field(\"f\", \"abc\"),\n"
+              "          ui.center([ui.divider()])];\n"
+              "}\n"
+              "func main() -> int {\n"
+              "  ui.open(\"memcheck\", 40, 24);\n"
+              "  ui.clear(ui.rgb(1, 2, 3));\n"
+              "  ui.fill_circle(20, 12, 6, ui.rgb(255, 0, 0));\n"
+              "  ui.text(1, 1, \"hi\", ui.rgb(255, 255, 255));\n"
+              "  var hit = ui.show(view(1));\n"
+              "  var png = ui.to_png();\n"
+              "  ui.close();\n"
+              "  return hit.len() + png.len() * 0;\n"
+              "}");
+
   check_clean("実行時エラーで止まったあと",
               "func main() -> int { var xs = [1]; var s = \"ながい文字列\" + \"ですよ\"; return xs[5] + s.len(); }");
 

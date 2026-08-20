@@ -129,6 +129,7 @@ class Checker {
   Vec<Str> vkeys_;     // virtual の表の位置を決めるための鍵
   ClassInfo* c_error_;
   ClassInfo* c_comparable_;
+  ClassInfo* c_widget_;   // std.ui の Widget（std.ui を持たない処理系では 0）
   Type* t_none_;       // none リテラルの型（どの T? にも入る）
 };
 

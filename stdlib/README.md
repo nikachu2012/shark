@@ -9,6 +9,7 @@
 | [`types.shk`](types.shk) | `string` `list` `map` `Result` など、コアが持つ型と、その関数 |
 | `math.shk` `time.shk` … | `import std.xxx;` で使うモジュール（1ファイル1モジュール） |
 | [`prelude.shk`](prelude.shk) | **宣言ではなく実装**。Shark 自身で書いた並べ替え |
+| [`prelude_ui.shk`](prelude_ui.shk) | 同じく実装。宣言的に書くときの入り口（`ui.run`） |
 
 読むのは [`tools/shkdoc.py`](../tools/shkdoc.py)。使う側は2つ。
 

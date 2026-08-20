@@ -7,7 +7,7 @@ namespace shark {
 // ------------------------------------------------------------------ 準備
 Checker::Checker(Program& prog, Registry& reg, TypeTable& types, DiagBag& diag, Arena& arena)
     : prog_(prog), reg_(reg), t_(types), diag_(diag), arena_(arena), unit_(0), fc_(0),
-      c_error_(0), c_comparable_(0) {
+      c_error_(0), c_comparable_(0), c_widget_(0) {
   t_none_ = t_.optional_of(t_.t_unknown());
   make_builtin_classes();
 }
@@ -30,6 +30,13 @@ NativeStatus n_error_message(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_error_code(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_error_init1(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_error_init2(VM& vm, Value* args, int n, Value& out);
+// Widget の見た目を変えるメソッド（本体は lib/ui.cpp）
+NativeStatus n_widget_color(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_background(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_padding(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_width(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_height(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_align(VM& vm, Value* args, int n, Value& out);
 
 void Checker::make_builtin_classes() {
   // class Error { public virtual func message() -> string; public virtual func code() -> int; }
@@ -97,6 +104,77 @@ void Checker::make_builtin_classes() {
     c_comparable_->methods.push(m);
   }
   layout_class(c_comparable_);
+
+  // class Widget — std.ui の宣言的な層で使う入れ物（spec/library/ui.md）。
+  // 作るのは ui.label() などで、中身は書く人からは見えない。
+  // list<Widget> に入れ子にして持ち、ui.show() に渡す
+  if (reg_.has_module(Str("std.ui"))) {
+    c_widget_ = new_class(prog_);
+    c_widget_->name = Str("Widget");
+    c_widget_->module = Str("std");
+    c_widget_->is_public = true;
+    c_widget_->is_builtin = true;
+    Type* tw = t_.class_type(c_widget_);
+    Vec<Type*> no_params;
+    struct { const char* name; Type* type; } wf[] = {
+        {"kind", t_.t_int()},        // 部品の種類（lib/ui.cpp の WidgetKind）
+        {"text", t_.t_string()},     // 出す文字・ラベル
+        {"id", t_.t_string()},       // 名札。押されると ui.show() がこれを返す
+        {"a", t_.t_int()},           // 値（checkbox の入切、slider のいま、space の高さ）
+        {"b", t_.t_int()},           // slider の下
+        {"c", t_.t_int()},           // slider の上
+        {"kids", t_.list_of(tw)},    // column / row の中身
+        // ここから下は見た目の指定（鎖でつないで変える）。-1 と 0 は「指定なし」
+        {"fg", t_.t_int()},          // 文字の色
+        {"bg", t_.t_int()},          // 下地の色
+        {"pad", t_.t_int()},         // 内側の余白
+        {"wid", t_.t_int()},         // 幅（0 なら中身から決める）
+        {"hei", t_.t_int()},         // 高さ（同上）
+        {"al", t_.t_int()},          // 寄せ方。0=左 1=中央 2=右
+        {"act", t_.func_type(no_params, t_.t_void())},   // 押されたときに呼ぶ関数
+    };
+    for (int i = 0; i < 14; i++) {
+      FieldInfo f;
+      f.name = Str(wf[i].name);
+      f.type = wf[i].type;
+      f.is_public = false;   // 中身は見せない。作るのも読むのも ui.* を通す
+      f.owner = c_widget_;
+      c_widget_->fields.push(f);
+    }
+    // 見た目を変えるメソッド。**自分を変えるのではなく、変えたものを返す**ので、
+    // ui.label("あ").color(c).padding(4) のようにつなげられる（本体は lib/ui.cpp）
+    struct { const char* name; NativeFn fn; Type* p0; } wm[] = {
+        {"color", n_widget_color, t_.t_int()},
+        {"background", n_widget_background, t_.t_int()},
+        {"padding", n_widget_padding, t_.t_int()},
+        {"width", n_widget_width, t_.t_int()},
+        {"height", n_widget_height, t_.t_int()},
+        {"align", n_widget_align, t_.t_string()},
+    };
+    for (int i = 0; i < 6; i++) {
+      FuncInfo* f = new_func(prog_);
+      f->name = Str(wm[i].name);
+      f->module = Str("std");
+      f->owner = c_widget_;
+      f->is_method = true;
+      f->is_public = true;
+      f->is_native = true;
+      f->native = wm[i].fn;
+      f->ret = tw;
+      ParamInfo p;
+      p.name = Str("v");
+      p.type = wm[i].p0;
+      f->params.push(p);
+      MethodRef m;
+      m.name = f->name;
+      m.func = f->index;
+      m.is_public = true;
+      c_widget_->methods.push(m);
+    }
+    layout_class(c_widget_);
+    // 関数の表に仮で入れてある Widget を、本物に差し替える（lib/ui.cpp）
+    ui_bind_widget_class(reg_, c_widget_);
+  }
 }
 
 // virtual の表の位置。同じ名前・同じ引数なら、どのクラスでも同じ位置になる

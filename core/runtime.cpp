@@ -15,6 +15,7 @@ Runtime::Runtime(const Config& cfg) : cfg_(cfg), reg_(types_), prog_(0), ok_(fal
 }
 
 Runtime::~Runtime() {
+  ui_shutdown();   // 面を捨て、画面を開いたままなら閉じる（lib/ui.cpp）
   vm_.reset();
   if (prog_) { prog_->~Program(); sk_free(prog_); }
 }

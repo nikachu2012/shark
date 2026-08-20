@@ -15,6 +15,25 @@ CXXSTD   ?= -std=c++17
 CXXFLAGS ?= -O2 -Wall -Wextra -Wno-unused-parameter
 CORE_FLAGS = $(CXXSTD) $(CXXFLAGS) -fno-exceptions -fno-rtti
 
+# 窓（std.ui）は OS の道具を**実行時に**取りに行く（dlopen）。
+# そのため作るときに要るライブラリは無い。古い glibc だけ dlopen が -ldl にある
+ifeq ($(shell uname -s),Linux)
+LDLIBS += -ldl
+endif
+
+# 日本語などの字を出すための FreeType。**唯一の外部ライブラリ**で、任意。
+# 入っていれば自動で使い、無ければ内蔵の 5×7 の字形だけになる。
+#   make FREETYPE=0   入っていても使わない
+#   make FREETYPE=1   使う（pkg-config で見つからないときは FT_CFLAGS/FT_LIBS を渡す）
+# 入れ方は README の「日本語の字を出す」
+FREETYPE ?= $(shell pkg-config --exists freetype2 2>/dev/null && echo 1 || echo 0)
+ifeq ($(FREETYPE),1)
+FT_CFLAGS ?= $(shell pkg-config --cflags freetype2)
+FT_LIBS   ?= $(shell pkg-config --libs freetype2)
+CORE_FLAGS += -DSHARK_FREETYPE $(FT_CFLAGS)
+LDLIBS += $(FT_LIBS)
+endif
+
 # コアは2つに分かれる。
 #   RT_SRC  バイトコードを動かすのに要るもの（＝実行装置。sharkvm はこれだけ）
 #   FE_SRC  ソースからバイトコードを作るところ（字句解析・構文解析・型検査・コード生成）
@@ -25,7 +44,7 @@ RT_SRC = \
   core/lib/format.cpp core/lib/builtin.cpp core/lib/math.cpp core/lib/time.cpp \
   core/lib/task.cpp core/lib/fmt.cpp core/lib/path.cpp core/lib/file.cpp \
   core/lib/os.cpp core/lib/text.cpp core/lib/json.cpp core/lib/test.cpp \
-  core/lib/crypto.cpp
+  core/lib/crypto.cpp core/lib/ui.cpp
 
 FE_SRC = \
   core/lexer.cpp core/parser.cpp core/check.cpp core/codegen.cpp core/shark.cpp
@@ -37,12 +56,13 @@ VM_FRONT_SRC = frontend/vm_main.cpp
 
 OBJ = $(CORE_SRC:.cpp=.o) $(FRONT_SRC:.cpp=.o)
 VM_OBJ = $(RT_SRC:.cpp=.o) $(VM_FRONT_SRC:.cpp=.o)
-HDR = $(wildcard core/*.h core/platform/*.h core/lib/*.inc frontend/*.h)
+HDR = $(wildcard core/*.h core/platform/*.h core/platform/*.inc core/lib/*.inc frontend/*.h)
 
 all: shark sharkvm
 
-# Shark 自身で書いた部分（並べ替え）。コアはファイルを読まないので埋め込む
-core/prelude.h: stdlib/prelude.shk tools/prelude.py
+# Shark 自身で書いた部分（並べ替えと、宣言的 UI の入り口）。
+# コアはファイルを読まないので埋め込む
+core/prelude.h: stdlib/prelude.shk stdlib/prelude_ui.shk tools/prelude.py
 	@python3 tools/prelude.py
 
 # ゲームに組み込む例（spec/runtime/embedding.md）
@@ -50,13 +70,13 @@ core/prelude.h: stdlib/prelude.shk tools/prelude.py
 #   play_stage  作者のステージを、バイトコードにして焼き込んだもの
 embed: examples/embed/game examples/embed/play_stage
 examples/embed/game: examples/embed/game.o $(CORE_SRC:.cpp=.o)
-	$(CXX) $(CORE_FLAGS) -o $@ $^
+	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
 
 # バイトコードを焼き込む例（spec/runtime/bytecode.md）。
 #   build_stage  開発機で動かす道具。stage.shk → C の配列
 #   play_stage   ゲーム機に載る側。実行装置（RT_SRC）だけをリンクする
 examples/embed/build_stage: examples/embed/build_stage.o $(CORE_SRC:.cpp=.o)
-	$(CXX) $(CORE_FLAGS) -o $@ $^
+	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
 # ホストの表を変えたら焼き直す（指紋が変わるので、古いままだと読めなくなる）
 examples/embed/game.o examples/embed/build_stage.o examples/embed/play_stage.o: \
   examples/embed/game_hosts.h
@@ -65,15 +85,15 @@ examples/embed/stage_bytecode.h: examples/embed/build_stage examples/embed/stage
 	@./examples/embed/build_stage examples/embed/stage.shk $@
 examples/embed/play_stage.o: examples/embed/stage_bytecode.h
 examples/embed/play_stage: examples/embed/play_stage.o $(RT_SRC:.cpp=.o)
-	$(CXX) $(CORE_FLAGS) -o $@ $^
+	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
 
 shark: $(OBJ)
-	$(CXX) $(CORE_FLAGS) -o $@ $(OBJ)
+	$(CXX) $(CORE_FLAGS) -o $@ $(OBJ) $(LDLIBS)
 
 # バイトコードだけを動かす実行装置（spec/runtime/bytecode.md）。
 # shark build がこれを土台にして単一バイナリを作るので、shark と一緒に作る
 sharkvm: $(VM_OBJ)
-	$(CXX) $(CORE_FLAGS) -o $@ $(VM_OBJ)
+	$(CXX) $(CORE_FLAGS) -o $@ $(VM_OBJ) $(LDLIBS)
 
 # ヘッダを直したら全部を作り直す（型の並びが変わるため）
 %.o: %.cpp $(HDR)
@@ -84,11 +104,11 @@ test: shark sharkvm tests/memcheck tests/bytecheck
 
 # メモリの後始末と上限を見る（tests/run.sh から呼ばれる）
 tests/memcheck: tests/memcheck.o $(CORE_SRC:.cpp=.o)
-	$(CXX) $(CORE_FLAGS) -o $@ $^
+	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
 
 # 壊れたバイトコードを断るか見る（tests/run.sh から呼ばれる）
 tests/bytecheck: tests/bytecheck.o $(CORE_SRC:.cpp=.o)
-	$(CXX) $(CORE_FLAGS) -o $@ $^
+	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
 
 # コアのソース一覧を出す（web/build.sh が使う）。
 # 一覧を2か所に書くと、片方だけ増えて気づけないので、ここを正とする

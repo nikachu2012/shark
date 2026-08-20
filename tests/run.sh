@@ -5,6 +5,10 @@
 #   sh tests/run.sh  でも動く
 set -u
 root=$(cd "$(dirname "$0")/.." && pwd)
+# std.ui は画面を開かない。開くと機種によって結果が変わり、窓も出てしまう
+# （spec/library/ui.md）。見えない面に描くだけになる
+SHARK_UI=off
+export SHARK_UI
 shark="$root/shark"
 pass=0
 fail=0

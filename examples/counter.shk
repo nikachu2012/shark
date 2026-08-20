@@ -1,0 +1,68 @@
+// counter.shk — 宣言的な書き方の例（spec/library/ui.md）
+//
+//   ./shark run examples/counter.shk
+//
+// くり返しも描き直しも ui.run() が引き受ける。書くのは「いまどうあるべきか」と、
+// **部品に持たせた関数**だけ。押されたら、その関数が呼ばれる。
+//
+// 日本語は ui.run() が機種のフォントを読むので、そのまま出る。
+// FreeType を入れずに作ったときは □ になる（README の「日本語の字を出す」）。
+import std.ui;
+import std.file;
+
+// 状態はふつうの変数。処理系は覚えない
+var count = 0;
+var sound = true;
+var volume = 60;
+var name = "さめ";
+
+// 押されたときの動き。部品に直に持たせる
+func inc() -> void { count += 1; }
+func dec() -> void { count -= 1; }
+func reset() -> void { count = 0; }
+func toggle_sound() -> void { sound = ui.value() == 1; }
+func set_volume() -> void { volume = ui.value(); }
+func bye() -> void { ui.quit(); }
+
+// いまどうあるべきか
+func view() -> list<Widget> {
+  return [
+    ui.center([ui.label("かうんた").color(ui.rgb(120, 200, 255))]),
+    ui.divider(),
+    ui.label(f"{count} 回おした"),
+    ui.row([
+      ui.button("ふやす", inc),
+      ui.button("へらす", dec),
+      ui.button("もどす", reset),
+    ]),
+    ui.space(4),
+    ui.checkbox("音を出す", toggle_sound, sound),
+    ui.row([ui.label("おおきさ"), ui.slider(set_volume, volume, 0, 100)]),
+    ui.label(f"{volume}"),
+    ui.space(4),
+    ui.label("なまえ（押してから打つ。右で押すと切り貼り）"),
+    ui.field("name", name),          // 入力欄は名札で受ける
+    ui.space(4),
+    ui.button("おわる", bye).align("right"),
+  ];
+}
+
+// 入力欄だけは名札で来る
+func update(hit: string) -> void {
+  if hit == "name" { name = ui.text_value(); }
+}
+
+func main() -> int {
+  ui.theme(ui.rgb(18, 18, 26), ui.rgb(232, 232, 236), ui.rgb(76, 155, 232));
+  ui.run("かうんた", 420, 340, view, update);
+
+  // 画面が無いときは、ui.run が1回だけ描いて返り、面はそのまま残る
+  if ui.width() > 0 {
+    _ = file.write_bytes("counter.png", ui.to_png());
+    print("画面がないので counter.png に保存しました");
+    ui.close();
+    return 0;
+  }
+  print(f"{count} 回おしました");
+  return 0;
+}

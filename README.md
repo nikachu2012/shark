@@ -21,6 +21,7 @@ print("Hello, Shark!");
 
 ```
 make                              # コアと shark コマンド、実行装置を作る（外部依存なし）
+                                  #   日本語の字を出すときだけ FreeType が要る（下）
 ./shark run examples/hello.shk    # Hello, Shark!
 make test                         # tests/ を走らせる
 make embed && ./examples/embed/game   # ゲームに組み込む例
@@ -58,6 +59,161 @@ make web-test       # 作ったものを node で確かめる
 - 出し入れは**端末とおなじ**。出力も打った文字も1本の流れに並び、`input()` は打たれるまで待つ。
   出る形（診断・panic・テストの結果）も `shark` コマンドと同じ
 - `shark.wasm` は 741 KB（gzip 233 KB）。置き場に置くだけで動き、サーバ側の処理は要らない
+
+## 画面に描く
+
+`std.ui` には層が2つある。どちらも描くのはこの処理系の中で、
+外の描画ライブラリにもフォントにも、**窓の道具にも頼らない**。
+
+```
+./shark run examples/paint.shk      # 下の層。マウスで描く
+./shark run examples/counter.shk    # 上の層。部品を配列で返す
+```
+
+**下の層**は、画素の並び1枚（面）と、押された・動いたという出来事だけ。
+
+```shark
+import std.ui;
+
+ui.open("さかな", 160, 120);   // 面は画素の並び。細かい画面なら ui.scale() を掛ける
+while ui.poll() {
+  if ui.pressed("esc") { ui.quit(); }
+  ui.clear(ui.rgb(0, 20, 40));
+  ui.fill_circle(ui.mouse_x(), ui.mouse_y(), 12, ui.rgb(255, 140, 60));
+  ui.present();
+  sleep(0.016);
+}
+```
+
+**上の層**は、「いまどうあるべきか」を **`Widget` の配列にして返す**だけ。
+くり返しも描き直しも `ui.run()` が引き受けるので、**書くのは2つの関数**で済む。
+
+```shark
+var count = 0;                        // 状態はふつうの変数
+
+func inc() -> void { count += 1; }    // 押されたときの動き
+func dec() -> void { count -= 1; }
+
+func view() -> list<Widget> {         // いまどうあるべきか
+  return [
+    ui.label(f"{count} 回"),
+    ui.row([ui.button("ふやす", inc), ui.button("へらす", dec)]),
+  ];
+}
+
+ui.run("かうんた", 420, 300, view);
+```
+
+- 呼び出しにブロックを続ける記法は言語に無いので、入れ子は**配列**で表す
+- **押されたときの動きは部品に持たせる。**まとめて振り分けたいときは、
+  関数の代わりに名札を渡して `update(hit)` で受けてもよい
+- 部品は状態を持たない。値は呼んだ側が持って毎回渡し直すので、
+  **「いまの状態」と「画面」が食い違わない**
+- 見た目は鎖でつないで変える。`ui.label("さめ").color(c).padding(6)`
+- `ui.run()` は**処理系の中で Shark 自身で書いてある**。特別な仕掛けは無く、
+  下の層（`ui.poll` / `ui.show` / `ui.present`）を呼んでいるだけ
+
+### 出し先
+
+`shark` コマンドは、出せるところに出す。
+
+| | |
+|---|---|
+| macOS | 窓（AppKit） |
+| Linux ほか | 窓（X11） |
+| 窓が開けないところ | 端末。升目1つに上下2画素を詰め（`▀`）、24 ビットの色で出す |
+| 画面が無いところ | 見えない面に描く。結果は `ui.get()` と `ui.to_png()` で取れる |
+
+面の1画素は画面の1画素にそのまま乗る。**細かい画面（HiDPI）では面も細かく取る。**
+
+```shark
+var k = ui.scale();                  // ふつうは 1、Retina なら 2
+ui.open("さめ", 420 * k, 300 * k);   // 見た目の大きさは変わらず、中身が細かくなる
+_ = ui.font(12 * k);                 // 12pt くらい
+```
+
+- 窓に要る関数は**実行時に**取りに行く（`dlopen`）ので、
+  **作るときに要るライブラリは無い**。X11 の無い機械でもそのまま作れる
+- 画面が無くても同じように動くので、**画面の要るプログラムでもテストが書ける**
+- `SHARK_UI=window|terminal|off` で出し先を選べる
+- 移植層に求めるのは「面を出す」と「出来事を渡す」の2つだけ。
+  ゲームに組み込むときは、その面をゲーム本体が受け取る
+  （[spec/library/ui.md](spec/library/ui.md)）
+
+内蔵の字形は ASCII だけ。日本語などは □ になる。
+
+## 日本語の字を出す（FreeType）
+
+内蔵の字形は ASCII だけ。日本語などを出すには **FreeType** が要る。
+これが**唯一の外部ライブラリ**で、**任意**。入れなくても処理系は作れて動く
+（日本語が □ になるだけ）。日本語の字形を自前で抱えると処理系が数百 KB 太るので、
+ここだけ外に頼ることにした（[spec/library/ui.md](spec/library/ui.md)）。
+
+### 1. FreeType を入れる
+
+| | |
+|---|---|
+| macOS | `brew install freetype` |
+| Debian / Ubuntu | `sudo apt install libfreetype-dev pkg-config` |
+| Fedora / RHEL | `sudo dnf install freetype-devel pkgconf-pkg-config` |
+| Arch | `sudo pacman -S freetype2 pkgconf` |
+| Windows（MSYS2） | `pacman -S mingw-w64-x86_64-freetype mingw-w64-x86_64-pkgconf` |
+
+日本語のフォントも要る。macOS と Windows は最初から入っている。
+Linux で無ければ `sudo apt install fonts-noto-cjk`（Debian / Ubuntu）など。
+
+### 2. 作り直す
+
+`make` が `pkg-config` で見つけて、自動で使う。
+
+```
+make clean && make          # 見つかれば FreeType つきで作られる
+```
+
+| したいこと | |
+|---|---|
+| 入っていても使わない | `make FREETYPE=0` |
+| pkg-config が無い | `make FREETYPE=1 FT_CFLAGS=-I/opt/freetype/include/freetype2 FT_LIBS="-L/opt/freetype/lib -lfreetype"` |
+| 使われているか見る | `./shark run examples/counter.shk`（日本語が出れば入っている） |
+
+`make clean` を挟むのは、`make` が「作るときの指定が変わったこと」までは見ないため。
+
+### 3. プログラムから読む
+
+**何もしなければ内蔵の字形のまま。**読むかどうかは書く人が決める。
+
+```shark
+import std.ui;
+
+var k = ui.scale();                   // 細かい画面（Retina）なら 2
+ui.open("さめ", 420 * k, 300 * k);
+if !ui.font(12 * k) {                 // 12pt くらい。画素で渡す
+  print("フォントが見つかりません");
+}
+ui.text(8 * k, 8 * k, "こんにちは", ui.rgb(255, 255, 255));
+```
+
+探す順番は、環境変数 `SHARK_FONT` → 機種によくある場所。
+探すのは**本文の太さ**（macOS はヒラギノ角ゴシック W4、Linux は Noto Sans CJK Regular）。
+別の太さが要るときは、自分で選ぶ。
+
+```shark
+_ = ui.font("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 15);
+_ = ui.font(data, 15);     // 自分で読んだ中身（bytes）から
+ui.font_builtin();          // 内蔵の 5×7 に戻す
+print(ui.font_name());      // いま使っているもの。内蔵なら空
+```
+
+### 気をつけること
+
+- **字の幅と高さは、その機種のフォント次第**になる。`ui.text_width()` の答えも変わる。
+  内蔵の字形のままなら、どの機種でも同じ形・同じ大きさで出る。
+  だから**既定は内蔵**で、`ui.font()` を呼んだときだけ切り替わる
+- 部品（ボタンなど）の寸法は字の大きさから決まるので、`ui.font()` を変えるだけで
+  全体の釣り合いが付いてくる
+- `shark build` で作った単一バイナリは、FreeType つきで作ったなら
+  配る先にも FreeType が要る（`make FREETYPE=0` で作れば要らない）
+- ブラウザ版（`make web`）とゲーム機向けの雛形には入れない。内蔵の字形だけになる
 
 ## 1つのファイルにして配る
 

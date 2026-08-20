@@ -2,7 +2,8 @@
 
 namespace shark {
 
-int Registry::add(const char* name, NativeFn fn, Type* ret, Type* p0, Type* p1, Type* p2, Type* p3) {
+int Registry::add(const char* name, NativeFn fn, Type* ret, Type* p0, Type* p1, Type* p2, Type* p3,
+                  Type* p4) {
   NativeEntry e;
   e.name = Str(name);
   e.fn = fn;
@@ -11,6 +12,7 @@ int Registry::add(const char* name, NativeFn fn, Type* ret, Type* p0, Type* p1, 
   if (p1) e.params.push(p1);
   if (p2) e.params.push(p2);
   if (p3) e.params.push(p3);
+  if (p4) e.params.push(p4);
   e_.push(e);
   return e_.size() - 1;
 }
@@ -52,6 +54,7 @@ void register_modules(Registry& r, const Config& cfg) {
   if (cfg.with_os) register_os(r);
   if (cfg.with_crypto) register_crypto(r);
   if (cfg.with_test) register_test(r);
+  if (cfg.with_ui) register_ui(r);
 }
 
 // 表の指紋。合わないバイトコードは読まない（spec/runtime/bytecode.md）。

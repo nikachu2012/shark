@@ -52,6 +52,87 @@ struct PlatformRandom {
   bool (*secure_bytes)(unsigned char* buf, int n);
 };
 
+// --- 任意機能：画面 -------------------------------------------------------
+//
+// std.ui が使う（spec/library/ui.md）。無い機種では 0 でよく、その場合 std.ui は
+// 「見えない面」に描くだけになる（描いた結果は ui.get() や ui.to_png() で取れる）。
+//
+// コアは面（RGB の並び）を自前で描き、ここに求めるのは次の3つだけ。
+//   1. その面を画面に出す        present
+//   2. 起きた出来事を渡す        poll（待たない。無ければ false）
+//   3. 開ける・閉じる            open / close
+
+enum ScreenEventKind {
+  SEV_None = 0,
+  SEV_Close,   // 閉じてくれと言われた
+  SEV_Key,     // キーが押された・離された（code に下の番号）
+  SEV_Text,    // 文字が打たれた（text に UTF-8）
+  SEV_Mouse,   // 押された・離された・動いた（code はボタン、-1 は移動）
+};
+
+// キーの番号。印字できる文字はその ASCII（英字は小文字）をそのまま使い、
+// それ以外はここの番号を使う
+enum ScreenKey {
+  SKEY_Left = 0x100, SKEY_Right, SKEY_Up, SKEY_Down,
+  SKEY_Enter, SKEY_Escape, SKEY_Tab, SKEY_Back, SKEY_Delete,
+  SKEY_Home, SKEY_End, SKEY_PageUp, SKEY_PageDown,
+  SKEY_Shift, SKEY_Ctrl, SKEY_Alt,
+  SKEY_F1, SKEY_F2, SKEY_F3, SKEY_F4, SKEY_F5, SKEY_F6,
+  SKEY_F7, SKEY_F8, SKEY_F9, SKEY_F10, SKEY_F11, SKEY_F12,
+  SKEY_Max
+};
+
+struct ScreenEvent {
+  int kind;      // ScreenEventKind
+  int code;      // SEV_Key: ScreenKey / SEV_Mouse: 0=左 1=中 2=右、-1 は移動
+  bool down;     // SEV_Key / SEV_Mouse: 押されたなら true
+  int x, y;      // SEV_Mouse: 面の中の位置（画素）
+  char text[8];  // SEV_Text: 打たれた文字（UTF-8。0 で終わる）
+  ScreenEvent() : kind(SEV_None), code(0), down(false), x(0), y(0) { text[0] = 0; }
+};
+
+struct PlatformScreen {
+  // 画面の細かさ（1 なら等倍、2 なら HiDPI）。**開く前にも呼べること**。
+  // std.ui はこれを見て、面の大きさと字の大きさを決める（ui.scale()）
+  int (*scale)();
+  // 画面を用意する。出せないなら false（そのときコアは見えない面に描く）
+  bool (*open)(const char* title, int w, int h);
+  void (*close)();
+  // 面の中身を画面に出す。px は横 w・縦 h の並びで、1つが 0x00RRGGBB
+  void (*present)(const uint32_t* px, int w, int h);
+  // 起きた出来事を1つ取る。無ければ false を返す。**待たない**
+  bool (*poll)(ScreenEvent* out);
+  // 離した合図を出せるか。出せない機種（端末など）では、コアが
+  // 「押された刻みのあいだだけ押されている」とみなす
+  bool has_key_up;
+
+  // --- 文字入力（IME）。無ければ 0 でよい -------------------------------
+  //
+  // 日本語などの変換は OS が持っている。自前で候補一覧まで描くと機種ごとの
+  // 作り込みが際限なく増えるので、**変換は OS に任せて、結果だけ受け取る**
+  // （spec/library/ui.md）。
+  //
+  // 入力欄に文字を入れているあいだだけ on にする。off のあいだ、キーは
+  // ふつうの出来事（SEV_Key / SEV_Text）として届く。
+  //   initial  受け付け始めるときの中身。0 なら今の中身のまま（置き場所だけ変える）
+  //   x, y, h  面の中の位置。変換中の候補をこのあたりに出す
+  void (*text_input)(bool on, const char* initial, int x, int y, int h);
+  // いまの中身。confirmed に確定した文字列、marked に変換中の文字列。
+  // text_input(on) のあいだだけ意味がある。取れなければ false
+  bool (*text_state)(Str* confirmed, Str* marked);
+
+  // 選んでいるところ。単位は**文字の数**（先頭から数えて start から len 文字）。
+  // 持っている機種では、矢印・shift・二度押しでの選択も OS がやってくれる
+  bool (*text_selection)(int* start, int* len);
+  void (*text_select)(int start, int len);
+  // 選んでいるところを、この文字列で置き換える（貼り付けと切り取りに使う）
+  void (*text_replace)(const char* s);
+
+  // --- 切り貼りの置き場（クリップボード）。無ければ 0 -------------------
+  bool (*clipboard_get)(Str* out);
+  void (*clipboard_set)(const char* s);
+};
+
 // --- 必須 ----------------------------------------------------------------
 struct Platform {
   void* (*alloc)(size_t n);
@@ -72,6 +153,7 @@ struct Platform {
   const PlatformFile*   file;    // 無ければ 0
   const PlatformOS*     os;      // 無ければ 0
   const PlatformRandom* random;  // 無ければ 0
+  const PlatformScreen* screen;  // 無ければ 0
 };
 
 // いま使っている移植層。差し替えるときは platform_set() を呼ぶ

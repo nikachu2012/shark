@@ -2,6 +2,6 @@ error[E0501]: この処理系は std.net を持っていません
   --> missing_module.shk:1:8
   1 | import std.net;
     |        -------
-  直し方: この処理系が持つモジュール: math, time, task, fmt, path, file, text, json, os, crypto, test
+  直し方: この処理系が持つモジュール: math, time, task, fmt, path, file, text, json, os, crypto, test, ui
 
 1 件の誤りがあります

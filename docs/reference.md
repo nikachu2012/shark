@@ -17,7 +17,7 @@ Shark は、**ゲーム機で動くプログラミング学習用ゲームの中
 | 最初 | `var` `func` `if` `for` `while` `print` `list` `map` `string` | 1〜7、11 |
 | 次 | `class` 継承 `T?` `Result` `try` | 8〜10 |
 | その次 | `ref` `virtual` `override` インタフェース | 4、8 |
-| 必要になったら | ジェネリクス `task` `parallel` `ui` | 8、14、15 |
+| 必要になったら | ジェネリクス `task` `parallel` `std.ui` | 8、14、15 |
 
 ---
 
@@ -682,7 +682,7 @@ int(s);  float(s);  string(v);  bool(s);// 型変換
 | `std.net` / `std.http` | TCP と HTTP | [net.md](../spec/library/net.md) / [http.md](../spec/library/http.md) |
 | `std.os` | 引数、環境変数、外部プログラム | [os.md](../spec/library/os.md) |
 | `std.task` | タスクとチャネル | [task.md](../spec/library/task.md) |
-| `std.ui` | GUI | [ui.md](../spec/library/ui.md) |
+| `std.ui` | 画面に描く | [ui.md](../spec/library/ui.md) |
 | `std.test` | テスト | [test.md](../spec/library/test.md) |
 
 ### よく使うもの
@@ -816,62 +816,187 @@ sleep(1.0);     // このタスクだけが1秒止まる。他のタスクは動
 
 ---
 
-## 15. GUI
+## 15. 画面に描く
 
-「どう描くか」ではなく「今どうあるべきか」を書きます。状態が変わると、
-記述をたどり直して前回との差だけを画面に反映します。
+`std.ui` には層が2つあります。**下の層**は画素の並び1枚（面）と、押された・動いたという
+出来事だけ。**上の層**は、部品を配列にして返すと、そのとおりに描いてくれます。
+混ぜて使えます。
+
+`shark` コマンドは、macOS と Linux では**窓を開き**、窓を持てないところ（ssh の先など）
+では端末に出します。どちらも外部のライブラリは使っていません。
+
+### 下の層 — 自分で描く
+
+くり返しの形はいつも同じです。
 
 ```shark
-func main() -> int {
-  var count = 0;
+import std.ui;
 
-  ui.window("かうんた") {
-    ui.column {
-      ui.text(f"{count} 回");
-      ui.button("押す") {
-        count += 1;
-      }
-    }
+func main() -> int {
+  ui.open("さかな", 160, 120);
+  var x = 10;
+
+  while ui.poll() {                        // 1. 押された・動いた を取り込む
+    if ui.pressed("esc") { ui.quit(); }
+    if ui.key("right") { x += 2; }
+
+    ui.clear(ui.rgb(0, 20, 40));           // 2. 描く
+    ui.fill_circle(x, 60, 12, ui.rgb(255, 140, 60));
+    ui.text(4, 4, "press esc", ui.rgb(255, 255, 255));
+
+    ui.present();                          // 3. 画面に出す
+    sleep(0.016);
   }
+  ui.close();
   return 0;
 }
 ```
 
-`ui.window` は窓が閉じるまで返りません。だからブロックの中から外側の `count` を
-`ref` として捕まえられます（借用の規則を破っていません）。
+描けるのは、点・線・四角・円・文字と、画素の並びをそのまま置く `ui.blit()` です。
+色は `int` 1つで、`ui.rgb(赤, 緑, 青)` で作ります。
 
-入力欄を選ぶと **OS の入力ダイアログが開き**、確定した文字列が変数に入ります。
-変換中の文字を欄の中に表示する方式（インライン変換）は行いません。描画を自前でしている以上、
-変換中の下線や候補一覧まで作り込むと OS ごとの手間が際限なく増えるためです。
+`ui.poll()` は待ちません。`ui.key()` などが答えるのは
+「最後に `poll` したときの様子」なので、1回のくり返しの中では答えが変わりません。
 
-数の変わるリストには `ui.key()` で目印を付けます。
+### 上の層 — いまどうあるべきかを返す
+
+部品を作って**配列に入れて返す**と、そのとおりに描かれます。
+くり返しも描き直しも `ui.run()` が引き受け、**押されたときの動きは部品に持たせます**。
 
 ```shark
-for var f in fishes {
-  ui.key(f.id) { ui.text(f.name); }
+import std.ui;
+
+var count = 0;                        // 状態はふつうの変数
+
+func inc() -> void { count += 1; }    // 押されたときの動き
+func dec() -> void { count -= 1; }
+
+func view() -> list<Widget> {         // いまどうあるべきか
+  return [
+    ui.label(f"{count} 回"),
+    ui.row([ui.button("ふやす", inc), ui.button("へらす", dec)]),
+  ];
+}
+
+func main() -> int {
+  ui.run("かうんた", 420, 300, view);
+  return 0;
 }
 ```
 
-イベント処理は UI タスクの上で順に実行されるので、状態の書き換えが描画と競合しません。
-ただし待つ関数を直接呼ぶと画面が固まるため、時間のかかる処理は `task` に逃がし、`Task<T>` を状態として持ちます。
+まとめて振り分けたいときは、関数の代わりに**名札**を渡して `update()` で受けます。
 
 ```shark
-var loading: Task<Result<string>>? = none;
+ui.button("ふやす", "inc")            // ui.show() が "inc" を返す
 
-ui.button("読み込む") {
-  loading = task http.get(url);      // すぐ返る
+func update(hit: string) -> void {
+  if hit == "inc" { count += 1; }
 }
-
-if var t = loading {
-  if t.done() { ui.text(t.wait().value() ?? "失敗"); }
-  else        { ui.text("読み込み中..."); }
-}
+ui.run("かうんた", 420, 300, view, update);
 ```
 
-タスクが終わった時点で再描画されます。`await` のような記法は要りません。
+入力欄（`ui.field`）は名札で受け取ります（焦点を名札で覚えているため）。
 
-見た目は OS ごとの流儀に合わせず、どこでも同じにします。描画は自前で行い、
-プラットフォームには「描く面」と「入力」だけを求めます。
+`ui.show()` が返すのは、押されたものの**名札**（自分で決めた `id`）です。
+値を持つ部品なら、新しい値は `ui.value()` か `ui.text_value()` で受け取ります。
+
+```shark
+ui.checkbox("音を出す", "sound", sound),   // 押されると "sound" が返る
+ui.slider("volume", volume, 0, 100),       // つまむと "volume" が返る
+ui.field("name", name),                    // 打つと "name" が返る
+```
+
+```shark
+if hit == "sound" { sound = ui.value() == 1; }
+if hit == "name"  { name = ui.text_value(); }
+```
+
+**部品は状態を持ちません。**値は自分で持ち、毎回渡し直します。
+だから「いまの状態」と「画面に出ているもの」が食い違いません。
+
+見た目は、メソッドをつないで変えられます。**返るのは変えたもので、元は変わりません。**
+
+```shark
+ui.label("さめ").color(ui.rgb(255, 200, 0)).background(ui.rgb(30, 30, 40)).padding(6)
+ui.button("ok", "ok").width(200).align("center")
+ui.center([ui.label("まんなか")])
+ui.divider()
+```
+
+`ui.run()` は Shark 自身で書かれていて、中では下の層を呼んでいるだけです。
+自分でくり返しを書きたいときは `ui.poll()` / `ui.show()` / `ui.present()` を並べます。
+
+### 細かい画面（HiDPI）
+
+面の1画素は、画面の1画素にそのまま乗ります。細かい画面（Retina）では、
+面もそのぶん細かく取ると、字がなめらかに出ます。
+
+```shark
+var k = ui.scale();                  // ふつうは 1、細かい画面なら 2
+ui.open("さめ", 420 * k, 300 * k);   // 見た目の大きさは変わりません
+_ = ui.font(12 * k);                 // 12pt くらい
+```
+
+部品の寸法は字の大きさから決まるので、`ui.font()` を変えれば全体の釣り合いが付いてきます。
+
+### 画面が無くても動く
+
+画面を持たない機種や、`SHARK_UI=off` のときは、描く先が**見えない面**になります。
+描き方は何も変わりません。結果は `ui.get()` で読めるので、
+**画面の要るプログラムでもテストが書けます**。
+
+```shark
+ui.open(8, 8);
+ui.set(2, 3, ui.rgb(255, 0, 0));
+print(ui.get(2, 3));      // 16711680
+```
+
+`ui.to_png()` で、そのときの面を PNG として取り出せます。
+
+### 日本語を出す
+
+内蔵の字形は ASCII だけです。日本語などは `ui.font()` で機種のフォントを読むと出せます
+（処理系を FreeType つきで作ったときだけ。作り方は [README](../README.md) の
+「日本語の字を出す」）。
+
+```shark
+if !ui.font(12 * ui.scale()) { print("フォントが見つかりません"); }
+ui.text(8, 8, "こんにちは", ui.rgb(255, 255, 255));
+```
+
+読まなければ内蔵の字形のままです。内蔵ならどの機種でも同じ形・同じ大きさで出ますが、
+機種のフォントを読むと `ui.text_width()` の答えもその機種のものになります。
+
+### 日本語を打つ
+
+`ui.field` は日本語も打てます。変換は**出し先に任せます**。
+
+| 出し先 | どうなるか |
+|---|---|
+| 窓（macOS） | OS の変換が効きます。変換中の文字には下線が出ます |
+| 端末 | 端末のソフトが変換し、確定した文字が届きます |
+| そのほか | 打った文字がそのまま入ります |
+
+変換中のキー（確定の enter、取り消しの esc）はプログラムには届きません。
+確定しても入力欄から焦点は外れません。
+
+文字はなぞって選べます（shift＋矢印でも）。**右で押すと切り貼りのメニュー**が出ます。
+窓（macOS）では Cmd-C / Cmd-V / Cmd-X / Cmd-A も効きます。
+置き場は `ui.clipboard()` と `ui.set_clipboard()` でプログラムからも触れます。
+
+自分でメニューを出したいときは `ui.menu(x, y, 並べるもの)` と `ui.menu_pick()` です。
+
+自分で入力欄を描くときは `ui.input()` と `ui.marked()` を使います。
+
+### 気をつけること
+
+- 内蔵の字形は ASCII だけです。日本語などは □ になります（部品のラベルも同じ）
+- 端末に出しているあいだ、`print` で出したものは見えません
+- 端末では「キーを離した」が届きません。押しっぱなしで動かしたいときは、
+  `ui.pressed()` で向きを覚えておくと、どの機種でも同じに動きます
+
+動く例が [examples/paint.shk](../examples/paint.shk)（下の層）と
+[examples/counter.shk](../examples/counter.shk)（上の層）にあります。
 
 → [spec/library/ui.md](../spec/library/ui.md)
 
@@ -934,7 +1059,7 @@ shark build main.shk    # 1つで動く実行ファイルにする（→ ./main�
 
 | 区分 | 内容 |
 |---|---|
-| 実装しながら決める | GUI の既定値、実行時コンパイルのしきい値、Unicode の表の大きさ、C++ の規格 |
+| 実装しながら決める | 画面の日本語の字形と文字入力、部品をどこまで増やすか、実行時コンパイルのしきい値、Unicode の表の大きさ、C++ の規格 |
 | 組み込みの詰め | ホストの関数にクラスを渡せるか、実行の途中状態を保存できるか |
 | コアの外で決める | 言語サーバの形、整形規則、ツールの配り方 |
 

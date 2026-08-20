@@ -168,7 +168,8 @@ func main() -> int {
 | [library/http.md](library/http.md) | `std.http` HTTP |
 | [library/os.md](library/os.md) | `std.os` 引数と環境変数 |
 | [library/task.md](library/task.md) | `std.task` タスクとチャネル |
-| [library/ui.md](library/ui.md) | `std.ui` GUI と宣言的 UI の実行モデル |
+| [library/ui.md](library/ui.md) | `std.ui` 面に描く・出来事を受け取る・部品を配列で返す |
+| [library/ui-declarative.md](library/ui-declarative.md) | 宣言的 UI をブロックで書く案（作っていない方。いまは配列で実現） |
 | [library/test.md](library/test.md) | `std.test` テスト |
 
 ### 仕様書と宣言ファイル

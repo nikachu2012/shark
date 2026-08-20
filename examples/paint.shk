@@ -1,0 +1,91 @@
+// paint.shk — std.ui でお絵かき（spec/library/ui.md）
+//
+//   ./shark run examples/paint.shk
+//
+// マウスで描く。1〜5 で色を変える。c で消す。esc か q でおしまい。
+// macOS と Linux では窓が開き、窓を持てないところでは端末に出る。
+// 画面がまったく無いところ（SHARK_UI=off など）では、
+// 決まった絵を描いて paint.png に保存する。
+import std.ui;
+import std.file;
+
+// 画面が細かい（HiDPI）なら、面もそのぶん細かく取る（ui.scale()）
+var K: int = 1;
+var W: int = 400;
+var H: int = 260;
+
+func palette() -> list<int> {
+  return [ui.rgb(240, 80, 60), ui.rgb(250, 200, 60), ui.rgb(90, 200, 120),
+          ui.rgb(80, 160, 240), ui.rgb(240, 240, 240)];
+}
+
+// 下に出す案内。描いた絵の上に重ねる
+func draw_bar(colors: list<int>, pick: int) -> void {
+  var bar = ui.text_height() + 8 * K;
+  ui.fill_rect(0, H - bar, W, bar, ui.rgb(20, 20, 28));
+  for var i in range(colors.len()) {
+    var x = 6 * K + i * 16 * K;
+    ui.fill_rect(x, H - bar + 4 * K, 12 * K, bar - 8 * K, colors[i]);
+    if i == pick {
+      ui.rect(x - 2 * K, H - bar + 2 * K, 16 * K, bar - 4 * K, ui.rgb(255, 255, 255));
+    }
+  }
+  ui.text(110 * K, H - bar + 4 * K, "1〜5 で色 / c で消す / esc でおわり",
+          ui.rgb(150, 150, 160));
+}
+
+func main() -> int {
+  var colors = palette();
+  var pick = 0;
+  K = ui.scale();
+  W = 400 * K;
+  H = 260 * K;
+  ui.open("paint", W, H);
+  _ = ui.font(12 * K);   // 機種のフォントを 12pt で。読めなければ内蔵の字形のまま
+  ui.clear(ui.rgb(12, 12, 18));
+
+  // 画面が無いときは、決まった絵を描いて PNG にする
+  if !ui.visible() {
+    for var i in range(5) {
+      ui.fill_circle((70 + i * 60) * K, 100 * K, 34 * K, colors[i]);
+    }
+    ui.text(80 * K, 170 * K, "hello from shark", ui.rgb(230, 230, 230));
+    draw_bar(colors, 0);
+    var saved = file.write_bytes("paint.png", ui.to_png());
+    if !saved.ok() {
+      print(f"保存できません: {saved.error().message()}");
+      return 1;
+    }
+    print("画面がないので paint.png に保存しました");
+    return 0;
+  }
+
+  var last_x = -1;
+  var last_y = -1;
+  while ui.poll() {
+    if ui.pressed("esc") || ui.pressed("q") { ui.quit(); }
+    if ui.pressed("c") { ui.clear(ui.rgb(12, 12, 18)); }
+    for var i in range(colors.len()) {
+      if ui.pressed(string(i + 1)) { pick = i; }
+    }
+
+    if ui.mouse(0) || ui.clicked(0) {
+      var x = ui.mouse_x();
+      var y = ui.mouse_y();
+      if last_x >= 0 { ui.line(last_x, last_y, x, y, colors[pick]); }
+      ui.fill_circle(x, y, 3 * K, colors[pick]);
+      last_x = x;
+      last_y = y;
+    } else {
+      last_x = -1;
+      last_y = -1;
+    }
+
+    draw_bar(colors, pick);
+    ui.present();
+    sleep(0.016);
+  }
+  ui.close();
+  print("おしまい");
+  return 0;
+}

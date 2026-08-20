@@ -20,8 +20,10 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <unistd.h>
 #endif
 
@@ -398,11 +400,128 @@ bool r_secure(unsigned char* buf, int n) {
 }
 const PlatformRandom kRandom = {r_true, r_secure};
 
+// --- 任意機能：画面 -------------------------------------------------------
+//
+// 出せるところに出す。順に試して、最初に開けたものを使う。
+//
+//   1. 窓（macOS は AppKit、Linux などは X11。どちらも実行時に取りに行く）
+//   2. 端末（升目1つに上下2画素）
+//   3. どちらも駄目なら、画面なし（std.ui は見えない面に描く）
+//
+// 環境変数 SHARK_UI で選べる。window / terminal / off
+#include "screen_mac.inc"
+#include "screen_x11.inc"
+#include "screen_term.inc"
+
+const PlatformScreen* g_active = 0;
+PlatformScreen kScreen;   // 中身は開いたときに、選んだものへ差し替える
+
+void s_text_input(bool on, const char* initial, int x, int y, int h) {
+  if (g_active && g_active->text_input) g_active->text_input(on, initial, x, y, h);
+}
+bool s_text_state(Str* confirmed, Str* marked) {
+  return (g_active && g_active->text_state) ? g_active->text_state(confirmed, marked) : false;
+}
+bool s_text_selection(int* start, int* len) {
+  return (g_active && g_active->text_selection) ? g_active->text_selection(start, len) : false;
+}
+void s_text_select(int start, int len) {
+  if (g_active && g_active->text_select) g_active->text_select(start, len);
+}
+void s_text_replace(const char* s) {
+  if (g_active && g_active->text_replace) g_active->text_replace(s);
+}
+// 切り貼りの置き場は、窓を開いていなくても使えることがある（macOS はそう）
+bool s_clipboard_get(Str* out) {
+  if (g_active && g_active->clipboard_get) return g_active->clipboard_get(out);
+  if (const PlatformScreen* m = mac_screen()) if (m->clipboard_get) return m->clipboard_get(out);
+  return false;
+}
+void s_clipboard_set(const char* s) {
+  if (g_active && g_active->clipboard_set) { g_active->clipboard_set(s); return; }
+  if (const PlatformScreen* m = mac_screen()) if (m->clipboard_set) m->clipboard_set(s);
+}
+
+bool s_open(const char* title, int w, int h) {
+  const char* pick = getenv("SHARK_UI");
+  bool want_win = true, want_term = true;
+  if (pick) {
+    if (strcmp(pick, "window") == 0) want_term = false;
+    else if (strcmp(pick, "terminal") == 0 || strcmp(pick, "term") == 0) want_win = false;
+    else if (strcmp(pick, "off") == 0 || strcmp(pick, "none") == 0) want_win = want_term = false;
+  }
+  const PlatformScreen* order[3];
+  int n = 0;
+  if (want_win) {
+    if (const PlatformScreen* m = mac_screen()) order[n++] = m;
+    if (const PlatformScreen* x = x11_screen()) order[n++] = x;
+  }
+  if (want_term) {
+    if (const PlatformScreen* t = term_screen()) order[n++] = t;
+  }
+  for (int i = 0; i < n; i++) {
+    if (order[i]->open(title, w, h)) {
+      g_active = order[i];
+      kScreen.has_key_up = order[i]->has_key_up;
+      // 変換つきの文字入力を持っている出し先のときだけ、口を出す
+      kScreen.text_input = order[i]->text_input ? s_text_input : 0;
+      kScreen.text_state = order[i]->text_state ? s_text_state : 0;
+      kScreen.text_selection = order[i]->text_selection ? s_text_selection : 0;
+      kScreen.text_select = order[i]->text_select ? s_text_select : 0;
+      kScreen.text_replace = order[i]->text_replace ? s_text_replace : 0;
+      return true;
+    }
+  }
+  g_active = 0;
+  return false;
+}
+void s_close() {
+  if (g_active) g_active->close();
+  g_active = 0;
+}
+void s_present(const uint32_t* px, int w, int h) {
+  if (g_active) g_active->present(px, w, h);
+}
+bool s_poll(ScreenEvent* out) { return g_active ? g_active->poll(out) : false; }
+
+// 画面の細かさ。**開く前にも呼べる**ので、まだ選んでいなければ出せそうな順に尋ねる。
+// 窓を使わないと決まっているとき（SHARK_UI）は 1。端末にも見えない面にも細かさは無い
+int s_scale() {
+  if (g_active) return g_active->scale ? g_active->scale() : 1;
+  const char* pick = getenv("SHARK_UI");
+  if (pick && pick[0] && strcmp(pick, "window") != 0) return 1;
+  if (const PlatformScreen* m = mac_screen()) if (m->scale) return m->scale();
+  if (const PlatformScreen* x = x11_screen()) if (x->scale) return x->scale();
+  return 1;
+}
+
+// 中身は s_open が差し替える。ここでは入れ物だけ作る
+struct ScreenInit {
+  ScreenInit() {
+    kScreen.scale = s_scale;
+    kScreen.open = s_open;
+    kScreen.close = s_close;
+    kScreen.present = s_present;
+    kScreen.poll = s_poll;
+    kScreen.has_key_up = false;
+    kScreen.text_input = 0;   // 選んだものが持っていれば s_open が入れる
+    kScreen.text_state = 0;
+    kScreen.text_selection = 0;
+    kScreen.text_select = 0;
+    kScreen.text_replace = 0;
+    kScreen.clipboard_get = s_clipboard_get;   // 画面が無くても使えることがある
+    kScreen.clipboard_set = s_clipboard_set;
+  }
+};
+ScreenInit g_screen_init;
+
+const PlatformScreen* desktop_screen() { return &kScreen; }
+
 const Platform kDesktop = {
     d_alloc, d_realloc, d_free, d_fatal,
     d_now, d_mono, d_sleep, d_local_offset,
     d_write_out, d_write_err, d_read_line, d_exit,
-    &kFile, &kOS, &kRandom};
+    &kFile, &kOS, &kRandom, desktop_screen()};
 
 }  // namespace
 

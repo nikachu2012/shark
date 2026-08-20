@@ -25,6 +25,7 @@ make web        # ブラウザで動く形（WebAssembly）を作る
 ```
 
 外部ライブラリは要らない。C++ コンパイラだけで通る。
+（日本語の字を出すときだけ FreeType が要る。任意 → 下の「字を描く」）
 
 ```
 ./shark run examples/hello.shk      # 実行する
@@ -124,6 +125,7 @@ frontend/
 | `std.json` | あり | |
 | `std.os` | あり | `os.run` は移植層が持つときだけ |
 | `std.crypto` | あり | ハッシュ（SHA-256/512、SHA-1、MD5、HMAC）は自前。乱数のもとは移植層から取り、真の乱数か安全な乱数かを `crypto.source()` が返す |
+| `std.ui` | あり | 描くところは全部自前（点・線・円・5×7 の字形）。宣言的な層（`Widget` の配列）も同じ層の上に載せてある。画面は移植層の `PlatformScreen` で、`shark` コマンドは窓か端末に出す（下）。日本語は FreeType があれば出せる（任意。下） |
 | `std.test` | あり | 1件ずつ順に走らせる |
 
 ### 実装での細かい決めごと
@@ -156,7 +158,8 @@ frontend/
 | 削ったもの | 理由・代わり |
 |---|---|
 | `std.net` `std.http` | 移植層のノンブロッキング通信から作る必要がある。`import` すると E0501 が返る |
-| `std.ui` | 画面の実装が要る。GUI はホスト側で用意して `register_host` で渡す形にしてある |
+| `ui.window(...) { }` の記法 | 呼び出しにブロックを続ける記法が言語に無い。宣言的な UI は**部品の配列を返す形**で入れてある（[spec/library/ui.md](../spec/library/ui.md)、[ui-declarative.md](../spec/library/ui-declarative.md)） |
+| 内蔵の字形での日本語 | 内蔵は ASCII だけ。日本語は FreeType（任意の外部ライブラリ）で出す |
 | 実行時コンパイル（JIT） | 仕様でも任意機能。いまは常に仮想マシンで実行する。結果は変わらない |
 | `shark fmt` | 整形の規則がまだ決まっていない（[spec/open-questions.md](../spec/open-questions.md)） |
 | 言語サーバ | 同上。`shark check` の出力をそのまま使う形にしてある |
@@ -245,7 +248,8 @@ for (;;) {
 1. `core/platform/console.cpp` を複製する（必須の4つだけが並んでいる）
 2. メモリ・時間・標準入出力・終了を埋める
 3. 使えるならファイル（`PlatformFile`）と OS（`PlatformOS`）も埋める。要らなければ `0` のまま
-4. ホストの最初に `platform_set(platform_自分の機種());` を呼ぶ
+4. 画面に出すなら `PlatformScreen` を埋める。埋めなくても `std.ui` は動く（見えない面に描く）
+5. ホストの最初に `platform_set(platform_自分の機種());` を呼ぶ
 
 必須の4つだけでも、`time` `math` `task` と言語のすべてが動く。
 `file` や `os` を持たない移植層では、対応するモジュールは登録されず、
@@ -254,6 +258,143 @@ for (;;) {
 実際に足した例が [core/platform/web.cpp](../core/platform/web.cpp)（ブラウザ）。
 コアには手を入れていない。待てない環境なので `sleep` は何もせず、
 進む量はホストが `step()` の刻みで決める（[web/README.md](../web/README.md)）。
+
+### 画面の出し先（`std.ui`）
+
+`shark` コマンドの移植層（`core/platform/desktop.cpp`）は、`PlatformScreen` を
+3つ持っていて、開けたものを使う。選び方は環境変数 `SHARK_UI` でも変えられる。
+
+| 順 | 出し先 | ソース |
+|---|---|---|
+| 1 | 窓（macOS） | `core/platform/screen_mac.inc` |
+| 1 | 窓（X11） | `core/platform/screen_x11.inc` |
+| 2 | 端末 | `core/platform/screen_term.inc` |
+
+**どれも作るときに要るライブラリが無い。**窓に要る関数は実行時に `dlopen` で取りに行く。
+X11 の開発ファイルが入っていない機械でも、そのまま作れて動く（窓が開かないだけ）。
+`make` に足したのは、古い glibc 向けの `-ldl` だけ。
+
+#### 窓（macOS）
+
+- libobjc・AppKit・CoreGraphics を `dlopen` し、`objc_msgSend` をそのつど
+  正しい形に見立てて呼ぶ。Objective-C のソースは持たない
+- 画素は `CGImage` にして、窓の層（`CALayer`）の `contents` に貼る。
+  拡大は補間しない（`magnificationFilter` を `nearest`）
+- **HiDPI**：窓の大きさは「面の画素 ÷ 画面の細かさ」の**点**で決め、
+  層の `contentsScale` を細かさに合わせる。こうすると面の1画素が画面の1画素に乗る。
+  細かさは `[[NSScreen mainScreen] backingScaleFactor]` で、`ui.scale()` が返す。
+  マウスの位置は点で来るので、細かさを掛けてから面の画素に直す
+- 面の並び `0x00RRGGBB` を、そのまま
+  `kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little` として読ませている
+- 出来事は `nextEventMatchingMask:untilDate:` に `distantPast` を渡して**待たずに**取る
+- 閉じるボタンと Cmd-Q は「閉じてくれ」として渡す
+
+#### 窓（X11）
+
+- `libX11.so.6` を `dlopen` し、要る関数だけ `dlsym` で引く。
+  Xlib の構造体は必要なぶんだけ書き写してある（並びは昔から変わっていない）
+- 画素は `XCreateImage` で1枚だけ作り、そこへ書いてから `XPutImage`
+- `DISPLAY` が無ければ開かない。`WM_DELETE_WINDOW` を「閉じてくれ」にする
+
+#### 端末
+
+- 画面の細かさは 1 として扱う（升目に細かさは無い）
+- 升目1つに上下2画素を詰める。`▀` の文字色が上の画素、背景色が下の画素
+- 色は 24 ビット指定。前の回と色が変わった升だけを書き直す
+- 面より端末が小さければ縮め、大きければ整数倍に拡げる。縦横の比は保つ
+  （窓の側は、面が 640×480 未満のときだけ拡げる。それより大きい面は画面の画素と1対1）
+- キーとマウスはエスケープ列から読む。SGR 形式（`\e[<b;x;yM`）のマウスに対応する。
+  Ctrl-C は「閉じてくれ」として渡す
+- 端末でないとき（出力を `|` や `>` で受けているとき）は `open` が `false` を返す
+- 終わるときは端末を元に戻す。`panic` やメモリ上限で抜けても戻るよう、`atexit` にも入れてある
+
+端末には「離した」が届かない。そのため `has_key_up` は `false` にしてあり、
+コアが「押された刻みの間だけ押されている」とみなす（[spec/library/ui.md](../spec/library/ui.md)）。
+窓の方は両方届くので `true`。
+
+Windows では窓も端末も持たない（`0`）。見えない面には描ける。
+
+#### 文字入力（IME）
+
+変換は OS に任せ、**確定した文字列と変換中の文字列だけ**を受け取る
+（`PlatformScreen.text_input` / `text_state`）。
+
+- macOS は、**見えない `NSTextView` を1つ置いて**そこにキーを受けさせる。
+  1×1 の大きさで入力欄の位置に置くので、変換の候補もそこに出る。
+  確定と未確定の切り分けは `hasMarkedText` / `markedRange` で、
+  文字位置が UTF-16 なので `substringWithRange:` に切ってもらう
+- 受け皿が焦点を持っているあいだ、こちらからは `SEV_Text` を出さない（二重に入るため）
+- **変換中（`hasMarkedText`）は `SEV_Key` も出さない。**そのキーは変換のもので、
+  `enter` は確定、`esc` は取り消し、空白と矢印は候補選びに使われる。
+  渡してしまうと、確定した拍子に入力欄から焦点が外れる（コア側にも同じ見張りを置いてある）
+- 端末は何もしない。変換は端末のソフトがやって、確定した UTF-8 だけが届く
+- X11 は XIM を持たないので、打った文字がそのまま入る
+- 持たない出し先では、コアが今までどおり `ui.typed()` と back で組み立てる
+
+#### 選ぶ・切り貼り・メニュー
+
+- 選んでいるところは、移植層が持っていればそちらが正（macOS の窓では
+  `NSTextView` が持つので、二度押しでの単語選びや Cmd-Z もそのまま効く）。
+  単位は**文字の数**で、UTF-16 との行き来は移植層の中で済ませる
+- 持たない出し先では、コアが文字の数（`g_caret` / `g_anchor`）を覚えて動かす。
+  なぞり・shift＋矢印・home/end・delete はこちらの実装
+- 切り貼りの置き場は macOS の `NSPasteboard`。**窓を開いていなくても使える**ので、
+  端末で動かしているときも同じ置き場に入る
+- Cmd-C などは、menu bar を持たないと OS 側で拾われない。
+  受け皿に `copy:` `paste:` `cut:` `selectAll:` `undo:` を直接頼んでいる
+- 右で押したときのメニューは**こちらで描く**（どの出し先でも同じ）。
+  `ui.show()` の頭で押されたところを見て、下の部品には渡さない
+
+#### 宣言的な入り口（ui.run）
+
+`ui.run()` は **Shark 自身で書いてある**（`stdlib/prelude_ui.shk`）。
+`view` と `update` を**関数の値**で受け取って呼ぶので、ネイティブでは書けない
+（ネイティブから Shark の関数を呼び戻す道が無い）。並べ替えの `__sort` と同じ考え方。
+
+- `tools/prelude.py` が `core/prelude.h` に埋め込む（`kUiRunSource`）
+- `Engine::load()` が、`std.ui` を持つときだけ読み、**その単位のモジュール名を
+  `std.ui` にする**。こうすると `ui.run(...)` が、ふつうのモジュール関数として解決される
+  （型検査はモジュール名で関数を探すので、ネイティブと同じ場所に並ぶ）
+- バイトコードにもふつうの関数として入るので、`shark build` でもそのまま動く
+- 部品に持たせた関数（`ui.button("ふやす", inc)`）を**呼ぶのも Shark の側**。
+  `ui.show()` は押された部品の関数を覚えておくだけで、`ui.run()` が
+  `ui.has_action()` / `ui.action()` で取り出して呼ぶ。
+  関数の値は `Widget` の隠し欄（`act`）に入っている
+
+#### 宣言的な層の作り
+
+`Widget` は処理系が持つクラス（`Error` と同じ扱い。`core/check.cpp` の
+`make_builtin_classes`）で、中身は書く人からは見えない。作るのは `ui.label()` などで、
+`ui.show()` が配列をたどって、測って・描いて・触られたかを見る。状態は持たない。
+
+型検査がクラスを作るのは処理系を作った後なので、関数の表には**名前だけ同じ仮の型**で
+登録しておき、クラスができたところで差し替える（`ui_bind_widget_class`）。
+仮の型の名前は本物と同じ `Widget` なので、**表の指紋は差し替えの前後で変わらない**。
+バイトコードだけを動かす実行装置には型検査が無く差し替えも起きないが、指紋は一致する。
+
+テストと `make docs-check` は `SHARK_UI=off` で走らせている。
+窓が開くと結果が機種によって変わるため。
+
+#### 字を描く
+
+字の出どころは2つ。既定は内蔵の 5×7（`core/lib/font5x7.inc`）で、
+`ui.font()` を呼んだときだけ FreeType に切り替わる（`core/lib/font_ft.inc`）。
+
+- **FreeType はこの処理系で唯一の外部ライブラリ**で、任意。
+  `make` が `pkg-config` で見つけたときだけ `-DSHARK_FREETYPE` を付ける。
+  無ければ中身は丸ごと消え、内蔵の字形だけになる（入れ方は README）
+- 字形は `FT_LOAD_RENDER` で濃さ（8 ビット）にして、下地と混ぜて置く。
+  そのぶん縁がなめらかになる
+- 1行の高さは `ascender - descender` で数える。FreeType の `metrics.height` は
+  行間のあきを含む「次の行までの送り」で、ヒラギノなら 24 画素の字で 36 もある。
+  これを高さにすると**字の下に 11 画素のあきが残る**ので使わない
+  （改行のときだけ 1.25 倍にして下げる）
+- 覚え書きは (文字, 大きさ) を鍵にした開番地法の表。いっぱいになったら丸ごと捨てる
+- **フォントの中身と覚え書きは `malloc` に置く。**日本語のフォントは数 MB あり、
+  プログラムのメモリ（`--memory`）に数えると上限に当たってしまうため。
+  処理系を捨てるときに `ui_shutdown()` が返す
+- フォントを読むのは移植層のファイル機能（`PlatformFile`）。
+  コアは自分でファイルを開かない決めごとのまま
 
 ### まだ入力が無いとき
 

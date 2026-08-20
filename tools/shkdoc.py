@@ -234,12 +234,16 @@ def qualified(page, item, owner=''):
     return '.'.join(parts)
 
 
+# 宣言ではなく実装のファイル（Shark 自身で書いた部分）。ページにはしない
+IMPL_FILES = ('prelude.shk', 'prelude_ui.shk')
+
+
 def parse(root, stdlib='stdlib'):
-    """宣言ファイルを全部読む。prelude.shk は宣言ではなく実装なので読まない"""
+    """宣言ファイルを全部読む。prelude*.shk は宣言ではなく実装なので読まない"""
     d = os.path.join(root, stdlib)
     pages = []
     for fn in sorted(os.listdir(d)):
-        if fn.endswith('.shk') and fn != 'prelude.shk':
+        if fn.endswith('.shk') and fn not in IMPL_FILES:
             page = parse_file(os.path.join(d, fn))
             page['items'] = merge_overloads(page['items'])
             for cls in page['classes']:
@@ -267,6 +271,13 @@ def core_names(root):
             names.add(m.group(1))
         for m in re.finditer(r'enable_module\("std\.(\w+)"\)', src):
             modules.add(m.group(1))
+    # Shark 自身で書いたモジュールの関数（stdlib/prelude_ui.shk の public func）
+    ui_impl = os.path.join(root, 'stdlib/prelude_ui.shk')
+    if os.path.exists(ui_impl):
+        with open(ui_impl, encoding='utf-8') as f:
+            for m in re.finditer(r'^public func (\w+)', f.read(), re.M):
+                names.add('ui.' + m.group(1))
+
     # 型のメソッドは型検査の表にも載る（Shark 自身で書いた sort、比較の compare）
     with open(os.path.join(root, 'core/check.cpp'), encoding='utf-8') as f:
         src = f.read()

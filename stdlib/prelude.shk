@@ -45,3 +45,7 @@ func __sort<T: Comparable>(ref xs: list<T>) -> void {
     width = width + width;
   }
 }
+
+// ui.action() が返す既定。押された部品が関数を持っていないとき用
+func __noop() -> void {
+}

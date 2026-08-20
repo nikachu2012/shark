@@ -1,0 +1,61 @@
+// prelude_ui.shk — 宣言的に書くときの入り口。Shark 自身で書いてある。
+//
+// ui.run() が、開く・くり返す・描き直す・閉じる をぜんぶ引き受ける。
+// 書く人が書くのは、いまどうあるべきか（view）と、押されたときの動きだけ。
+//
+// 押されたときの動きは、2つの書き方がある。
+//   ・部品に関数を持たせる      ui.button("ふやす", inc)
+//   ・名札を付けて update で振り分ける   ui.button("ふやす", "inc")
+// 混ぜてもよい。
+//
+// 状態は書く人がふつうの変数で持つ。ここは覚えない。
+// 処理系はこのファイルを埋め込んで持ち、std.ui を入れたときだけ読み込む
+// （core/shark.cpp）。core/prelude.h は tools/prelude.py がここから作る。
+import std.ui;
+
+public func run(title: string, width: int, height: int,
+                view: func() -> list<Widget>,
+                update: func(string) -> void) -> void {
+  var k = ui.scale();
+  ui.open(title, width * k, height * k);
+  if ui.font_name() == "" { _ = ui.font(12 * k); }
+
+  // 画面が無いところ（SHARK_UI=off など）では、1回だけ描いて返る。
+  // 面はそのままにしておくので、ui.get() や ui.to_png() で結果を見られる
+  if !ui.visible() {
+    ui.clear();
+    _ = ui.show(view());
+    return;
+  }
+
+  while ui.poll() {
+    ui.clear();
+    var hit = ui.show(view());
+    var changed = false;
+    if ui.has_action() {          // 部品が関数を持っていれば、それを呼ぶ
+      var act = ui.action();
+      act();
+      changed = true;
+    }
+    if hit != "" {                // 名札が付いていれば、update に渡す
+      update(hit);
+      changed = true;
+    }
+    if changed {                  // 状態が変わったので、すぐ描き直す
+      ui.clear();
+      _ = ui.show(view());
+    }
+    ui.present();
+    sleep(0.016);
+  }
+  ui.close();
+}
+
+// 部品に関数を持たせる書き方。update は要らない
+public func run(title: string, width: int, height: int,
+                view: func() -> list<Widget>) -> void {
+  run(title, width, height, view, __ui_ignore);
+}
+
+func __ui_ignore(hit: string) -> void {
+}

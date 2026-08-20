@@ -193,7 +193,22 @@ NativeStatus n_error_init2(VM& vm, Value* a, int n, Value& out) {
 // 処理系が持つクラスのメソッドは、Program の中に関数ポインタとして入っている。
 // バイトコードにはポインタを書けないので、読み戻すときは名前でここを引く
 // （書くときの並びは check.cpp の make_builtin_classes と揃えてある）
+NativeStatus n_widget_color(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_background(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_padding(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_width(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_height(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_align(VM& vm, Value* args, int n, Value& out);
+
 NativeFn builtin_native_method(const Str& cls, const Str& name, int nparams) {
+  if (cls == "Widget" && nparams == 1) {
+    if (name == "color") return n_widget_color;
+    if (name == "background") return n_widget_background;
+    if (name == "padding") return n_widget_padding;
+    if (name == "width") return n_widget_width;
+    if (name == "height") return n_widget_height;
+    if (name == "align") return n_widget_align;
+  }
   if (cls == "Error") {
     if (name == "message" && nparams == 0) return n_error_message;
     if (name == "code" && nparams == 0) return n_error_code;

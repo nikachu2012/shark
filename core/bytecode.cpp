@@ -31,6 +31,7 @@ uint32_t modules_bits(const Config& cfg) {
   if (cfg.with_os) b |= 32;
   if (cfg.with_crypto) b |= 64;
   if (cfg.with_test) b |= 128;
+  if (cfg.with_ui) b |= 256;
   return b;
 }
 
@@ -43,6 +44,7 @@ void modules_to_config(uint32_t bits, Config* cfg) {
   cfg->with_os = (bits & 32) != 0;
   cfg->with_crypto = (bits & 64) != 0;
   cfg->with_test = (bits & 128) != 0;
+  cfg->with_ui = (bits & 256) != 0;
 }
 
 // ------------------------------------------------------------------ 書く道具

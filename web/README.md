@@ -247,7 +247,9 @@ createShark().then((M) => {
 | 外のファイルを読む | `std.file` が触るのはタブの中だけの仮の置き場（Emscripten の MEMFS）。閉じると消える |
 | 外のプログラムを呼ぶ | `os.run()` は失敗を返す（[../spec/library/os.md](../spec/library/os.md) のとおり `Result` で受け取れる） |
 | その場で待つ | 移植層の `sleep` は何もしない。`sleep()` はタスクを譲るだけで、実時間は描画の刻みで進む |
-| `std.net` `std.http` `std.ui` | もともとこの実装に入っていない（[../docs/implementation.md](../docs/implementation.md)） |
+| `std.net` `std.http` | もともとこの実装に入っていない（[../docs/implementation.md](../docs/implementation.md)） |
+| `std.ui` の画面 | 入ってはいるが、移植層（`core/platform/web.cpp`）に画面がまだ無い。描くことも部品を並べることもでき、結果は `ui.get()` と `ui.to_png()` で取れる（[../spec/library/ui.md](../spec/library/ui.md)） |
+| `std.ui` のフォント | FreeType を入れていないので、字は内蔵の 5×7（ASCII）だけ。`ui.font()` は false を返す |
 
 `os.platform()` は `"wasm"` を返す。
 

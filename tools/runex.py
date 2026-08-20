@@ -50,8 +50,10 @@ def main():
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(head + it['example'] + '\n')
             try:
+                # std.ui の例で窓が開かないようにする（spec/library/ui.md）
+                env = dict(os.environ, SHARK_UI='off')
                 p = subprocess.run([shark, 'run', path], capture_output=True, text=True,
-                                   timeout=20, cwd=work, stdin=subprocess.DEVNULL)
+                                   timeout=20, cwd=work, stdin=subprocess.DEVNULL, env=env)
             except subprocess.TimeoutExpired:
                 bad += 1
                 print('終わらない   %s' % name)

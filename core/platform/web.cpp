@@ -195,7 +195,8 @@ const Platform kWeb = {
     w_alloc, w_realloc, w_free, w_fatal,
     w_now, w_mono, w_sleep, w_local_offset,
     w_write_out, w_write_err, w_read_line, w_exit,
-    &kFile, &kOS, &kRandom};
+    &kFile, &kOS, &kRandom,
+    0};   // 画面はまだ持たない（std.ui は見えない面に描く → spec/library/ui.md）
 
 }  // namespace
 

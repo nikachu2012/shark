@@ -27,7 +27,7 @@ class Registry {
   explicit Registry(TypeTable& types) : types_(types) {}
 
   int add(const char* name, NativeFn fn, Type* ret,
-          Type* p0 = 0, Type* p1 = 0, Type* p2 = 0, Type* p3 = 0);
+          Type* p0 = 0, Type* p1 = 0, Type* p2 = 0, Type* p3 = 0, Type* p4 = 0);
   // 型検査では使わない（checker が型を決める）もの
   int add_untyped(const char* name, NativeFn fn);
   void mark_ref0(int id) { e_[id].ref0 = true; }
@@ -68,6 +68,7 @@ void register_file(Registry& r);
 void register_os(Registry& r);
 void register_text(Registry& r);
 void register_test(Registry& r);
+void register_ui(Registry& r);
 // 型に付くメソッド（string.len など）。名前で引ける形で入れておく
 void register_methods(Registry& r);
 
@@ -96,6 +97,14 @@ int test_after_index();
 
 // std.os にコマンド引数を渡す
 void os_set_args(const Vec<Str>& args);
+
+// std.ui の後始末（面を捨て、画面を閉じる）。処理系を捨てるときに呼ぶ
+void ui_shutdown();
+
+// std.ui の Widget。関数の表には仮のクラスで登録してあるので、
+// 型検査が本物を作ったところで差し替える（core/check.cpp から呼ぶ）
+struct ClassInfo;
+void ui_bind_widget_class(Registry& r, ClassInfo* real);
 
 }  // namespace shark
 #endif
