@@ -1,0 +1,14 @@
+error[E0307]: ここに ref で渡せるのは、一番外側の var だけです
+  --> ui_ref.shk:8:20
+  8 |   return [ui.field(ref tmp), ui.field(name)];   // E0307 / E0301
+    |                    ---
+  直し方: ui.field は「どの var か」を覚えて、そのつどそこへ書き戻します。関数の中の変数は、その関数が返ると消えます
+  直し方: その変数を一番外側（トップレベル）の var にします
+
+error[E0301]: ここは ref を付けて渡します
+  --> ui_ref.shk:8:39
+  8 |   return [ui.field(ref tmp), ui.field(name)];   // E0307 / E0301
+    |                                       ----
+  直し方: 呼ぶ側にも ref と書きます: ui.field(ref name)
+
+2 件の誤りがあります

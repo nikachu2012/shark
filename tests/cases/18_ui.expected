@@ -34,6 +34,8 @@ true
 true
 0
 [] true false
+[] [abc] false
+true
 [] 8 12
 false
 false

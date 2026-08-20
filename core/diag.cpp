@@ -83,6 +83,14 @@ static const Explain kExplain[] = {
   {"E0302",
    "ref はタスクの境界を越えられません。タスクには値をそのまま渡してコピーさせます。",
    "ref cannot cross a task boundary. Pass the value itself; it will be copied."},
+  {"E0307",
+   "ui.field(ref ...) のように、呼び出しのあとも書き戻すものがあります。持ち続けるのは借用\n"
+   "ではなく「どの var か」で、書き戻しはその var への代入と同じです。覚えられるのは、\n"
+   "プログラムが終わるまで生きている一番外側の var だけ。関数の中の変数は返ると消えます。",
+   "ui.field(ref ...) writes back after the call returns. What it keeps is not the borrow but which\n"
+   "var to write to, so writing back is the same as assigning to that var. Only a top-level var --\n"
+   "one that lives as long as the program -- can be recorded; a variable inside a function is gone\n"
+   "once that function returns."},
   {"E0401",
    "親に virtual の無いメソッドは上書きできません。上書きしてよいものには親側に virtual を書きます。",
    "Only methods marked virtual in the parent can be overridden."},

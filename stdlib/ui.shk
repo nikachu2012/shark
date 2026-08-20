@@ -762,15 +762,28 @@ func slider(action: func() -> void, value: int, lo: int, hi: int) -> Widget;
 
 /// 1行の入力欄。
 ///
-/// 押すとそこに文字が入るようになる。打たれるたびに ui.show() が `id` を返し、
-/// ui.text_value() が新しい文字を返すので、それを自分の変数に入れ直す。
-/// 入っている文字は自分で持つので、画面と食い違わない。
+/// 押すとそこに文字が入るようになる。受け取り方は2つ。
+///
+/// **変数を ref で渡すと、打たれるたびにその変数が書き換わる。**
+/// 名札（`id`）を渡したときは、打たれるたびに ui.show() がその名札を返すので、
+/// ui.text_value() で新しい文字を受け取り、自分の変数に入れ直す。
+///
+/// ```
+/// ui.field(ref name)        // name が直に書き換わる
+/// ui.field("name", name)    // ui.show() が "name" を返す
+/// ```
+///
+/// 文字を持つのはどちらの形でも書く人で、処理系は覚えない。だから画面と食い違わない。
 ///
 /// 引数:
-///   id      名札
-///   value   いま入っている文字
+///   value   いま入っている文字（ref なら、書き換える先の変数）
+///   id      名札（ref の代わりに渡す）
 ///
 /// 注意:
+///   ref で渡せるのは**一番外側の var** だけ（誤り E0307）。ほかのモジュールの var でもよい。
+///   覚えているのは借用ではなく「どの var か」で、書き戻しはその var への代入と同じ。
+///   関数の中の変数は返ると消えるので渡せない。使いたいときは名札の形にする。
+///
 ///   日本語などの変換は**出し先に任せる**。窓（macOS）では変換中の文字が
 ///   下線つきで出て、確定したものが入る。端末では、その端末のソフトが変換して、
 ///   確定した文字だけが届く。どちらでもないときは、打った文字がそのまま入る。
@@ -782,11 +795,13 @@ func slider(action: func() -> void, value: int, lo: int, hi: int) -> Widget;
 ///   窓（macOS）では Cmd-C / Cmd-V / Cmd-X / Cmd-A も効く。
 ///
 /// 例:
-///   ui.open(140, 40);
+///   ui.open(140, 60);
 ///   var name = "さめ";
-///   var hit = ui.show([ui.field("name", name)]);
-///   if hit == "name" { name = ui.text_value(); }
-///   print(name);   // さめ
+///   var nick = "しゃち";
+///   var hit = ui.show([ui.field(ref name), ui.field("nick", nick)]);
+///   if hit == "nick" { nick = ui.text_value(); }
+///   print(f"[{hit}] {name} {nick}");   // [] さめ しゃち
+func field(ref value: string) -> Widget;
 func field(id: string, value: string) -> Widget;
 
 /// 縦に空ける。h は画素の数。
@@ -859,6 +874,18 @@ func divider() -> Widget;
 ///   print(count);   // 0
 func show(view: list<Widget>) -> string;
 func show(view: list<Widget>, x: int, y: int) -> string;
+
+/// 直前の ui.show() で、ref で渡した変数が書き換わったか。
+///
+/// ui.field(ref ...) に文字が打たれると true になる。ui.run() が中で使っていて、
+/// 変わっていればその場で描き直す。自分でくり返しを書くときも同じようにする。
+///
+/// 例:
+///   ui.open(140, 40);
+///   var name = "さめ";
+///   _ = ui.show([ui.field(ref name)]);
+///   print(ui.edited());   // false（何も打たれていない）
+func edited() -> bool;
 
 /// この回、**関数を持った部品**が押されたか。
 ///

@@ -220,10 +220,9 @@ x += dir;
 見分けるのは `ui.has_ime()`。どの場合でも、書く側のコードは同じでよい。
 
 ```shark
-var name = "";
+var name = "";                                   // 一番外側の var
 while ui.poll() {
-  var hit = ui.show([ui.field("name", name)]);   // 中で下の口を使っている
-  if hit == "name" { name = ui.text_value(); }
+  _ = ui.show([ui.field(ref name)]);             // 中で下の口を使っている
   ui.present();
 }
 ```
@@ -303,14 +302,23 @@ func update(hit: string) -> void {
 ui.run("かうんた", 420, 300, view, update);
 ```
 
-| | 関数を渡す | 名札を渡す |
+| | 関数・ref を渡す | 名札を渡す |
 |---|---|---|
 | `ui.button` | `ui.button(label, f)` | `ui.button(label, id)` |
 | `ui.checkbox` | `ui.checkbox(label, f, on)` | `ui.checkbox(label, id, on)` |
 | `ui.slider` | `ui.slider(f, v, lo, hi)` | `ui.slider(id, v, lo, hi)` |
-| `ui.field` | — | `ui.field(id, value)` |
+| `ui.field` | `ui.field(ref value)` | `ui.field(id, value)` |
 
-入力欄だけは名札で受け取る。焦点をどの欄に置いているかを名札で覚えているため。
+入力欄だけは関数ではなく **`ref` で変数を渡す**。押されたときに一度呼べばよい
+ボタンと違い、入力欄は打たれた文字を毎回どこかに入れ直すことになるので、
+入れ先そのものを渡す方が短い。
+
+```shark
+var name = "";                       // 一番外側の var（下の「ref で渡せるもの」）
+
+ui.field(ref name)                   // 打たれるたびに name が書き換わる
+```
+
 値を持つ部品（checkbox、slider）に関数を渡したときは、新しい値をその中で
 `ui.value()` から読む。
 
@@ -320,7 +328,8 @@ ui.run("かうんた", 420, 300, view, update);
 2. 押された・動いた を取り込む
 3. `view()` を呼んで、そのとおりに描く
 4. 押された部品が関数を持っていれば**それを呼び**、名札なら `update()` を呼ぶ。
-   そのあと**その場で描き直す**
+   `ref` で受けた入力欄は `ui.show()` の中で変数を書き換えている（`ui.edited()`）。
+   どれかが起きていれば、そのあと**その場で描き直す**
 5. 窓が閉じられるか `ui.quit()` まで、2 に戻る
 
 **状態を持つのは書く人だけ。**処理系は覚えない。だから「いまの状態」と「画面」が
@@ -335,8 +344,10 @@ ui.open("さかな", 160, 120);
 while ui.poll() {
   ui.clear();
   var hit = ui.show(view());
-  if ui.has_action() { var act = ui.action(); act(); }
-  if hit != "" { update(hit); }
+  var changed = ui.edited();                    // ref で受けた入力欄が書き換えた
+  if ui.has_action() { var act = ui.action(); act(); changed = true; }
+  if hit != "" { update(hit); changed = true; }
+  if changed { ui.clear(); _ = ui.show(view()); }
   ui.present();
   sleep(0.016);
 }
@@ -349,6 +360,29 @@ ui.close();
 
 画面が無いところ（`SHARK_UI=off`）では、`ui.run()` は**1回だけ描いて返る**。
 面はそのままなので、`ui.get()` や `ui.to_png()` で結果を確かめられる。
+
+### ref で渡せるもの
+
+`ui.field(ref ...)` に渡せるのは**一番外側の `var`** だけ。ほかは型検査が断る（E0307）。
+
+```shark
+var name = "";                     // ← ここに置く
+
+func view() -> list<Widget> {
+  var tmp = "";
+  return [ui.field(ref tmp)];      // 誤り E0307: view() が返ると tmp は消える
+}
+```
+
+ほかのモジュールの `var`（`state.name`）も一番外側の var なので渡せる。
+
+`ref` はふつう「呼んでいる間だけの借用」だが、これはその例外ではない。
+処理系が覚えるのは借用（指し先）ではなく **どの var か**（番号）だけで、
+書き戻しはその var への代入と変わらないため（[../runtime/memory.md](../runtime/memory.md)）。
+番号にできるのは一番外側の var だけ、というのが上の決まりの理由。書き戻すのは `ui.show()` の中。
+
+宣言的な層では、状態はどのみち一番外側の `var` に置くことになる。その場に書く関数からも
+外側の局所変数は見えないため（[../syntax.md](../syntax.md)）、この決まりで困ることは少ない。
 
 ### なぜ配列なのか
 
@@ -380,6 +414,7 @@ Shark にはその記法が無く、入れるとなると構文・型検査・`r
 | `ui.checkbox(label, id, on)` | 押されたとき | `ui.value()` が 1 か 0 |
 | `ui.slider(id, value, lo, hi)` | つまんでいる間 | `ui.value()` が選ばれた数 |
 | `ui.field(id, value)` | 打たれたとき | `ui.text_value()` が新しい文字 |
+| `ui.field(ref value)` | 返らない（変数を直に書き換える） | 渡した変数がそのまま新しい文字 |
 | `ui.label(text)` | 返らない | — |
 | `ui.space(h)` / `ui.divider()` | 返らない | — |
 | `ui.column(kids)` / `ui.row(kids)` / `ui.center(kids)` | 中身のものが返る | — |
@@ -463,8 +498,14 @@ ui.center([ui.label("これも"), ui.label("まんなか")])   // まとめて�
 
 ### 入力欄
 
-`ui.field` は押すとそこに文字が入るようになる。打たれた文字は
-`ui.text_value()` で返るので、**自分の変数に入れ直す**。
+`ui.field` は押すとそこに文字が入るようになる。打たれた文字の受け取り方は2つ。
+
+```shark
+ui.field(ref name)         // name が直に書き換わる
+ui.field("name", name)     // ui.show() が "name" を返し、ui.text_value() が新しい文字
+```
+
+どちらでも、文字を持つのは書く人の変数。処理系は覚えない。
 
 - 消すのは `back`、離れるのは `enter`
 - ただし**変換中の `enter` は「確定」**なので、入力欄からは出ない。

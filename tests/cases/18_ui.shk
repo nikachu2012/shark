@@ -10,6 +10,9 @@ func t_update(hit: string) -> void {
   if hit == "inc" { t_count += 1; }
 }
 
+// ref で受ける入力欄に渡す変数（一番外側の var でなければならない）
+var t_name = "abc";
+
 // 部品に関数を持たせる形
 var t_acted = 0;
 func t_act() -> void { t_acted += 1; }
@@ -150,6 +153,12 @@ func main() -> int {
   print(hits(0, 0, 120, 80));    // 消えている
   var hit2 = ui.show([ui.label("l")], 40, 30);   // 置く場所を決める
   print(f"[{hit2}] {ui.get(41, 30) != 0} {ui.get(4, 4) != 0}");
+
+  // --- ref で受ける入力欄（名札は返らず、変数を直に書き換える）---
+  ui.clear(0);
+  var hit3 = ui.show([ui.field(ref t_name)]);
+  print(f"[{hit3}] [{t_name}] {ui.edited()}");   // 誰も打っていないので、そのまま
+  print(hits(0, 0, 120, 80) > 0);                // 枠は描かれている
 
   // --- フォント（機種のものが読めるかは機種次第なので、内蔵の側だけ見る）---
   ui.font_builtin();

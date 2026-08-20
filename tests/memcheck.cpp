@@ -252,11 +252,12 @@ int main() {
   // 面（生のメモリ）と、宣言的な層の部品（クラスの実体と配列）
   check_clean("画面と部品",
               "import std.ui;\n"
+              "var name = \"abc\";\n"          // ui.field(ref ...) の書き戻し先
               "func act() -> void {}\n"
               "func view(n: int) -> list<Widget> {\n"
               "  return [ui.label(\"n\"), ui.row([ui.button(\"ok\", act),\n"
               "          ui.checkbox(\"c\", \"c\", true)]), ui.field(\"f\", \"abc\"),\n"
-              "          ui.center([ui.divider()])];\n"
+              "          ui.field(ref name), ui.center([ui.divider()])];\n"
               "}\n"
               "func main() -> int {\n"
               "  ui.open(\"memcheck\", 40, 24);\n"

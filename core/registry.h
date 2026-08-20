@@ -17,9 +17,11 @@ struct NativeEntry {
   Vec<Type*> params;
   Type* ret;
   bool ref0;       // 第1引数を ref で受け取る
+  bool ref0_var;   // その ref を「どの var か」として覚える（一番外側の var だけを受ける）
   bool typed;      // 型検査に使える型を持っているか
   bool is_host;    // ホストが足した関数
-  NativeEntry() : fn(0), ret(0), ref0(false), typed(true), is_host(false) {}
+  NativeEntry()
+      : fn(0), ret(0), ref0(false), ref0_var(false), typed(true), is_host(false) {}
 };
 
 class Registry {
@@ -31,6 +33,10 @@ class Registry {
   // 型検査では使わない（checker が型を決める）もの
   int add_untyped(const char* name, NativeFn fn);
   void mark_ref0(int id) { e_[id].ref0 = true; }
+  // 第1引数の ref を、呼び出しのあとも書き戻し先にするもの（ui.field など）。
+  // 持ち続けるのは借用ではなく「どの var か」なので、型検査は一番外側の var だけを通す
+  // （check.cpp。一番外側の var はプログラムが終わるまで生きている）
+  void mark_ref0_var(int id) { e_[id].ref0 = true; e_[id].ref0_var = true; }
   void mark_host(int id) { e_[id].is_host = true; }
 
   int size() const { return e_.size(); }

@@ -120,7 +120,8 @@ void Checker::make_builtin_classes() {
         {"kind", t_.t_int()},        // 部品の種類（lib/ui.cpp の WidgetKind）
         {"text", t_.t_string()},     // 出す文字・ラベル
         {"id", t_.t_string()},       // 名札。押されると ui.show() がこれを返す
-        {"a", t_.t_int()},           // 値（checkbox の入切、slider のいま、space の高さ）
+        {"a", t_.t_int()},           // 値（checkbox の入切、slider のいま、space の高さ、
+                                     //      field が書き戻す var の番号）
         {"b", t_.t_int()},           // slider の下
         {"c", t_.t_int()},           // slider の上
         {"kids", t_.list_of(tw)},    // column / row の中身
@@ -2121,10 +2122,27 @@ bool Checker::resolve_overload(Node* call, const Vec<int>& cand_funcs, const Vec
     }
     if (given_ref) {
       Node* inner = args[i]->a;
-      if (inner->kind == E_Ident) {
-        Local* l = find_local(inner->name);
-        if (l && l->is_const)
-          err("E0113", diag_.L("const は ref で渡せません", "a const cannot be passed by ref"), args[i]);
+      // const は書き換えられないので ref でも渡せない（関数の中のものも、一番外側のものも）
+      Local* l = inner->kind == E_Ident ? find_local(inner->name) : 0;
+      bool is_const = l ? l->is_const
+                        : (inner->is_global && inner->slot >= 0 &&
+                           inner->slot < prog_.globals.size() &&
+                           prog_.globals[inner->slot]->is_const);
+      if (is_const)
+        err("E0113", diag_.L("const は ref で渡せません", "a const cannot be passed by ref"), args[i]);
+      // 「どの var か」として覚える ref（ui.field など）は、一番外側の var だけを受ける。
+      // 関数の中の変数は、その関数が返ると消えてしまうため（spec/runtime/memory.md）
+      if (best_native && want_ref && reg_[best].ref0_var && !inner->is_global) {
+        Diagnostic& d = diag_.error("E0307",
+                                    diag_.L("ここに ref で渡せるのは、一番外側の var だけです",
+                                            "only a top-level var can be passed by ref here"));
+        d.spans.push(Span(args[i]->line, args[i]->col, args[i]->len));
+        d.help.push(diag_.L(shown + " は「どの var か」を覚えて、そのつどそこへ書き戻します。"
+                            "関数の中の変数は、その関数が返ると消えます",
+                            shown + " records which var to write to and writes there as it goes; "
+                            "a variable inside a function is gone once that function returns"));
+        d.help.push(diag_.L("その変数を一番外側（トップレベル）の var にします",
+                            "declare that variable as a top-level var"));
       }
     }
     need_assign(ps[i], args[i]->type, args[i], "引数", "argument");

@@ -933,7 +933,18 @@ func update(hit: string) -> void {
 ui.run("かうんた", 420, 300, view, update);
 ```
 
-入力欄（`ui.field`）は名札で受け取ります（焦点を名札で覚えているため）。
+入力欄（`ui.field`）だけは、関数ではなく **`ref` で変数を渡します**。
+打たれるたびに、その変数が書き換わります。
+
+```shark
+var name = "さめ";                    // 一番外側の var に置きます
+
+ui.field(ref name),                   // 打つと name が変わる
+```
+
+`ref` で渡せるのは**一番外側の `var`** だけです（誤り `E0307`）。
+覚えているのは借用ではなく「どの `var` か」で、書き戻しはその `var` への代入と同じだからです。
+ほかのモジュールの `var`（`state.name`）でもかまいません。
 
 `ui.show()` が返すのは、押されたものの**名札**（自分で決めた `id`）です。
 値を持つ部品なら、新しい値は `ui.value()` か `ui.text_value()` で受け取ります。
@@ -941,7 +952,7 @@ ui.run("かうんた", 420, 300, view, update);
 ```shark
 ui.checkbox("音を出す", "sound", sound),   // 押されると "sound" が返る
 ui.slider("volume", volume, 0, 100),       // つまむと "volume" が返る
-ui.field("name", name),                    // 打つと "name" が返る
+ui.field("name", name),                    // 打つと "name" が返る（ref を使わない書き方）
 ```
 
 ```shark

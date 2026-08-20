@@ -73,7 +73,7 @@ static const char* kUiRunSource =
     "  while ui.poll() {\n"
     "    ui.clear();\n"
     "    var hit = ui.show(view());\n"
-    "    var changed = false;\n"
+    "    var changed = ui.edited();    // ref で受けた入力欄が、変数を書き換えた\n"
     "    if ui.has_action() {          // 部品が関数を持っていれば、それを呼ぶ\n"
     "      var act = ui.action();\n"
     "      act();\n"

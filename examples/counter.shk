@@ -4,13 +4,15 @@
 //
 // くり返しも描き直しも ui.run() が引き受ける。書くのは「いまどうあるべきか」と、
 // **押されたときの動き**だけ。動きは名前を付けず、部品を書いたその場に置ける。
+// 入力欄は ref で変数を渡すと、打たれるたびにその変数が書き換わる。
 //
 // 日本語は ui.run() が機種のフォントを読むので、そのまま出る。
 // FreeType を入れずに作ったときは □ になる（README の「日本語の字を出す」）。
 import std.ui;
 import std.file;
 
-// 状態はふつうの変数。処理系は覚えない
+// 状態はふつうの変数。処理系は覚えない。
+// 入力欄に ref で渡すものは、ここ（一番外側）に置く
 var count = 0;
 var sound = true;
 var volume = 60;
@@ -36,7 +38,8 @@ func view() -> list<Widget> {
     ui.label(f"{volume}"),
     ui.space(4),
     ui.label("なまえ（押してから打つ。右で押すと切り貼り）"),
-    ui.field("name", name),          // 入力欄は名札で受ける
+    ui.field(ref name),              // 打たれるたびに name が書き換わる
+    ui.label(f"こんにちは、{name} さん"),
     ui.space(4),
     ui.button("おわる", func() -> void { ui.quit(); }).align("right"),
   ];
@@ -45,10 +48,7 @@ func view() -> list<Widget> {
 func main() -> int {
   ui.theme(ui.rgb(18, 18, 26), ui.rgb(232, 232, 236), ui.rgb(76, 155, 232));
 
-  // 入力欄だけは名札で来るので、受け取る関数もその場に書く
-  ui.run("かうんた", 420, 340, view, func(hit: string) -> void {
-    if hit == "name" { name = ui.text_value(); }
-  });
+  ui.run("かうんた", 420, 360, view);
 
   // 画面が無いときは、ui.run が1回だけ描いて返り、面はそのまま残る
   if ui.width() > 0 {

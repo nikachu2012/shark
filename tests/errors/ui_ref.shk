@@ -1,0 +1,14 @@
+// ui.field(ref ...) に渡せるのは、一番外側の var だけ
+import std.ui;
+
+var name = "";
+
+func view() -> list<Widget> {
+  var tmp = "";
+  return [ui.field(ref tmp), ui.field(name)];   // E0307 / E0301
+}
+
+func main() -> int {
+  _ = ui.show(view());
+  return 0;
+}

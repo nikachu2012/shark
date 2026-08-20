@@ -8,6 +8,9 @@
 //   ・名札を付けて update で振り分ける   ui.button("ふやす", "inc")
 // 関数は名前を付けたものでもよい（ui.button("ふやす", inc)）。混ぜてもよい。
 //
+// 入力欄は ref で変数を渡すと、打たれるたびにその変数が書き換わる
+//   ui.field(ref name)
+//
 // 状態は書く人がふつうの変数で持つ。ここは覚えない。
 // 処理系はこのファイルを埋め込んで持ち、std.ui を入れたときだけ読み込む
 // （core/shark.cpp）。core/prelude.h は tools/prelude.py がここから作る。
@@ -31,7 +34,7 @@ public func run(title: string, width: int, height: int,
   while ui.poll() {
     ui.clear();
     var hit = ui.show(view());
-    var changed = false;
+    var changed = ui.edited();    // ref で受けた入力欄が、変数を書き換えた
     if ui.has_action() {          // 部品が関数を持っていれば、それを呼ぶ
       var act = ui.action();
       act();

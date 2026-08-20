@@ -691,6 +691,18 @@ static void input_frame(int x, int y, int h, const Str& value, Str* conf, Str* m
   g_marked.clear();
 }
 
+// 入力欄が受け取った打鍵を、その回のぶんとして使い切る。
+// 同じ回にもう一度描くとき、同じ字がもう一度入らないようにする
+static void take_input() {
+  g_typed.clear();
+  g_press[SKEY_Back] = false;
+  g_press[SKEY_Delete] = false;
+  g_press[SKEY_Left] = false;
+  g_press[SKEY_Right] = false;
+  g_press[SKEY_Home] = false;
+  g_press[SKEY_End] = false;
+}
+
 static NativeStatus u_poll(VM& vm, Value* a, int n, Value& out) {
   (void)a; (void)n;
   if (!need_open(vm)) return N_Panic;
@@ -1207,6 +1219,8 @@ static int64_t w_field(const Value& v, int i) {
   InstObj* o = as_inst(v);
   return i < o->fields.size() ? o->fields[i].i : 0;
 }
+// 入力欄が書き戻す先の var の番号（-1 なら名札で受ける形）
+static int w_var(const Value& v) { return w_kind(v) == WK_Field ? (int)w_a(v) : -1; }
 static int w_pad(const Value& v) { return (int)w_field(v, WF_Pad); }
 static int w_wid(const Value& v) { return (int)w_field(v, WF_Wid); }
 static int w_hei(const Value& v) { return (int)w_field(v, WF_Hei); }
@@ -1269,6 +1283,9 @@ static int64_t g_hit_val = 0;
 static Str g_hit_text;
 static bool g_click_seen = false;   // この回にどこかが押されたか（焦点を外すのに使う）
 static Str g_focus_next;
+static bool g_edited = false;      // この回、ref で受けた部品が変数を書き換えたか
+// ui.show() を呼んだ処理系。ref で受けた入力欄の書き戻しに使う（下の write_var）
+static VM* g_vm = 0;
 
 static void clear_hit_action() {
   val_release(g_hit_action);
@@ -1287,6 +1304,8 @@ static void hit(const Value& v, int64_t val) {
 static void ui_reset_widgets() {
   clear_hit_action();
   g_hit_any = false;
+  g_edited = false;
+  g_vm = 0;
   g_menu_on = false;
   g_menu_items.clear();
   g_menu_owner.clear();
@@ -1299,6 +1318,39 @@ static void ui_reset_widgets() {
   g_hit_val = 0;
 }
 
+
+// --- ref で受けた部品の、書き戻し先 ---------------------------------------
+// 借用（Value*）をそのまま持ち続けると、渡した側の関数が返ったところで宙に浮く。
+// そこで覚えるのは借用ではなく、**どの var か**（一番外側の var の番号）。
+// 一番外側の var はプログラムが終わるまで生きているので、いつ書き戻しても指し先を失わない。
+// 番号にできないもの（関数の中の変数）は型検査が断るので、ふつうはここに来ない（E0307）
+static int var_slot(VM& vm, const Value* p) {
+  int n = vm.globals.size();
+  if (!p || n <= 0) return -1;
+  uintptr_t base = (uintptr_t)vm.globals.data();
+  uintptr_t q = (uintptr_t)p;
+  if (q < base || q >= base + sizeof(Value) * (size_t)n) return -1;
+  size_t off = (size_t)(q - base);
+  if (off % sizeof(Value) != 0) return -1;
+  return (int)(off / sizeof(Value));
+}
+
+// その var に、新しい文字を入れ直す
+static void write_var(VM& vm, int slot, const Str& s) {
+  if (slot < 0 || slot >= vm.globals.size()) return;
+  Value v = mk_str(s);
+  val_release(vm.globals[slot]);
+  vm.globals[slot] = v;
+}
+
+// ref で受けた入力欄の名札。どの欄に焦点があるかは名札で覚えているので、番号から作る。
+// 先頭に付ける 0x01 は名札に書くような字ではないので、自分で付けた名札とはぶつからない。
+// この名札は ui.show() から返さないので、書く人の目に触れることもない
+static Str var_field_id(int slot) {
+  Str id("\x01");
+  id += str_from_int(slot);
+  return id;
+}
 
 static bool inside(int x, int y, int w, int h) {
   return g_mx >= x && g_mx < x + w && g_my >= y && g_my < y + h;
@@ -1561,17 +1613,24 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
   // --- 文字を受け取る ---
   Str marked;
   if (focused) {
-    Str before = text;
     bool was_composing = g_marked.size() > 0;
     Str conf;
     input_frame(tx, ty, b.h - field_pad_y() * 2, text, &conf, &marked);
     if (g_press[SKEY_Enter] && !was_composing) g_focus_next.clear();
     text = conf;
     if (!(conf == w_text(v))) {
-      hit(v, 0);
+      int slot = w_var(v);
+      if (slot >= 0 && g_vm) {   // ref で受けた形。その var を直に書き換える
+        write_var(*g_vm, slot, conf);
+        g_edited = true;
+      } else {                   // 名札で受ける形。ui.show() が名札を返す
+        hit(v, 0);
+      }
       g_hit_text = conf;
     }
-    (void)before;
+    // 打たれた字は、この欄が使い切る。こうすると、同じ回にもう一度 ui.show() しても
+    // 二度は入らない（ui.run が、状態を変えたあとすぐ描き直すのに要る）
+    take_input();
   }
 
   // --- 見せるところを決める（カーソルが見えるように左を隠す）---
@@ -1730,7 +1789,26 @@ static NativeStatus u_slider(VM& vm, Value* a, int n, Value& out) {
 }
 static NativeStatus u_field(VM& vm, Value* a, int n, Value& out) {
   (void)n;
-  return make_widget(vm, WK_Field, as_str(*A(a, 1))->s, as_str(*A(a, 0))->s, 0, 0, 0, 0, out)
+  return make_widget(vm, WK_Field, as_str(*A(a, 1))->s, as_str(*A(a, 0))->s, -1, 0, 0, 0, out)
+             ? N_Ok : N_Panic;
+}
+// ref で受ける形。打たれるたびに、渡された var が書き換わる（名札は要らない）。
+// 覚えるのは借用そのものではなく var の番号で、書き戻すのは ui.show() の中
+static NativeStatus u_field_ref(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  Value* p = val_deref(&a[0]);
+  int slot = var_slot(vm, p);
+  if (slot < 0) {
+    vm.panic(vm.L("入力欄に ref で渡せるのは、一番外側の var だけです",
+                  "ui.field(ref ...) takes a top-level var"));
+    return N_Panic;
+  }
+  if (!(p->k == V_Obj && p->o->kind == O_Str)) {
+    vm.panic(vm.L("入力欄に ref で渡せるのは string の var です",
+                  "ui.field(ref ...) takes a string var"));
+    return N_Panic;
+  }
+  return make_widget(vm, WK_Field, as_str(*p)->s, var_field_id(slot), slot, 0, 0, 0, out)
              ? N_Ok : N_Panic;
 }
 static NativeStatus u_space(VM& vm, Value* a, int n, Value& out) {
@@ -1770,6 +1848,8 @@ static NativeStatus show_at(VM& vm, Value* a, int x, int y, Value& out) {
   g_hit_text.clear();
   g_hit_val = 0;
   g_hit_any = false;
+  g_edited = false;
+  g_vm = &vm;          // ref で受けた入力欄の書き戻しに使う
   clear_hit_action();
   g_click_seen = g_mpress[0];
   g_focus_next = g_focus;
@@ -1807,6 +1887,12 @@ static NativeStatus u_value(VM& vm, Value* a, int n, Value& out) {
 static NativeStatus u_text_value(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)a; (void)n;
   out = mk_str(g_hit_text);
+  return N_Ok;
+}
+// この回、ref で受けた部品が var を書き換えたか
+static NativeStatus u_edited(VM& vm, Value* a, int n, Value& out) {
+  (void)vm; (void)a; (void)n;
+  out = mk_bool(g_edited);
   return N_Ok;
 }
 // この回、関数を持った部品が押されたか
@@ -1978,6 +2064,9 @@ void register_ui(Registry& r) {
   r.add("ui.checkbox", u_checkbox, tw, ts, ts, tb);
   r.add("ui.slider", u_slider, tw, ts, ti, ti, ti);
   r.add("ui.field", u_field, tw, ts, ts);
+  // ref で受ける形。覚えるのは借用ではなく「どの var か」なので、
+  // 型検査は一番外側の var だけを通す（check.cpp の E0307）
+  r.mark_ref0_var(r.add("ui.field", u_field_ref, tw, ts));
   r.add("ui.space", u_space, tw, ti);
   r.add("ui.column", u_column, tw, tlw);
   r.add("ui.row", u_row, tw, tlw);
@@ -1988,6 +2077,7 @@ void register_ui(Registry& r) {
   r.add("ui.button", u_button_fn, tw, ts, tact);
   r.add("ui.checkbox", u_checkbox_fn, tw, ts, tact, tb);
   r.add("ui.slider", u_slider_fn, tw, tact, ti, ti, ti);
+  r.add("ui.edited", u_edited, tb);
   r.add("ui.has_action", u_has_action, tb);
   r.add("ui.action", u_action, tact);
   r.add("ui.show", u_show, ts, tlw);
