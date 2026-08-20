@@ -48,8 +48,79 @@ void modules_to_config(uint32_t bits, Config* cfg) {
 // ------------------------------------------------------------------ 書く道具
 namespace {
 
+// 64 ビットの鍵で番号を引く小さな表（開番地法）。
+// 型・クラス・文字列は書き出すあいだ何度も引くので、そのたびに並びを頭から
+// 見ていくと、数が増えたときに二乗で効いてくる
+class Lookup {
+ public:
+  Lookup() : mask_(0), count_(0) { reset(256); }
+  int find(uint64_t k) const {
+    int i = (int)(mix(k) & (uint64_t)mask_);
+    for (;;) {
+      if (val_[i] < 0) return -1;
+      if (key_[i] == k) return val_[i];
+      i = (i + 1) & mask_;
+    }
+  }
+  void add(uint64_t k, int v) {
+    if ((count_ + 1) * 4 >= (mask_ + 1) * 3) grow();
+    int i = (int)(mix(k) & (uint64_t)mask_);
+    while (val_[i] >= 0) {
+      if (key_[i] == k) { val_[i] = v; return; }
+      i = (i + 1) & mask_;
+    }
+    key_[i] = k;
+    val_[i] = v;
+    count_++;
+  }
+
+ private:
+  static uint64_t mix(uint64_t x) {
+    x ^= x >> 33; x *= 0xff51afd7ed558ccdull; x ^= x >> 33;
+    return x;
+  }
+  void reset(int n) {
+    key_.clear(); val_.clear();
+    for (int i = 0; i < n; i++) { key_.push(0); val_.push(-1); }
+    mask_ = n - 1;
+    count_ = 0;
+  }
+  void grow() {
+    Vec<uint64_t> k = key_;
+    Vec<int> v = val_;
+    reset((mask_ + 1) * 2);
+    for (int i = 0; i < v.size(); i++) if (v[i] >= 0) add(k[i], v[i]);
+  }
+  Vec<uint64_t> key_;
+  Vec<int> val_;
+  int mask_;
+  int count_;
+};
+
+static uint64_t ptr_key(const void* p) { return (uint64_t)(uintptr_t)p; }
+
+// 文字列を鍵にする（同じ中身なら同じ値）
+static uint64_t str_key(const Str& t) {
+  uint64_t h = 0xcbf29ce484222325ull;
+  for (int i = 0; i < t.size(); i++) { h ^= (uint64_t)(unsigned char)t[i]; h *= 0x100000001b3ull; }
+  return h;
+}
+
+// 見張り（checksum）。覚え書きの後ろぜんぶを 1 つの数にまとめる。
+// 1 バイトでも化けていれば、中身を組み立てる前に気づける（spec/runtime/bytecode.md）。
+// 悪意のある書き換えを防ぐものではない
+static uint32_t payload_checksum(const Str& b, int from) {
+  uint64_t h = 0xcbf29ce484222325ull;
+  for (int i = from; i < b.size(); i++) { h ^= (uint64_t)(unsigned char)b[i]; h *= 0x100000001b3ull; }
+  return (uint32_t)(h ^ (h >> 32));
+}
+
 struct Writer {
   Str b;
+  // 名前や道は同じものが何度も出てくる。本体には番号だけを入れ、
+  // 中身は表にまとめて1回だけ書く（spec/runtime/bytecode.md）
+  Vec<Str> pool;
+  Lookup pool_at;
   void u8(int v) { b.push((char)(v & 0xff)); }
   void fixed32(uint32_t v) { for (int i = 0; i < 4; i++) u8((int)((v >> (8 * i)) & 0xff)); }
   void fixed64(uint64_t v) { for (int i = 0; i < 8; i++) u8((int)((v >> (8 * i)) & 0xff)); }
@@ -60,13 +131,25 @@ struct Writer {
   void sv(int64_t v) { uv(((uint64_t)v << 1) ^ (uint64_t)(v >> 63)); }
   void f64(double d) { uint64_t u = 0; sk_memcpy(&u, &d, sizeof u); fixed64(u); }
   void str(const Str& s) { uv((uint64_t)s.size()); b.append(s.data(), s.size()); }
+  // 表に入れて、その番号を書く
+  void sid(const Str& s) { uv((uint64_t)intern(s)); }
+  int intern(const Str& s) {
+    uint64_t k = str_key(s);
+    int i = pool_at.find(k);
+    if (i >= 0 && pool[i] == s) return i;
+    pool.push(s);
+    int n = pool.size() - 1;
+    if (i < 0) pool_at.add(k, n);   // ぶつかったときは、足すだけにして正しさを取る
+    return n;
+  }
 };
 
 struct Reader {
   const Str& b;
   int p;
   bool bad;
-  explicit Reader(const Str& s) : b(s), p(0), bad(false) {}
+  const Vec<Str>* pool;   // 文字列の表（覚え書きのすぐ後ろにある）
+  explicit Reader(const Str& s) : b(s), p(0), bad(false), pool(0) {}
   int u8() {
     if (p >= b.size()) { bad = true; return 0; }
     return (unsigned char)b[p++];
@@ -89,10 +172,13 @@ struct Reader {
   int64_t sv() { uint64_t u = uv(); return (int64_t)(u >> 1) ^ -(int64_t)(u & 1); }
   double f64() { uint64_t u = fixed64(); double d = 0; sk_memcpy(&d, &u, sizeof d); return d; }
   int idx() { return (int)sv(); }
-  // 個数。壊れたファイルで途方もない数を読んだら、そこで止める
-  int count() {
+  // 個数。壊れたファイルで途方もない数を読んだら、そこで止める。
+  // 見るのは「残りのバイト数」。1つあたり least バイトは要るものなら、そのぶん割る。
+  // ここを緩くすると、中身を1つも読まないうちに大量の確保を始めてしまう
+  int count(int least = 1) {
     uint64_t n = uv();
-    if (n > 0x4000000ull || (int)n > b.size()) { bad = true; return 0; }
+    uint64_t room = (uint64_t)(b.size() - p) / (uint64_t)(least > 0 ? least : 1);
+    if (n > 0x4000000ull || n > room) { bad = true; return 0; }
     return (int)n;
   }
   Str str() {
@@ -102,19 +188,23 @@ struct Reader {
     p += n;
     return s;
   }
+  // 表を番号で引く
+  Str sid() {
+    uint64_t i = uv();
+    if (bad || !pool || i >= (uint64_t)pool->size()) { bad = true; return Str(); }
+    return (*pool)[(int)i];
+  }
 };
 
 // 型を並べる。指しているものが必ず先に来るように、深いところから入れる
 struct TypeIndex {
   Vec<Type*> order;
   Vec<Type*> working;
+  Lookup at;         // 型 → order の位置
   bool cycle;
   TypeIndex() : cycle(false) {}
 
-  int find(Type* t) const {
-    for (int i = 0; i < order.size(); i++) if (order[i] == t) return i;
-    return -1;
-  }
+  int find(Type* t) const { return t ? at.find(ptr_key(t)) : -1; }
   int put(Type* t) {
     if (!t) return -1;
     int i = find(t);
@@ -128,15 +218,19 @@ struct TypeIndex {
     for (int k = 0; k < t->targs.size(); k++) put(t->targs[k]);
     working.pop();
     order.push(t);
+    at.add(ptr_key(t), order.size() - 1);
     return order.size() - 1;
   }
 };
 
-int class_index(Program& prog, ClassInfo* c) {
-  if (!c) return -1;
-  for (int i = 0; i < prog.classes.size(); i++) if (prog.classes[i] == c) return i;
-  return -1;
-}
+// クラス → Program::classes の位置。表は一度だけ作る
+struct ClassIndex {
+  Lookup at;
+  explicit ClassIndex(Program& prog) {
+    for (int i = 0; i < prog.classes.size(); i++) at.add(ptr_key(prog.classes[i]), i);
+  }
+  int find(ClassInfo* c) const { return c ? at.find(ptr_key(c)) : -1; }
+};
 
 bool write_const(Writer& w, const Value& v, Lang lang, Str* err) {
   if (v.k == V_Void) { w.u8(C_Void); return true; }
@@ -145,8 +239,8 @@ bool write_const(Writer& w, const Value& v, Lang lang, Str* err) {
   if (v.k == V_Float) { w.u8(C_Float); w.f64(v.f); return true; }
   if (v.k == V_Bool) { w.u8(C_Bool); w.u8(v.b ? 1 : 0); return true; }
   if (v.k == V_Obj && v.o) {
-    if (v.o->kind == O_Str) { w.u8(C_Str); w.str(((StrObj*)v.o)->s); return true; }
-    if (v.o->kind == O_Bytes) { w.u8(C_Bytes); w.str(((StrObj*)v.o)->s); return true; }
+    if (v.o->kind == O_Str) { w.u8(C_Str); w.sid(((StrObj*)v.o)->s); return true; }
+    if (v.o->kind == O_Bytes) { w.u8(C_Bytes); w.sid(((StrObj*)v.o)->s); return true; }
     if (v.o->kind == O_Func) { w.u8(C_Func); w.sv(((FuncObj*)v.o)->fn); return true; }
   }
   *err = L(lang, "この種類の定数は保存できません", "this kind of constant cannot be saved");
@@ -161,8 +255,8 @@ bool read_const(Reader& r, int nfuncs, Value* out, Lang lang, Str* err) {
     case C_Int: *out = mk_int(r.sv()); return true;
     case C_Float: *out = mk_float(r.f64()); return true;
     case C_Bool: *out = mk_bool(r.u8() != 0); return true;
-    case C_Str: *out = mk_str(r.str()); return true;
-    case C_Bytes: *out = mk_bytes(r.str()); return true;
+    case C_Str: *out = mk_str(r.sid()); return true;
+    case C_Bytes: *out = mk_bytes(r.sid()); return true;
     case C_Func: {
       int fn = r.idx();
       if (fn < 0 || fn >= nfuncs) { r.bad = true; return false; }
@@ -181,6 +275,7 @@ bool read_const(Reader& r, int nfuncs, Value* out, Lang lang, Str* err) {
 bool bytecode_write(Program& prog, const Registry& reg, const BytecodeHeader& h, Str* out,
                     Str* err) {
   Lang lang = h.lang;
+  ClassIndex cix(prog);
   // 指しているものを集める（型は、指す先が先に並ぶ順にする）
   TypeIndex tix;
   for (int i = 0; i < prog.globals.size(); i++) tix.put(prog.globals[i]->type);
@@ -200,15 +295,7 @@ bool bytecode_write(Program& prog, const Registry& reg, const BytecodeHeader& h,
     return false;
   }
 
-  Writer w;
-  // --- 覚え書き ---
-  for (int i = 0; i < 4; i++) w.u8(kBytecodeMagic[i]);
-  w.fixed32((uint32_t)kBytecodeVersion);
-  w.str(h.main_file);
-  w.u8(h.lang == LANG_EN ? 1 : 0);
-  w.fixed32((uint32_t)h.memory_mb);
-  w.fixed32(h.modules);
-  w.fixed64(registry_signature(reg));
+  Writer w;   // 本体。ここで出てきた文字列は w.pool にたまる
 
   // --- 大きさ（先に読めるように） ---
   w.uv((uint64_t)prog.classes.size());
@@ -221,13 +308,13 @@ bool bytecode_write(Program& prog, const Registry& reg, const BytecodeHeader& h,
     w.u8((int)t->kind);
     w.sv(tix.find(t->a));
     w.sv(tix.find(t->b));
-    w.sv(class_index(prog, t->cls));
-    w.str(t->name);
+    w.sv(cix.find(t->cls));
+    w.sid(t->name);
     w.uv((uint64_t)t->params.size());
     for (int k = 0; k < t->params.size(); k++) w.sv(tix.find(t->params[k]));
     w.sv(tix.find(t->ret));
     w.uv((uint64_t)t->constraints.size());
-    for (int k = 0; k < t->constraints.size(); k++) w.sv(class_index(prog, t->constraints[k]));
+    for (int k = 0; k < t->constraints.size(); k++) w.sv(cix.find(t->constraints[k]));
     w.uv((uint64_t)t->targs.size());
     for (int k = 0; k < t->targs.size(); k++) w.sv(tix.find(t->targs[k]));
   }
@@ -235,22 +322,22 @@ bool bytecode_write(Program& prog, const Registry& reg, const BytecodeHeader& h,
   // --- クラス ---
   for (int i = 0; i < prog.classes.size(); i++) {
     ClassInfo* c = prog.classes[i];
-    w.str(c->name);
-    w.str(c->module);
-    w.sv(class_index(prog, c->base));
+    w.sid(c->name);
+    w.sid(c->module);
+    w.sv(cix.find(c->base));
     w.uv((uint64_t)c->interfaces.size());
-    for (int k = 0; k < c->interfaces.size(); k++) w.sv(class_index(prog, c->interfaces[k]));
+    for (int k = 0; k < c->interfaces.size(); k++) w.sv(cix.find(c->interfaces[k]));
     w.uv((uint64_t)c->fields.size());
     for (int k = 0; k < c->fields.size(); k++) {
       const FieldInfo& f = c->fields[k];
-      w.str(f.name);
+      w.sid(f.name);
       w.sv(tix.find(f.type));
       w.u8(f.is_public ? 1 : 0);
-      w.sv(class_index(prog, f.owner));
+      w.sv(cix.find(f.owner));
     }
     w.uv((uint64_t)c->methods.size());
     for (int k = 0; k < c->methods.size(); k++) {
-      w.str(c->methods[k].name);
+      w.sid(c->methods[k].name);
       w.sv(c->methods[k].func);
       w.u8(c->methods[k].is_public ? 1 : 0);
     }
@@ -263,7 +350,7 @@ bool bytecode_write(Program& prog, const Registry& reg, const BytecodeHeader& h,
     if (c->is_builtin) flags |= CF_Builtin;
     w.uv((uint64_t)flags);
     w.uv((uint64_t)c->gparams.size());
-    for (int k = 0; k < c->gparams.size(); k++) w.str(c->gparams[k]);
+    for (int k = 0; k < c->gparams.size(); k++) w.sid(c->gparams[k]);
     w.uv((uint64_t)c->gtypes.size());
     for (int k = 0; k < c->gtypes.size(); k++) w.sv(tix.find(c->gtypes[k]));
   }
@@ -271,12 +358,12 @@ bool bytecode_write(Program& prog, const Registry& reg, const BytecodeHeader& h,
   // --- 関数 ---
   for (int i = 0; i < prog.funcs.size(); i++) {
     FuncInfo* f = prog.funcs[i];
-    w.str(f->name);
-    w.str(f->module);
-    w.str(f->file);
+    w.sid(f->name);
+    w.sid(f->module);
+    w.sid(f->file);
     w.uv((uint64_t)f->params.size());
     for (int k = 0; k < f->params.size(); k++) {
-      w.str(f->params[k].name);
+      w.sid(f->params[k].name);
       w.sv(tix.find(f->params[k].type));
       w.u8(f->params[k].is_ref ? 1 : 0);
     }
@@ -292,11 +379,11 @@ bool bytecode_write(Program& prog, const Registry& reg, const BytecodeHeader& h,
     if (f->is_test) flags |= FF_Test;
     if (f->is_generic) flags |= FF_Generic;
     w.uv((uint64_t)flags);
-    w.sv(class_index(prog, f->owner));
+    w.sv(cix.find(f->owner));
     w.sv(f->vslot);
     w.uv((uint64_t)f->nlocals);
     w.uv((uint64_t)f->gparams.size());
-    for (int k = 0; k < f->gparams.size(); k++) w.str(f->gparams[k]);
+    for (int k = 0; k < f->gparams.size(); k++) w.sid(f->gparams[k]);
     w.uv((uint64_t)f->gtypes.size());
     for (int k = 0; k < f->gtypes.size(); k++) w.sv(tix.find(f->gtypes[k]));
     // 命令の並びと、そこで使う定数と、行番号
@@ -322,8 +409,8 @@ bool bytecode_write(Program& prog, const Registry& reg, const BytecodeHeader& h,
   w.uv((uint64_t)prog.globals.size());
   for (int i = 0; i < prog.globals.size(); i++) {
     GlobalInfo* g = prog.globals[i];
-    w.str(g->name);
-    w.str(g->module);
+    w.sid(g->name);
+    w.sid(g->module);
     w.sv(tix.find(g->type));
     int flags = 0;
     if (g->is_public) flags |= GF_Public;
@@ -336,7 +423,26 @@ bool bytecode_write(Program& prog, const Registry& reg, const BytecodeHeader& h,
   for (int i = 0; i < prog.inits.size(); i++) w.sv(prog.inits[i]);
   w.sv(prog.entry);
 
-  *out = w.b;
+  // 並べ方は「覚え書き ＋ 文字列の表 ＋ 本体」。
+  // 表は本体を書き終えないと揃わないので、最後にここで前へ付ける
+  Writer head;
+  for (int i = 0; i < 4; i++) head.u8(kBytecodeMagic[i]);
+  head.fixed32((uint32_t)kBytecodeVersion);
+  head.fixed32(0);                        // 見張りの置き場所。中身が揃ってから埋める
+  head.str(h.main_file);
+  head.u8(h.lang == LANG_EN ? 1 : 0);
+  head.fixed32((uint32_t)h.memory_mb);
+  head.fixed32(h.modules);
+  head.fixed64(registry_signature(reg));
+  head.uv((uint64_t)w.pool.size());
+  for (int i = 0; i < w.pool.size(); i++) head.str(w.pool[i]);
+  head.b += w.b;
+
+  // 見張りは、自分より後ろぜんぶを見る
+  uint32_t sum = payload_checksum(head.b, kChecksumAt + 4);
+  for (int i = 0; i < 4; i++) head.b[kChecksumAt + i] = (char)((sum >> (8 * i)) & 0xff);
+
+  *out = head.b;
   return true;
 }
 
@@ -353,6 +459,12 @@ bool bytecode_read_header(const Str& in, BytecodeHeader* h, Lang lang, Str* err)
   if (h->version != kBytecodeVersion) {
     *err = L(lang, "このバイトコードは別の版で作られています（作り直してください）",
              "this bytecode was made by another version (rebuild it)");
+    return false;
+  }
+  uint32_t sum = r.fixed32();
+  if (!r.bad && sum != payload_checksum(in, kChecksumAt + 4)) {
+    *err = L(lang, "バイトコードが壊れています（見張りの数が合いません）",
+             "the bytecode is damaged (checksum mismatch)");
     return false;
   }
   h->main_file = r.str();
@@ -383,15 +495,29 @@ bool bytecode_read(const Str& in, Program* prog, TypeTable& types, const Registr
   // 覚え書きを読み飛ばす
   r.p = 4;
   r.fixed32();
-  r.str();
+  r.fixed32();   // 見張り（bytecode_read_header で確かめ済み）
+  r.str();       // もとのファイル名。ここだけは表を使わない
   r.u8();
   r.fixed32();
   r.fixed32();
   r.fixed64();
 
-  int nclasses = r.count();
-  int nfuncs = r.count();
-  int ntypes = r.count();
+  // --- 文字列の表 ---
+  // 本体はここに入っている中身を番号で指す。器も本体も、これを読んでから組み立てる
+  int npool = r.count(1);
+  Vec<Str> pool;
+  for (int i = 0; i < npool && !r.bad; i++) pool.push(r.str());
+  if (r.bad) {
+    *err = L(lang, "バイトコードの文字列が壊れています", "the strings in the bytecode are damaged");
+    return false;
+  }
+  r.pool = &pool;
+
+  // 中身を読む前にこの数だけ器を作るので、残りのバイト数と釣り合うかを見ておく。
+  // 1つ書くのに最低でも要るバイト数（クラス 10・関数 14・型 9）より少なめに見積もる
+  int nclasses = r.count(8);
+  int nfuncs = r.count(8);
+  int ntypes = r.count(6);
   if (r.bad) {
     *err = L(lang, "バイトコードが壊れています", "the bytecode is damaged");
     return false;
@@ -406,7 +532,7 @@ bool bytecode_read(const Str& in, Program* prog, TypeTable& types, const Registr
   for (int i = 0; i < ntypes; i++) {
     int kind = r.u8();
     int ia = r.idx(), ib = r.idx(), ic = r.idx();
-    Str name = r.str();
+    Str name = r.sid();
     int nparams = r.count();
     Vec<Type*> params;
     for (int k = 0; k < nparams; k++) {
@@ -426,7 +552,9 @@ bool bytecode_read(const Str& in, Program* prog, TypeTable& types, const Registr
       int ti = r.idx();
       targs.push(ti >= 0 && ti < tys.size() ? tys[ti] : 0);
     }
-    if (r.bad || kind < 0 || kind > (int)T_Output) {
+    // T_Class は必ずクラスを指す。指していないと、既定値を作るところで null を触る
+    bool no_class = kind == (int)T_Class && (ic < 0 || ic >= nclasses);
+    if (r.bad || kind < 0 || kind > (int)T_Output || no_class) {
       *err = L(lang, "バイトコードの型が壊れています", "the types in the bytecode are damaged");
       return false;
     }
@@ -457,8 +585,8 @@ bool bytecode_read(const Str& in, Program* prog, TypeTable& types, const Registr
   // --- クラスの中身 ---
   for (int i = 0; i < nclasses; i++) {
     ClassInfo* c = prog->classes[i];
-    c->name = r.str();
-    c->module = r.str();
+    c->name = r.sid();
+    c->module = r.sid();
     int ibase = r.idx();
     c->base = ibase >= 0 && ibase < nclasses ? prog->classes[ibase] : 0;
     int nif = r.count();
@@ -469,7 +597,7 @@ bool bytecode_read(const Str& in, Program* prog, TypeTable& types, const Registr
     int nf = r.count();
     for (int k = 0; k < nf; k++) {
       FieldInfo f;
-      f.name = r.str();
+      f.name = r.sid();
       int ti = r.idx();
       f.type = ti >= 0 && ti < tys.size() ? tys[ti] : 0;
       f.is_public = r.u8() != 0;
@@ -480,10 +608,11 @@ bool bytecode_read(const Str& in, Program* prog, TypeTable& types, const Registr
     int nm = r.count();
     for (int k = 0; k < nm; k++) {
       MethodRef m;
-      m.name = r.str();
+      m.name = r.sid();
       m.func = r.idx();
       m.is_public = r.u8() != 0;
-      if (m.func < -1 || m.func >= nfuncs) { r.bad = true; break; }
+      // -1（純粋仮想）を許すのは vtable だけ。methods は必ず本物の関数を指す
+      if (m.func < 0 || m.func >= nfuncs) { r.bad = true; break; }
       c->methods.push(m);
     }
     int nv = r.count();
@@ -500,7 +629,7 @@ bool bytecode_read(const Str& in, Program* prog, TypeTable& types, const Registr
     c->is_builtin = (flags & CF_Builtin) != 0;
     c->layout_state = 2;   // 場所は決まったものが入っている
     int ngp = r.count();
-    for (int k = 0; k < ngp; k++) c->gparams.push(r.str());
+    for (int k = 0; k < ngp; k++) c->gparams.push(r.sid());
     int ngt = r.count();
     for (int k = 0; k < ngt; k++) {
       int ti = r.idx();
@@ -512,18 +641,29 @@ bool bytecode_read(const Str& in, Program* prog, TypeTable& types, const Registr
     }
   }
 
+  // 値として持つクラスが輪になっていないか（型検査の E0409 と同じ決まり）。
+  // 書くときには起こらない形だが、壊れていると既定値を作るところが戻ってこない
+  for (int i = 0; i < nclasses; i++) {
+    Vec<ClassInfo*> seen;
+    seen.push(prog->classes[i]);
+    if (class_holds_by_value(prog->classes[i], prog->classes[i], &seen)) {
+      *err = L(lang, "バイトコードのクラスが壊れています", "the classes in the bytecode are damaged");
+      return false;
+    }
+  }
+
   // --- 関数 ---
   for (int i = 0; i < nfuncs; i++) {
     FuncInfo* f = new (sk_alloc(sizeof(FuncInfo))) FuncInfo();
     f->index = i;
     prog->funcs.push(f);
-    f->name = r.str();
-    f->module = r.str();
-    f->file = r.str();
+    f->name = r.sid();
+    f->module = r.sid();
+    f->file = r.sid();
     int np = r.count();
     for (int k = 0; k < np; k++) {
       ParamInfo p;
-      p.name = r.str();
+      p.name = r.sid();
       int ti = r.idx();
       p.type = ti >= 0 && ti < tys.size() ? tys[ti] : 0;
       p.is_ref = r.u8() != 0;
@@ -546,7 +686,7 @@ bool bytecode_read(const Str& in, Program* prog, TypeTable& types, const Registr
     f->vslot = r.idx();
     f->nlocals = (int)r.uv();
     int ngp = r.count();
-    for (int k = 0; k < ngp; k++) f->gparams.push(r.str());
+    for (int k = 0; k < ngp; k++) f->gparams.push(r.sid());
     int ngt = r.count();
     for (int k = 0; k < ngt; k++) {
       int ti = r.idx();
@@ -584,11 +724,11 @@ bool bytecode_read(const Str& in, Program* prog, TypeTable& types, const Registr
   }
 
   // --- グローバル ---
-  int nglobals = r.count();
-  for (int i = 0; i < nglobals; i++) {
+  int nglobals = r.count(4);
+  for (int i = 0; i < nglobals && !r.bad; i++) {
     GlobalInfo* g = new (sk_alloc(sizeof(GlobalInfo))) GlobalInfo();
-    g->name = r.str();
-    g->module = r.str();
+    g->name = r.sid();
+    g->module = r.sid();
     int ti = r.idx();
     g->type = ti >= 0 && ti < tys.size() ? tys[ti] : 0;
     int flags = (int)r.uv();

@@ -178,10 +178,11 @@ static Str strip_ext(const Str& p) {
   return p;
 }
 
-static Str base_name(const Str& p) {
-  for (int i = p.size() - 1; i >= 0; i--)
-    if (p[i] == '/' || p[i] == '\\') return p.sub(i + 1, p.size() - i - 1);
-  return p;
+// 「動かす:」に出す書き方。区切りが無ければ ./ を付ける（PATH から拾われないように）
+static Str run_path(const Str& p) {
+  if (p.size() && p[0] == '/') return p;
+  for (int i = 0; i < p.size(); i++) if (p[i] == '/' || p[i] == '\\') return p;
+  return Str("./") + p;
 }
 
 // 単一バイナリの土台になる実行装置（sharkvm）を探す。
@@ -282,12 +283,18 @@ static int cmd_build(const Str& file, const Str& out_given, bool bytecode_only,
 
   if (bytecode_only) {
     Str out = out_given.size() ? out_given : strip_ext(file) + ".shkc";
+    if (same_file(out, file)) {
+      fprintf(stderr,
+              "書き出す先が、もとのソースと同じです: %s\n"
+              "  直し方: -o <path> で別の名前を渡します\n", out.c_str());
+      return 2;
+    }
     if (!write_file(out, code, false)) {
       fprintf(stderr, "書き出せません: %s\n", out.c_str());
       return 2;
     }
     printf("%s を作りました（バイトコード %d KB）\n", out.c_str(), kb(code.size()));
-    printf("  動かす: ./sharkvm %s\n", out.c_str());
+    printf("  動かす: %s %s\n", run_path(Str("sharkvm")).c_str(), out.c_str());
     return 0;
   }
 
@@ -318,7 +325,20 @@ static int cmd_build(const Str& file, const Str& out_given, bool bytecode_only,
     return 2;
   }
 
-  Str out = out_given.size() ? out_given : base_name(strip_ext(file));
+  // 既定の置き場所は --bytecode と同じ「もとのソースの隣」にそろえる
+  Str out = out_given.size() ? out_given : strip_ext(file);
+  if (same_file(out, file)) {
+    fprintf(stderr,
+            "書き出す先が、もとのソースと同じです: %s\n"
+            "  直し方: -o <path> で別の名前を渡します\n", out.c_str());
+    return 2;
+  }
+  if (same_file(out, rt_path)) {
+    fprintf(stderr,
+            "書き出す先が、土台にする実行装置と同じです: %s\n"
+            "  直し方: -o <path> で別の名前を渡します\n", out.c_str());
+    return 2;
+  }
   Str packed = stub;
   packed += code;
   packed += pack_footer(code.size());
@@ -328,7 +348,7 @@ static int cmd_build(const Str& file, const Str& out_given, bool bytecode_only,
   }
   printf("%s を作りました（実行装置 %d KB ＋ バイトコード %d KB＝%d KB）\n", out.c_str(),
          kb(stub.size()), kb(code.size()), kb(packed.size()));
-  printf("  動かす: ./%s\n", base_name(out).c_str());
+  printf("  動かす: %s\n", run_path(out).c_str());
   return 0;
 }
 

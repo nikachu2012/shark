@@ -29,15 +29,27 @@ static void on_output(void* ud, const char* s, int n) {
 int main() {
   platform_set(platform_desktop());
 
-  Runtime rt(game::game_config());
+  Str code((const char*)kStageBytecode, (int)sizeof kStageBytecode);
+  Config cfg = game::game_config();
+
+  // 作ったときに決めた「使ってよいメモリ」と「panic の言い方」は、覚え書きに入っている
+  // （build_stage.cpp）。読んで使わないと、ここの既定（64MB）のままになる
+  Str err;
+  BytecodeHeader h;
+  if (!bytecode_read_header(code, &h, cfg.lang, &err)) {
+    printf("バイトコードを読めない: %s\n", err.c_str());
+    return 1;
+  }
+  cfg.memory_limit = (size_t)h.memory_mb << 20;
+  cfg.lang = h.lang;
+
+  Runtime rt(cfg);
   game::register_game_hosts(rt);   // 作ったときと同じ順（game_hosts.h）
 
   HostIO io;
   io.write_out = on_output;
   rt.set_io(io);
 
-  Str code((const char*)kStageBytecode, (int)sizeof kStageBytecode);
-  Str err;
   if (!rt.load(code, &err)) {
     // 版や関数の表が食い違っていれば、ここで気づく
     printf("バイトコードを読めない: %s\n", err.c_str());

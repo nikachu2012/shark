@@ -66,13 +66,13 @@ make web-test       # 作ったものを node で確かめる
 （[spec/runtime/bytecode.md](spec/runtime/bytecode.md)）。
 
 ```
-./shark build examples/hello.shk   # → ./hello（429 KB）
+./shark build examples/hello.shk   # → ./hello（446 KB）
 ./hello                            # Hello, Shark!
 ```
 
 - 中身は**バイトコード実行装置＋バイトコード**。
-  字句解析・構文解析・型検査・コード生成は入らないので、`shark` 自身（912 KB）より小さい
-  （実行装置 427 KB ＋ hello のバイトコード 2 KB。gzip で 146 KB）
+  字句解析・構文解析・型検査・コード生成は入らないので、`shark` 自身（929 KB）より小さい
+  （実行装置 444 KB ＋ hello のバイトコード 2 KB。gzip で 152 KB）
 - 型検査は作るときに済んでいる。動かすときはバイトコードを読んで走らせるだけ
 - `import` したモジュールも中に入る。作ったファイルはどの場所からでも動く
 - メモリの上限（`--memory`）と診断の言語（`--lang`）は、**作るときに**決まる

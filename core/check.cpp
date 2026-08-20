@@ -508,21 +508,6 @@ static FuncInfo* find_in_bases(Program& prog, ClassInfo* c, FuncInfo* f, bool* f
   return 0;
 }
 
-// クラスが自分自身を値として持っていないか（代入がコピーなので大きさが決まらない）
-static bool holds_by_value(ClassInfo* c, ClassInfo* target, Vec<ClassInfo*>* seen) {
-  for (int i = 0; i < c->fields.size(); i++) {
-    Type* ft = c->fields[i].type;
-    if (!ft || ft->kind != T_Class || !ft->cls) continue;
-    if (ft->cls == target) return true;
-    bool visited = false;
-    for (int k = 0; k < seen->size(); k++) if ((*seen)[k] == ft->cls) visited = true;
-    if (visited) continue;
-    seen->push(ft->cls);
-    if (holds_by_value(ft->cls, target, seen)) return true;
-  }
-  return false;
-}
-
 void Checker::collect_funcs(Unit* u) {
   unit_ = u;
   diag_.set_file(u->display);
@@ -3021,7 +3006,7 @@ bool Checker::check_all() {
         if (!ft || ft->kind != T_Class || !ft->cls) continue;
         Vec<ClassInfo*> seen;
         seen.push(ft->cls);
-        if (ft->cls != c && !holds_by_value(ft->cls, c, &seen)) continue;
+        if (ft->cls != c && !class_holds_by_value(ft->cls, c, &seen)) continue;
         Diagnostic& d = diag_.error("E0409",
             diag_.L(c->name + " は自分自身を値として持てません（代入がコピーなので、大きさが決まりません）",
                     c->name + " cannot contain itself by value"));

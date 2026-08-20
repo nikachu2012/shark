@@ -50,7 +50,7 @@ static NativeStatus m_atan2(VM& vm, Value* a, int n, Value& out) {
 static NativeStatus m_abs_i(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   int64_t x = A(a, 0)->i;
-  if (x == (-9223372036854775807LL - 1)) { vm.panic(Str("int の計算があふれました")); return N_Panic; }
+  if (x == (-9223372036854775807LL - 1)) { vm.panic(vm.L("int の計算があふれました", "int overflow")); return N_Panic; }
   out = mk_int(x < 0 ? -x : x);
   return N_Ok;
 }
@@ -104,7 +104,7 @@ static NativeStatus m_random(VM& vm, Value* a, int n, Value& out) {
 static NativeStatus m_random_int(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   int64_t lo = A(a, 0)->i, hi = A(a, 1)->i;
-  if (hi < lo) { vm.panic(Str("random_int の範囲が逆です")); return N_Panic; }
+  if (hi < lo) { vm.panic(vm.L("random_int の範囲が逆です", "the range given to random_int is backwards")); return N_Panic; }
   uint64_t span = (uint64_t)(hi - lo) + 1;
   out = mk_int(lo + (int64_t)(next_rand(vm) % span));
   return N_Ok;

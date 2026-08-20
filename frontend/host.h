@@ -12,6 +12,7 @@
 #include "../core/vm.h"
 
 #if defined(_WIN32)
+#include <io.h>
 #include <windows.h>
 #else
 #include <sys/stat.h>
@@ -30,8 +31,9 @@ inline bool read_file(const Str& path, Str* out) {
   char buf[4096];
   size_t n;
   while ((n = fread(buf, 1, sizeof buf, f)) > 0) out->append(buf, (int)n);
+  bool ok = ferror(f) == 0;   // 途中で読めなくなったのを、成功として返さない
   fclose(f);
-  return true;
+  return ok;
 }
 
 inline bool write_file(const Str& path, const Str& data, bool executable) {
@@ -45,6 +47,18 @@ inline bool write_file(const Str& path, const Str& data, bool executable) {
   (void)executable;
 #endif
   return ok;
+}
+
+// 2つの道が同じファイルを指しているか。./a と a のような書き方の違いを吸収する
+inline bool same_file(const Str& a, const Str& b) {
+  if (a == b) return true;
+#if !defined(_WIN32)
+  struct stat sa, sb;
+  if (stat(a.c_str(), &sa) != 0 || stat(b.c_str(), &sb) != 0) return false;
+  return sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
+#else
+  return false;   // 書き方の違いまでは見ない
+#endif
 }
 
 // 自分自身（いま動いている実行ファイル）の場所
@@ -64,7 +78,7 @@ inline bool exe_path(Str* out) {
 #else
   char buf[4096];
   ssize_t n = readlink("/proc/self/exe", buf, sizeof buf);
-  if (n <= 0) return false;
+  if (n <= 0 || n >= (ssize_t)sizeof buf) return false;   // 収まらないと切り詰めて返る
   *out = Str(buf, (int)n);
   return true;
 #endif
@@ -145,11 +159,18 @@ inline HostIO host_io() {
   return io;
 }
 
-// 色を付けるか。環境変数 NO_COLOR に何か入っていれば付けない（no-color.org）
+// 色を付けるか。診断も panic も標準エラーに出すので、そこが端末のときだけ付ける。
+// 環境変数 NO_COLOR に何か入っていれば付けない（no-color.org）。
+// バイトコードを埋めた単一バイナリは引数をぜんぶプログラムに渡す（--no-color を取らない）ので、
+// ファイルに落としたときに色が混ざらないかどうかは、ここだけが決める
 inline bool color_default() {
   Str v;
   if (platform().os && platform().os->env("NO_COLOR", &v) && v.size()) return false;
-  return true;
+#if defined(_WIN32)
+  return _isatty(_fileno(stderr)) != 0;
+#else
+  return isatty(fileno(stderr)) != 0;
+#endif
 }
 
 // ------------------------------------------------------------------ 実行
@@ -170,7 +191,7 @@ inline void print_panic(VM& vm, bool color) {
     r += "\n";
   }
   if (vm.error_trace.size()) {
-    r += "  呼び出しの経路:\n";
+    r += vm.L("  呼び出しの経路:\n", "  call path:\n");
     r += vm.error_trace;
   }
   fwrite(r.data(), 1, (size_t)r.size(), stderr);

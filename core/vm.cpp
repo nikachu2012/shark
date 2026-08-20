@@ -117,8 +117,10 @@ void VM::start(bool with_inits) {
 void VM::push(const Value& v) {
   TaskState* t = tasks[cur];
   if (t->sp >= t->cap) {
-    panic(Str("値の置き場が足りません（深さ ") + str_from_int(t->frames.size()) +
-          "）\n  変数の多い関数を深くまで呼んでいませんか");
+    panic(L(Str("値の置き場が足りません（深さ ") + str_from_int(t->frames.size()) +
+              "）\n  変数の多い関数を深くまで呼んでいませんか",
+            Str("out of room for values (depth ") + str_from_int(t->frames.size()) +
+              ")\n  a function with many variables may be nested too deep"));
     return;
   }
   t->stack[t->sp++] = v;
@@ -164,9 +166,10 @@ Str VM::build_trace() {
   int shown = 0;
   for (int i = t->frames.size() - 1; i >= 0; i--) {
     if (shown == 8 && i > 8) {
-      r += "    ... （";
-      r += str_from_int(i - 8);
-      r += " 段省略）\n";
+      r += "    ... ";
+      r += L(Str("（") + str_from_int(i - 8) + " 段省略）",
+             Str("(") + str_from_int(i - 8) + " more)");
+      r += "\n";
       i = 9;   // 一番外側の数段だけ出す
       continue;
     }
@@ -230,7 +233,8 @@ bool VM::switch_task() {
     cur = 0;
     for (int i = 0; i < n; i++) if (tasks[i]->status == TS_Waiting) { cur = i; break; }
     status = SK_Error;
-    error_message = Str("すべてのタスクが待ったままになりました（届く見込みのない受け取り待ちです）");
+    error_message = L("すべてのタスクが待ったままになりました（届く見込みのない受け取り待ちです）",
+                          "every task is waiting for something that will never arrive");
     error_trace = build_trace();
     return false;
   }
@@ -252,7 +256,7 @@ void VM::reset() {
   has_panic = false;
   aborted = false;
   status = SK_Error;
-  error_message = Str("まだ読み込めていません");
+  error_message = L("まだ読み込めていません", "nothing has been loaded yet");
 }
 
 // ------------------------------------------------------------------ 命令の実行
@@ -290,7 +294,7 @@ bool VM::call_function(int fidx, int nargs) {
     if (st == N_Panic) return false;
     if (st == N_Wait || st == N_Cancel) {
       // この道すじ（FuncInfo として持つネイティブ）は待てない
-      panic(Str("このメソッドは待ち合わせに使えません"));
+      panic(L("このメソッドは待ち合わせに使えません", "this method cannot be awaited"));
       return false;
     }
     for (int i = 0; i < nargs; i++) val_release(t->stack[t->sp - 1 - i]);
@@ -304,8 +308,10 @@ bool VM::call_function(int fidx, int nargs) {
   fr.base = t->sp - nargs;
   for (int i = nargs; i < f->nlocals; i++) push(mk_void());
   if (t->frames.size() >= max_call_depth) {
-    panic(Str("呼び出しが深すぎます（深さ ") + str_from_int(max_call_depth) +
-          "）\n  止まる条件（return で抜ける形）を書き忘れていませんか");
+    panic(L(Str("呼び出しが深すぎます（深さ ") + str_from_int(max_call_depth) +
+              "）\n  止まる条件（return で抜ける形）を書き忘れていませんか",
+            Str("calls are nested too deep (depth ") + str_from_int(max_call_depth) +
+              ")\n  is the stopping condition (a return) missing?"));
     return false;
   }
   t->frames.push(fr);
@@ -345,7 +351,7 @@ RunStatus VM::step(int budget) {
     if (status != SK_Running) return status;
     if (aborted) {
       status = SK_Error;
-      error_message = Str("実行を止めました");
+      error_message = L("実行を止めました", "execution was stopped");
       return status;
     }
     TaskState* t = tasks[cur];
@@ -494,8 +500,10 @@ RunStatus VM::step(int budget) {
           ListObj* l = (ListObj*)o;
           int64_t i = idx.i;
           if (idx.k != V_Int || i < 0 || i >= l->v.size()) {
-            panic(Str("配列の長さは ") + str_from_int(l->v.size()) + " ですが、" +
-                  str_from_int(idx.k == V_Int ? idx.i : 0) + " 番目に書こうとしました");
+            panic(L(Str("配列の長さは ") + str_from_int(l->v.size()) + " ですが、" +
+                      str_from_int(idx.k == V_Int ? idx.i : 0) + " 番目に書こうとしました",
+                    Str("the list holds ") + str_from_int(l->v.size()) + " items, but item " +
+                      str_from_int(idx.k == V_Int ? idx.i : 0) + " was written"));
             val_release(idx);
             t->places.push(p);
             break;
@@ -557,14 +565,15 @@ RunStatus VM::step(int budget) {
         else if (op == OP_MUL_INT) ovf = mul_ovf(a.i, b.i, &r);
         else {
           if (b.i == 0) {
-            panic(op == OP_DIV_INT ? Str("0 で割ろうとしました") : Str("0 で割った余りを求めようとしました"));
+            panic(op == OP_DIV_INT ? L("0 で割ろうとしました", "division by zero")
+                                   : L("0 で割った余りを求めようとしました", "remainder by zero"));
             break;
           }
           if (b.i == -1 && a.i == (-9223372036854775807LL - 1)) ovf = true;
           else r = (op == OP_DIV_INT) ? a.i / b.i : a.i % b.i;
         }
         if (ovf) {
-          panic(Str("int の計算があふれました（int は 64 ビットです）"));
+          panic(L("int の計算があふれました（int は 64 ビットです）", "int overflow (int is 64-bit)"));
           break;
         }
         push(mk_int(r));
@@ -582,8 +591,10 @@ RunStatus VM::step(int budget) {
         fr0.ip = ip;
         Value b = pop(), a = pop();
         if (b.i < 0 || b.i > 63) {
-          panic(Str("ずらせるのは 0 〜 63 ビットです（int は 64 ビット）。いまは ") +
-                str_from_int(b.i));
+          panic(L(Str("ずらせるのは 0 〜 63 ビットです（int は 64 ビット）。いまは ") +
+                    str_from_int(b.i),
+                  Str("a shift must be 0 to 63 bits (int is 64-bit); this one is ") +
+                    str_from_int(b.i)));
           break;
         }
         int sh = (int)b.i;
@@ -610,8 +621,10 @@ RunStatus VM::step(int budget) {
         fr0.ip = ip;
         Value b = pop(), a = pop();
         if (b.i < 0) {
-          panic(Str("int の ** に負の指数は書けません（答えが整数になりません）\n"
-                    "  小数で計算するには float(...) ** float(...) と書きます"));
+          panic(L("int の ** に負の指数は書けません（答えが整数になりません）\n"
+                  "  小数で計算するには float(...) ** float(...) と書きます",
+                  "a negative exponent is not allowed for int ** (the result would not be an integer)\n"
+                  "  for a fractional result write float(...) ** float(...)"));
           break;
         }
         int64_t base = a.i, e2 = b.i, r = 1;
@@ -621,7 +634,7 @@ RunStatus VM::step(int budget) {
           e2 >>= 1;
           if (e2 > 0 && !ovf) ovf = mul_ovf(base, base, &base);
         }
-        if (ovf) { panic(Str("int の計算があふれました（int は 64 ビットです）")); break; }
+        if (ovf) { panic(L("int の計算があふれました（int は 64 ビットです）", "int overflow (int is 64-bit)")); break; }
         push(mk_int(r));
         break;
       }
@@ -634,7 +647,7 @@ RunStatus VM::step(int budget) {
       case OP_NEG_INT: {
         fr0.ip = ip;
         Value a = pop();
-        if (a.i == (-9223372036854775807LL - 1)) { panic(Str("int の計算があふれました")); break; }
+        if (a.i == (-9223372036854775807LL - 1)) { panic(L("int の計算があふれました", "int overflow")); break; }
         push(mk_int(-a.i));
         break;
       }
@@ -793,7 +806,7 @@ RunStatus VM::step(int budget) {
         fr0.ip = ip;
         Value r = pop();
         if (r.k == V_Obj && r.o->kind == O_Result) push(val_retain(((ResultObj*)r.o)->val));
-        else push(make_error(Str("失敗しました"), 0));
+        else push(make_error(L("失敗しました", "it failed"), 0));
         val_release(r);
         break;
       }
@@ -801,18 +814,20 @@ RunStatus VM::step(int budget) {
         fr0.ip = ip;
         Value v = pop();
         if (v.k == V_None) {
-          panic(Str("値がありません（! を書いた場所に none が来ました）"));
+          panic(L("値がありません（! を書いた場所に none が来ました）",
+                  "there is no value (none reached a !)"));
           break;
         }
         if (v.k == V_Obj && v.o->kind == O_Result) {
           ResultObj* r = (ResultObj*)v.o;
           if (!r->ok) {
-            Str msg = Str("失敗しました");
+            Str msg = L("失敗しました", "it failed");
             if (r->val.k == V_Obj && r->val.o->kind == O_Inst) {
               InstObj* e = (InstObj*)r->val.o;
               if (e->fields.size() > 0 && e->fields[0].k == V_Obj) msg = ((StrObj*)e->fields[0].o)->s;
             }
-            panic(Str("失敗した結果に ! を書きました: ") + msg);
+            panic(L(Str("失敗した結果に ! を書きました: ") + msg,
+                    Str("! was used on a failed result: ") + msg));
             val_release(v);
             break;
           }
@@ -838,13 +853,14 @@ RunStatus VM::step(int budget) {
         fr0.ip = ip;
         Value* recv = deref(&t->stack[t->sp - n]);
         if (recv->k != V_Obj || recv->o->kind != O_Inst) {
-          panic(Str("メソッドを呼べません"));
+          panic(L("メソッドを呼べません", "this method cannot be called"));
           break;
         }
         InstObj* o = (InstObj*)recv->o;
         int fidx = (slot < o->cls->vtable.size()) ? o->cls->vtable[slot] : -1;
         if (fidx < 0) {
-          panic(Str("実装されていないメソッドが呼ばれました（") + o->cls->name + "）");
+          panic(L(Str("実装されていないメソッドが呼ばれました（") + o->cls->name + "）",
+                  Str("an unimplemented method was called (") + o->cls->name + ")"));
           break;
         }
         call_function(fidx, n);
@@ -855,7 +871,8 @@ RunStatus VM::step(int budget) {
         fr0.ip = ip;
         Value fv = t->stack[t->sp - n - 1];
         if (fv.k != V_Obj || fv.o->kind != O_Func) {
-          panic(Str("関数ではないものを呼び出そうとしました"));
+          panic(L("関数ではないものを呼び出そうとしました",
+                  "tried to call something that is not a function"));
           break;
         }
         int fidx = ((FuncObj*)fv.o)->fn;
@@ -889,7 +906,8 @@ RunStatus VM::step(int budget) {
             // input() がホストの行を待っている。届けばまた進める
             if (input_wait) { idle_hint = true; return SK_Running; }
             status = SK_Error;
-            error_message = Str("すべてのタスクが待ったままになりました（届く見込みのない受け取り待ちです）");
+            error_message = L("すべてのタスクが待ったままになりました（届く見込みのない受け取り待ちです）",
+                          "every task is waiting for something that will never arrive");
             error_trace = build_trace();
             return status;
           }
@@ -967,8 +985,10 @@ RunStatus VM::step(int budget) {
           case O_List: {
             ListObj* l = (ListObj*)cv->o;
             if (idx.k != V_Int || idx.i < 0 || idx.i >= l->v.size()) {
-              panic(Str("配列の長さは ") + str_from_int(l->v.size()) + " ですが、" +
-                    str_from_int(idx.k == V_Int ? idx.i : 0) + " 番目を読もうとしました");
+              panic(L(Str("配列の長さは ") + str_from_int(l->v.size()) + " ですが、" +
+                        str_from_int(idx.k == V_Int ? idx.i : 0) + " 番目を読もうとしました",
+                      Str("the list holds ") + str_from_int(l->v.size()) + " items, but item " +
+                        str_from_int(idx.k == V_Int ? idx.i : 0) + " was read"));
               val_release(idx); val_release(col);
               break;
             }
@@ -980,8 +1000,10 @@ RunStatus VM::step(int budget) {
             Value* p = map_find(m, idx);
             if (!p) {
               bool q = idx.k == V_Obj && idx.o->kind == O_Str;
-              panic(Str("キー ") + (q ? Str("\"") : Str()) + val_to_display(idx) + (q ? Str("\"") : Str()) +
-                    " がありません（get() を使うと none が返ります）");
+              panic(L(Str("キー ") + (q ? Str("\"") : Str()) + val_to_display(idx) +
+                        (q ? Str("\"") : Str()) + " がありません（get() を使うと none が返ります）",
+                      Str("key ") + (q ? Str("\"") : Str()) + val_to_display(idx) +
+                        (q ? Str("\"") : Str()) + " is missing (get() returns none instead)"));
               val_release(idx); val_release(col);
               break;
             }
@@ -992,8 +1014,10 @@ RunStatus VM::step(int budget) {
             const Str& s = ((StrObj*)cv->o)->s;
             int len = utf8_len(s);
             if (idx.k != V_Int || idx.i < 0 || idx.i >= len) {
-              panic(Str("文字列の長さは ") + str_from_int(len) + " ですが、" +
-                    str_from_int(idx.k == V_Int ? idx.i : 0) + " 番目を読もうとしました");
+              panic(L(Str("文字列の長さは ") + str_from_int(len) + " ですが、" +
+                        str_from_int(idx.k == V_Int ? idx.i : 0) + " 番目を読もうとしました",
+                      Str("the string holds ") + str_from_int(len) + " characters, but character " +
+                        str_from_int(idx.k == V_Int ? idx.i : 0) + " was read"));
               val_release(idx); val_release(col);
               break;
             }
@@ -1005,8 +1029,10 @@ RunStatus VM::step(int budget) {
           case O_Bytes: {
             const Str& s = ((StrObj*)cv->o)->s;
             if (idx.k != V_Int || idx.i < 0 || idx.i >= s.size()) {
-              panic(Str("バイト列の長さは ") + str_from_int(s.size()) + " ですが、" +
-                    str_from_int(idx.k == V_Int ? idx.i : 0) + " 番目を読もうとしました");
+              panic(L(Str("バイト列の長さは ") + str_from_int(s.size()) + " ですが、" +
+                        str_from_int(idx.k == V_Int ? idx.i : 0) + " 番目を読もうとしました",
+                      Str("the bytes hold ") + str_from_int(s.size()) + " items, but item " +
+                        str_from_int(idx.k == V_Int ? idx.i : 0) + " was read"));
               val_release(idx); val_release(col);
               break;
             }
@@ -1140,7 +1166,7 @@ RunStatus VM::step(int budget) {
 
       default:
         fr0.ip = ip;
-        panic(Str("知らない命令に出会いました"));
+        panic(L("知らない命令に出会いました", "unknown instruction"));
         break;
     }
 
@@ -1148,8 +1174,12 @@ RunStatus VM::step(int budget) {
 
     // メモリを使いすぎていないか、命令の切れ目ごとに見る
     if (!has_panic && sk_mem_over()) {
-      panic(Str("メモリを使いすぎました\n  上限は ") + str_from_int((int64_t)(sk_mem_limit() >> 20)) +
-            " MB です。増え続ける配列や文字列がないか見てください");
+      panic(L(Str("メモリを使いすぎました\n  上限は ") +
+                str_from_int((int64_t)(sk_mem_limit() >> 20)) +
+                " MB です。増え続ける配列や文字列がないか見てください",
+              Str("out of memory\n  the limit is ") +
+                str_from_int((int64_t)(sk_mem_limit() >> 20)) +
+                " MB; look for a list or string that keeps growing"));
     }
 
     // panic の後始末

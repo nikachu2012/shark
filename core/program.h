@@ -142,6 +142,9 @@ struct Program {
 
 Str class_name(ClassInfo* c);
 bool class_is(ClassInfo* c, ClassInfo* base);
+// c が target を値として持っているか（間に他のクラスを挟んでいてもよい）。
+// seen には最初に c を入れて渡す。型検査（E0409）と、バイトコードを読むときに使う
+bool class_holds_by_value(ClassInfo* c, ClassInfo* target, Vec<ClassInfo*>* seen);
 Str inst_to_display(InstObj* o);
 const char* obj_kind_name(ObjKind k);
 

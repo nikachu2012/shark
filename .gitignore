@@ -7,6 +7,7 @@
 /examples/embed/play_stage
 /examples/embed/stage_bytecode.h
 /tests/memcheck
+/tests/bytecheck
 /bench/build/
 /docs/reference/
 /web/dist/

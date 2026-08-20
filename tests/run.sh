@@ -52,6 +52,16 @@ if [ -x "$root/tests/memcheck" ]; then
   fi
 fi
 
+# 壊れたバイトコードを断るか（C++ 側）。落ちれば、この実行ファイルごと死ぬので失敗になる
+if [ -x "$root/tests/bytecheck" ]; then
+  if "$root/tests/bytecheck" > /tmp/shark_bytecheck.txt 2>&1; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    cat /tmp/shark_bytecheck.txt
+  fi
+fi
+
 # 単一バイナリと、保存したバイトコード（spec/runtime/bytecode.md）。
 # tests/cases を build して、ソースから動かしたときと同じ出力になることを見る
 sharkvm="$root/sharkvm"
@@ -80,17 +90,22 @@ if [ -x "$sharkvm" ]; then
   # バイトコードだけ保存したものを、実行装置と shark run の両方で動かす
   f=01_basics.shk
   exp="${f%.shk}.expected"
-  "$shark" build --no-color --bytecode -o "$tmp/one.shkc" "$f" > "$tmp/build.log" 2>&1
-  for how in "$sharkvm --no-color" "$shark run --no-color"; do
-    got=$($how "$tmp/one.shkc" 2>&1)
-    if [ "$got" = "$(cat "$exp")" ]; then
-      pass=$((pass + 1))
-    else
-      fail=$((fail + 1))
-      echo "fail  $how $tmp/one.shkc"
-      printf '%s\n' "$got" | diff -u "$exp" - | sed -n '3,12p'
-    fi
-  done
+  if ! "$shark" build --no-color --bytecode -o "$tmp/one.shkc" "$f" > "$tmp/build.log" 2>&1; then
+    fail=$((fail + 1))
+    echo "fail  build --bytecode tests/cases/$f"
+    sed -n '1,6p' "$tmp/build.log"
+  else
+    for how in "$sharkvm --no-color" "$shark run --no-color"; do
+      got=$($how "$tmp/one.shkc" 2>&1)
+      if [ "$got" = "$(cat "$exp")" ]; then
+        pass=$((pass + 1))
+      else
+        fail=$((fail + 1))
+        echo "fail  $how $tmp/one.shkc"
+        printf '%s\n' "$got" | diff -u "$exp" - | sed -n '3,12p'
+      fi
+    done
+  fi
   cd "$root/tests" || exit 1
   rm -rf "$tmp"
 else

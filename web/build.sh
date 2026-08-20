@@ -33,18 +33,22 @@ MSG
   exit 1
 fi
 
-# コア（移植層は platform/web.cpp を選ぶ）とブラウザ側のホスト
-CORE="\
-$root/core/support.cpp $root/core/value.cpp $root/core/program.cpp $root/core/types.cpp \
-$root/core/diag.cpp $root/core/lexer.cpp $root/core/parser.cpp $root/core/check.cpp \
-$root/core/codegen.cpp $root/core/vm.cpp $root/core/registry.cpp $root/core/shark.cpp \
-$root/core/platform/web.cpp \
-$root/core/lib/format.cpp $root/core/lib/builtin.cpp $root/core/lib/math.cpp \
-$root/core/lib/time.cpp $root/core/lib/task.cpp $root/core/lib/fmt.cpp \
-$root/core/lib/path.cpp $root/core/lib/file.cpp $root/core/lib/os.cpp \
-$root/core/lib/text.cpp $root/core/lib/json.cpp $root/core/lib/test.cpp \
-$root/core/lib/crypto.cpp \
-$here/shark_web.cpp"
+# コア（移植層は platform/web.cpp を選ぶ）とブラウザ側のホスト。
+# 一覧は Makefile が正（RT_SRC ＋ FE_SRC）。ここで持つと、
+# コアにファイルが増えたときに片方だけ古くなる
+core_src=$(cd "$root" && make -s print-core-src)
+if [ -z "$core_src" ]; then
+  echo "コアのソース一覧を Makefile から取れません（make print-core-src）" >&2
+  exit 1
+fi
+CORE=""
+for f in $core_src; do
+  case "$f" in
+    core/platform/*) continue ;;   # 移植層は web.cpp に差し替える
+  esac
+  CORE="$CORE $root/$f"
+done
+CORE="$CORE $root/core/platform/web.cpp $here/shark_web.cpp"
 
 # ---------------------------------------------------------------- Monaco Editor
 if [ ! -f "$monaco_dir/vs/editor/editor.main.js" ]; then   # 取り寄せ済みかの印

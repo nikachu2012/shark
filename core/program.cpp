@@ -15,6 +15,22 @@ bool class_is(ClassInfo* c, ClassInfo* base) {
   return false;
 }
 
+// クラスが自分自身を値として持っていないか（代入がコピーなので大きさが決まらない）。
+// 輪になっていると、既定値を作るところ（VM::default_of）が戻ってこない
+bool class_holds_by_value(ClassInfo* c, ClassInfo* target, Vec<ClassInfo*>* seen) {
+  for (int i = 0; i < c->fields.size(); i++) {
+    Type* ft = c->fields[i].type;
+    if (!ft || ft->kind != T_Class || !ft->cls) continue;
+    if (ft->cls == target) return true;
+    bool visited = false;
+    for (int k = 0; k < seen->size(); k++) if ((*seen)[k] == ft->cls) visited = true;
+    if (visited) continue;
+    seen->push(ft->cls);
+    if (class_holds_by_value(ft->cls, target, seen)) return true;
+  }
+  return false;
+}
+
 Str inst_to_display(InstObj* o) {
   Str r = o->cls ? o->cls->name : Str("object");
   r += "(";

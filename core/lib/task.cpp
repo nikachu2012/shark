@@ -90,11 +90,13 @@ static NativeStatus tk_wait(VM& vm, Value* a, int n, Value& out) {
     return N_Wait;
   }
   if (target->status == TS_Panicked) {
-    vm.panic(Str("待っていたタスクが止まりました: ") + target->panic_msg);
+    vm.panic(vm.L(Str("待っていたタスクが止まりました: ") + target->panic_msg,
+                  Str("the task being waited on stopped: ") + target->panic_msg));
     return N_Panic;
   }
   if (target->status == TS_Cancelled) {
-    vm.panic(Str("取り消したタスクの結果は受け取れません（wait_timeout なら none が返ります）"));
+    vm.panic(vm.L("取り消したタスクの結果は受け取れません（wait_timeout なら none が返ります）",
+                  "a cancelled task has no result (wait_timeout returns none instead)"));
     return N_Panic;
   }
   out = val_retain(target->result);

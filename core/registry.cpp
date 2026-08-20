@@ -54,6 +54,11 @@ void register_modules(Registry& r, const Config& cfg) {
   if (cfg.with_test) register_test(r);
 }
 
+// 表の指紋。合わないバイトコードは読まない（spec/runtime/bytecode.md）。
+// 名前と引数の数だけでは足りない。引数や戻り値の型を変えただけ、
+// ref で受けるかどうかを変えただけ、という食い違いも見つけたいので、そこまで入れる。
+// （型検査は build のときに ref か値かを決めるので、そこがずれると
+//   ホスト関数が別のものを受け取ってしまう）
 uint64_t registry_signature(const Registry& r) {
   uint64_t h = 0xcbf29ce484222325ull;   // FNV-1a
   for (int i = 0; i < r.size(); i++) {
@@ -62,6 +67,13 @@ uint64_t registry_signature(const Registry& r) {
     k += "/";
     k += str_from_int(e.params.size());
     k += e.typed ? "t" : "u";
+    k += e.ref0 ? "r" : "-";
+    for (int j = 0; j < e.params.size(); j++) {
+      k += ",";
+      k += e.params[j] ? type_name(e.params[j]) : Str("?");
+    }
+    k += "->";
+    k += e.ret ? type_name(e.ret) : Str("?");
     for (int j = 0; j < k.size(); j++) {
       h ^= (uint64_t)(unsigned char)k[j];
       h *= 0x100000001b3ull;

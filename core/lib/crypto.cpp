@@ -306,7 +306,8 @@ static bool fill_random(u8* buf, int n) {
 static bool draw64(VM& vm, uint64_t* out) {
   u8 b[8];
   if (!fill_random(b, 8)) {
-    vm.panic(Str("この処理系は乱数のもとを持っていません"));
+    vm.panic(vm.L("この処理系は乱数のもとを持っていません",
+                  "this build has no source of randomness"));
     return false;
   }
   uint64_t v = 0;
@@ -361,9 +362,11 @@ static NativeStatus c_equal(VM& vm, Value* a, int n, Value& out) {
 static NativeStatus c_random_bytes(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   int64_t want = A(a, 0)->i;
-  if (want < 0) { vm.panic(Str("random_bytes の長さに負の数は渡せません")); return N_Panic; }
+  if (want < 0) { vm.panic(vm.L("random_bytes の長さに負の数は渡せません",
+                  "random_bytes cannot take a negative length")); return N_Panic; }
   if (want > (1 << 20)) {
-    vm.panic(Str("random_bytes で一度に取れるのは 1048576 バイトまでです"));
+    vm.panic(vm.L("random_bytes で一度に取れるのは 1048576 バイトまでです",
+                  "random_bytes returns at most 1048576 bytes at a time"));
     return N_Panic;
   }
   Str r;
@@ -372,7 +375,8 @@ static NativeStatus c_random_bytes(VM& vm, Value* a, int n, Value& out) {
   for (int64_t got = 0; got < want; got += 256) {
     int m = (int)(want - got < 256 ? want - got : 256);
     if (!fill_random(buf, m)) {
-      vm.panic(Str("この処理系は乱数のもとを持っていません"));
+      vm.panic(vm.L("この処理系は乱数のもとを持っていません",
+                  "this build has no source of randomness"));
       return N_Panic;
     }
     r.append((const char*)buf, m);
@@ -383,7 +387,7 @@ static NativeStatus c_random_bytes(VM& vm, Value* a, int n, Value& out) {
 static NativeStatus c_random_int(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   int64_t lo = A(a, 0)->i, hi = A(a, 1)->i;
-  if (hi < lo) { vm.panic(Str("random_int の範囲が逆です")); return N_Panic; }
+  if (hi < lo) { vm.panic(vm.L("random_int の範囲が逆です", "the range given to random_int is backwards")); return N_Panic; }
   uint64_t span = (uint64_t)(hi - lo) + 1;
   uint64_t v = 0;
   if (span == 0) {   // lo と hi が int の端どうし。64 ビットぜんぶが範囲になる
@@ -400,7 +404,8 @@ static NativeStatus c_random_int(VM& vm, Value* a, int n, Value& out) {
     // まともな乱数なら、外れ続ける見込みはない。64 回続いたら、もとが壊れている。
     // ここで引き直し続けると、呼んだ側に戻らなくなる（spec/runtime/platform.md）
     if (++tries > 64) {
-      vm.panic(Str("乱数のもとが同じ値ばかり返しています"));
+      vm.panic(vm.L("乱数のもとが同じ値ばかり返しています",
+                  "the source of randomness keeps returning the same value"));
       return N_Panic;
     }
   } while (v >= zone);
@@ -412,7 +417,8 @@ static NativeStatus c_uuid4(VM& vm, Value* a, int n, Value& out) {
   (void)a; (void)n;
   u8 b[16];
   if (!fill_random(b, 16)) {
-    vm.panic(Str("この処理系は乱数のもとを持っていません"));
+    vm.panic(vm.L("この処理系は乱数のもとを持っていません",
+                  "this build has no source of randomness"));
     return N_Panic;
   }
   b[6] = (u8)((b[6] & 0x0f) | 0x40);

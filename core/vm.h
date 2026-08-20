@@ -95,6 +95,11 @@ struct VM {
   // ライブラリから使う道具
   TaskState* task() { return tasks[cur]; }
   void panic(const Str& msg);
+  // panic の言い方（spec/runtime/diagnostics.md）。診断と同じで、ホストが選ぶ。
+  // diag が無ければ日本語にする
+  Lang lang() const { return diag ? diag->lang() : LANG_JA; }
+  Str L(const char* ja, const char* en) const { return Str(lang() == LANG_JA ? ja : en); }
+  Str L(const Str& ja, const Str& en) const { return lang() == LANG_JA ? ja : en; }
   void write_out(const Str& s);
   bool read_line(Str* out);
   bool input_ready();

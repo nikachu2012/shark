@@ -57,7 +57,11 @@ examples/embed/game: examples/embed/game.o $(CORE_SRC:.cpp=.o)
 #   play_stage   ゲーム機に載る側。実行装置（RT_SRC）だけをリンクする
 examples/embed/build_stage: examples/embed/build_stage.o $(CORE_SRC:.cpp=.o)
 	$(CXX) $(CORE_FLAGS) -o $@ $^
-examples/embed/stage_bytecode.h: examples/embed/build_stage examples/embed/stage.shk
+# ホストの表を変えたら焼き直す（指紋が変わるので、古いままだと読めなくなる）
+examples/embed/game.o examples/embed/build_stage.o examples/embed/play_stage.o: \
+  examples/embed/game_hosts.h
+examples/embed/stage_bytecode.h: examples/embed/build_stage examples/embed/stage.shk \
+  examples/embed/game_hosts.h
 	@./examples/embed/build_stage examples/embed/stage.shk $@
 examples/embed/play_stage.o: examples/embed/stage_bytecode.h
 examples/embed/play_stage: examples/embed/play_stage.o $(RT_SRC:.cpp=.o)
@@ -75,12 +79,21 @@ sharkvm: $(VM_OBJ)
 %.o: %.cpp $(HDR)
 	$(CXX) $(CORE_FLAGS) -c $< -o $@
 
-test: shark sharkvm tests/memcheck
+test: shark sharkvm tests/memcheck tests/bytecheck
 	@sh tests/run.sh
 
 # メモリの後始末と上限を見る（tests/run.sh から呼ばれる）
 tests/memcheck: tests/memcheck.o $(CORE_SRC:.cpp=.o)
 	$(CXX) $(CORE_FLAGS) -o $@ $^
+
+# 壊れたバイトコードを断るか見る（tests/run.sh から呼ばれる）
+tests/bytecheck: tests/bytecheck.o $(CORE_SRC:.cpp=.o)
+	$(CXX) $(CORE_FLAGS) -o $@ $^
+
+# コアのソース一覧を出す（web/build.sh が使う）。
+# 一覧を2か所に書くと、片方だけ増えて気づけないので、ここを正とする
+print-core-src:
+	@echo $(CORE_SRC)
 
 # C・Python・Shark の速さ比べ
 bench: shark
@@ -111,9 +124,10 @@ web-test: web
 
 clean:
 	rm -f $(OBJ) $(VM_OBJ) examples/embed/game.o examples/embed/game tests/memcheck.o tests/memcheck shark sharkvm
+	rm -f tests/bytecheck.o tests/bytecheck
 	rm -f examples/embed/build_stage.o examples/embed/build_stage examples/embed/play_stage.o \
 	      examples/embed/play_stage examples/embed/stage_bytecode.h
 	rm -rf docs/reference
 	rm -rf bench/build web/dist
 
-.PHONY: all test clean embed bench docs docs-check web web-serve web-test
+.PHONY: all test clean embed bench docs docs-check web web-serve web-test print-core-src

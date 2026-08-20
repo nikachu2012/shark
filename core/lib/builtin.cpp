@@ -59,7 +59,8 @@ static NativeStatus n_sleep(VM& vm, Value* a, int n, Value& out) {
 static NativeStatus n_assert(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   if (!(A(a, 0)->k == V_Bool && A(a, 0)->b)) {
-    vm.panic(Str("assert に失敗しました: ") + S(a, 1));
+    vm.panic(vm.L(Str("assert に失敗しました: ") + S(a, 1),
+                  Str("assert failed: ") + S(a, 1)));
     return N_Panic;
   }
   out = mk_void();
@@ -96,7 +97,7 @@ static NativeStatus n_range2(VM& vm, Value* a, int n, Value& out) {
 static NativeStatus n_range3(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   int64_t st = A(a, 2)->i;
-  if (st == 0) { vm.panic(Str("range_step の刻み幅に 0 は使えません")); return N_Panic; }
+  if (st == 0) { vm.panic(vm.L("range_step の刻み幅に 0 は使えません", "range_step cannot take a step of 0")); return N_Panic; }
   out = mk_range(A(a, 0)->i, A(a, 1)->i, st);
   return N_Ok;
 }
@@ -106,7 +107,8 @@ static NativeStatus c_int_from_float(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)n;
   double d = A(a, 0)->f;
   if (d != d || d > 9.2233720368547758e18 || d < -9.2233720368547758e18) {
-    vm.panic(Str("float から int に変換できません（大きすぎます）"));
+    vm.panic(vm.L("float から int に変換できません（大きすぎます）",
+                  "this float is too large to become an int"));
     return N_Panic;
   }
   out = mk_int((int64_t)d);
@@ -449,7 +451,10 @@ static NativeStatus l_insert(VM& vm, Value* a, int n, Value& out) {
   ListObj* l = (ListObj*)obj_unique(*recv);
   int64_t at = A(a, 1)->i;
   if (at < 0 || at > l->v.size()) {
-    vm.panic(Str("配列の長さは ") + str_from_int(l->v.size()) + " ですが、" + str_from_int(at) + " 番目に入れようとしました");
+    vm.panic(vm.L(Str("配列の長さは ") + str_from_int(l->v.size()) + " ですが、" +
+                    str_from_int(at) + " 番目に入れようとしました",
+                  Str("the list holds ") + str_from_int(l->v.size()) + " items, but item " +
+                    str_from_int(at) + " was inserted"));
     return N_Panic;
   }
   l->v.insert((int)at, val_retain(*A(a, 2)));
@@ -462,7 +467,10 @@ static NativeStatus l_remove(VM& vm, Value* a, int n, Value& out) {
   ListObj* l = (ListObj*)obj_unique(*recv);
   int64_t at = A(a, 1)->i;
   if (at < 0 || at >= l->v.size()) {
-    vm.panic(Str("配列の長さは ") + str_from_int(l->v.size()) + " ですが、" + str_from_int(at) + " 番目を消そうとしました");
+    vm.panic(vm.L(Str("配列の長さは ") + str_from_int(l->v.size()) + " ですが、" +
+                    str_from_int(at) + " 番目を消そうとしました",
+                  Str("the list holds ") + str_from_int(l->v.size()) + " items, but item " +
+                    str_from_int(at) + " was removed"));
     return N_Panic;
   }
   Value v = l->v[(int)at];
@@ -536,7 +544,8 @@ static NativeStatus r_ok(VM& vm, Value* a, int n, Value& out) { (void)vm; (void)
 static NativeStatus r_value(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   ResultObj* r = (ResultObj*)A(a, 0)->o;
-  if (!r->ok) { vm.panic(Str("失敗した結果に value() を呼びました。先に ok() で調べます")); return N_Panic; }
+  if (!r->ok) { vm.panic(vm.L("失敗した結果に value() を呼びました。先に ok() で調べます",
+                  "value() was called on a failed result; check ok() first")); return N_Panic; }
   out = val_retain(r->val);
   return N_Ok;
 }
