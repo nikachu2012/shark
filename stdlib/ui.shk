@@ -702,8 +702,9 @@ func label(text: string) -> Widget;
 /// 名札（`id`）を渡すと、ui.show() がその名札を返す。
 ///
 /// ```
-/// ui.button("ふやす", inc)      // 押されたら inc() が呼ばれる
-/// ui.button("ふやす", "inc")    // ui.show() が "inc" を返す
+/// ui.button("ふやす", func() -> void { n += 1; })   // その場に書く
+/// ui.button("ふやす", inc)                          // 名前を付けた関数でもよい
+/// ui.button("ふやす", "inc")                        // ui.show() が "inc" を返す
 /// ```
 ///
 /// 引数:
@@ -713,9 +714,8 @@ func label(text: string) -> Widget;
 ///
 /// 例:
 ///   var n = 0;
-///   func bump() -> void { n += 1; }
 ///   ui.open(120, 40);
-///   _ = ui.show([ui.button("ふやす", bump)]);
+///   _ = ui.show([ui.button("ふやす", func() -> void { n += 1; })]);
 ///   print(n);   // 0（まだ押していない）
 func button(label: string, id: string) -> Widget;
 func button(label: string, action: func() -> void) -> Widget;

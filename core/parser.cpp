@@ -217,6 +217,14 @@ FuncDecl* Parser::parse_func(bool is_public, bool is_virtual, bool is_override, 
                diag_.L("例: func add(a: int, b: int) -> int { }", "example: func add(a: int) -> int { }"));
   }
   if (at(TK_Lt)) parse_generic_params(&f->gparams);
+  parse_signature(f);
+  if (in_class && at(TK_Semi)) { p_++; return f; }  // 純粋仮想
+  f->body = parse_block();
+  return f;
+}
+
+// ( 引数 ) -> 戻り値。名前のある関数と、その場に書く関数で共通
+void Parser::parse_signature(FuncDecl* f) {
   expect(TK_LParen, "引数は ( で始めます", "expected ( for the parameter list");
   if (!at(TK_RParen)) {
     do {
@@ -233,9 +241,35 @@ FuncDecl* Parser::parse_func(bool is_public, bool is_virtual, bool is_override, 
   }
   expect(TK_RParen, "引数は ) で閉じます", "expected ) to close the parameter list");
   if (eat(TK_Arrow)) f->ret = parse_type();
-  if (in_class && at(TK_Semi)) { p_++; return f; }  // 純粋仮想
+}
+
+// その場に書く関数（名前を付けない）。`func(a: int) -> bool { ... }`
+Node* Parser::parse_lambda() {
+  Node* n = node(E_Lambda);
+  n->len = cur().len;
+  FuncDecl* f = arena_.make<FuncDecl>();
+  f->line = cur().line; f->col = cur().col; f->len = cur().len;
+  p_++;  // func
+  if (at(TK_Ident)) {
+    Diagnostic& d = diag_.error("E0001", diag_.L("その場に書く関数に名前は付けられません",
+                                                 "an inline function cannot have a name"));
+    d.spans.push(Span(cur().line, cur().col, cur().len));
+    d.help.push(diag_.L(Str("名前を付けるなら、一番外側に func ") + cur().text + "(...) と書きます",
+                        Str("to name it, declare func ") + cur().text + "(...) at the top level"));
+    p_++;
+  }
+  if (at(TK_Lt)) {
+    error_here(diag_.L("その場に書く関数に型引数は書けません",
+                       "an inline function cannot take type parameters"),
+               diag_.L("型引数が要るなら、名前を付けて一番外側に書きます",
+                       "declare it at the top level with a name instead"));
+    Vec<GenericParam> ignored;
+    parse_generic_params(&ignored);
+  }
+  parse_signature(f);
   f->body = parse_block();
-  return f;
+  n->fdecl = f;
+  return n;
 }
 
 ClassDecl* Parser::parse_class(bool is_public) {
@@ -465,8 +499,12 @@ Node* Parser::parse_statement() {
       return n;
     }
     case TK_Func: {
+      if (peek(1).kind == TK_LParen) break;   // その場に書く関数（式）
       error_here(diag_.L("関数の中に関数は定義できません", "functions cannot be nested"),
-                 diag_.L("トップレベル（ファイルの一番外側）に書きます", "define it at the top level"));
+                 diag_.L("トップレベル（ファイルの一番外側）に書くか、名前を付けずに\n"
+                         "  func(...) -> T { ... } と書いてその場で渡します",
+                         "define it at the top level, or write it inline without a name:\n"
+                         "  func(...) -> T { ... }"));
       FuncDecl* f = parse_func(false, false, false, false);
       (void)f;
       return 0;
@@ -932,6 +970,8 @@ Node* Parser::parse_primary() {
     case TK_This: { Node* n = node(E_This); p_++; return n; }
     case TK_Super: { Node* n = node(E_Super); p_++; return n; }
     case TK_Ident: { Node* n = node(E_Ident); n->name = t.text; n->len = t.len; p_++; return n; }
+    // その場に書く関数。`ui.button("ふやす", func() -> void { count += 1; })`
+    case TK_Func: return parse_lambda();
     // 型名は関数のように呼べる（型変換）
     case TK_ThisType: { Node* n = node(E_Ident); n->name = Str("This"); p_++; return n; }
     case TK_Panic: {

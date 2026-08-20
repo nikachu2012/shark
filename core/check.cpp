@@ -803,6 +803,27 @@ int Checker::declare_local(const Str& name, Type* t, bool is_const, Node* at) {
   return l.slot;
 }
 
+bool Checker::report_outer_local(const Str& name, Node* at) {
+  for (FuncCtx* o = fc_ ? fc_->outer : 0; o; o = o->outer) {
+    bool found = false;
+    // 使おうとはしているので、「使っていません」とは言わない
+    for (int i = o->locals.size() - 1; i >= 0; i--)
+      if (o->locals[i].name == name) { o->locals[i].used = true; found = true; break; }
+    if (!found) continue;
+    Diagnostic& d = diag_.error("E0156", diag_.L(Str("外側の変数 ") + name +
+                                                     " は、その場に書いた関数の中からは見えません",
+                                                 Str("the enclosing variable ") + name +
+                                                     " is not visible inside an inline function"));
+    d.spans.push(Span(at->line, at->col, at->len));
+    d.help.push(diag_.L(Str("引数で受け取ります: func(") + name + ": ...) -> ... { ... }",
+                        Str("take it as a parameter: func(") + name + ": ...) -> ... { ... }"));
+    d.help.push(diag_.L("どこからでも書き換えたい値なら、一番外側の var にします",
+                        "if it must be shared, declare it as a top-level var"));
+    return true;
+  }
+  return false;
+}
+
 GlobalInfo* Checker::find_global(const Str& name, Unit* u) {
   for (int i = 0; i < prog_.globals.size(); i++)
     if (prog_.globals[i]->name == name && prog_.globals[i]->module == u->module)
@@ -932,8 +953,9 @@ void Checker::check_assign(Node* s) {
         tt = g->type;
         target->type = tt;
       } else {
-        err("E0114", diag_.L(Str("変数 ") + target->name + " が見つかりません",
-                             Str("unknown variable: ") + target->name), target);
+        if (!report_outer_local(target->name, target))
+          err("E0114", diag_.L(Str("変数 ") + target->name + " が見つかりません",
+                               Str("unknown variable: ") + target->name), target);
         check_expr(s->b);
         return;
       }
@@ -1169,6 +1191,12 @@ void Checker::check_stmt(Node* s) {
 }
 
 // ------------------------------------------------------------------ 式
+// その場に書いた関数の中にいて、外側がメソッドか（this の案内に使う）
+static bool in_lambda_of_method(FuncCtx* fc) {
+  for (FuncCtx* o = fc ? fc->outer : 0; o; o = o->outer) if (o->cls) return true;
+  return false;
+}
+
 Type* Checker::check_expr(Node* e) {
   if (!e) return t_.t_unknown();
   Type* t = t_.t_unknown();
@@ -1182,8 +1210,16 @@ Type* Checker::check_expr(Node* e) {
     case E_ListLit: t = check_list_lit(e); break;
     case E_MapLit: t = check_map_lit(e); break;
     case E_Ident: t = check_ident(e); break;
+    case E_Lambda: t = check_lambda(e); break;
     case E_This: {
-      if (!fc_->cls) {
+      if (!fc_->cls && in_lambda_of_method(fc_)) {
+        Diagnostic& d = diag_.error("E0156", diag_.L("その場に書いた関数の中からは this は見えません",
+                                                     "this is not visible inside an inline function"));
+        d.spans.push(Span(e->line, e->col, 4));
+        d.help.push(diag_.L("使うものを引数で受け取るか、メソッドに名前を付けて渡します",
+                            "pass what you need as a parameter, or pass a named method"));
+        t = t_.t_unknown();
+      } else if (!fc_->cls) {
         err("E0122", diag_.L("this はクラスのメソッドの中だけで使えます",
                              "this may only be used inside a method"), e);
         t = t_.t_unknown();
@@ -1344,6 +1380,8 @@ Type* Checker::check_ident(Node* e) {
                         Str("call something inside it: ") + e->name + ".name(...)"));
     return t_.t_unknown();
   }
+  // その場に書いた関数からは、外側の局所変数は見えない
+  if (report_outer_local(e->name, e)) return t_.t_unknown();
   Diagnostic& d = diag_.error("E0114", diag_.L(Str("変数 ") + e->name + " が見つかりません",
                                                Str("unknown name: ") + e->name));
   d.spans.push(Span(e->line, e->col, e->len));
@@ -2717,14 +2755,25 @@ Type* Checker::check_call(Node* e) {
       resolve_ctor(e, c, args, targs);
       return e->type;
     }
-    // 関数を値として持っている変数
+    // 関数を値として持っている変数（局所でも、一番外側のものでも呼べる）
+    Type* ft = 0;
     Local* l = find_local(name);
     if (l && l->type && l->type->kind == T_Func) {
       l->used = true;
       callee->slot = l->slot;
-      callee->type = l->type;
+      callee->is_global = false;
+      ft = l->type;
+    } else if (!l) {
+      GlobalInfo* g = find_global(name, unit_);
+      if (g && g->type && g->type->kind == T_Func) {
+        callee->slot = g->index;
+        callee->is_global = true;
+        ft = g->type;
+      }
+    }
+    if (ft) {
+      callee->type = ft;
       e->opcode = CK_Value;
-      Type* ft = l->type;
       if (ft->params.size() != n) {
         Diagnostic& d = diag_.error("E0149", diag_.L(Str("引数の数が違います: ") + str_from_int(ft->params.size()) +
                                                          " 個必要です",
@@ -2829,6 +2878,38 @@ Type* Checker::check_call(Node* e) {
             d.help.push(diag_.L("呼ばせたい関数には public を付けます", "mark the function public"));
           }
           cf.push(i);
+        }
+        // モジュールの中の、関数を値として持つ変数
+        if (cn.size() == 0 && cf.size() == 0) {
+          for (int i = 0; i < prog_.globals.size(); i++) {
+            GlobalInfo* g = prog_.globals[i];
+            if (!(g->module == mod) || !(g->name == mname)) continue;
+            if (!g->type || g->type->kind != T_Func) break;
+            if (!g->is_public) {
+              Diagnostic& d = diag_.error("E0134", diag_.L(mname + " は " + mod + " の外からは使えません",
+                                                           mname + " is not public in " + mod));
+              d.spans.push(Span(e->line, e->col, e->len));
+              d.help.push(diag_.L("使わせたいものには public を付けます", "mark it public to expose it"));
+            }
+            Node* callee = e->a;
+            callee->slot = g->index;
+            callee->is_global = true;
+            callee->type = g->type;
+            callee->opcode = CK_None;   // モジュールの定数でも関数でもない
+            e->opcode = CK_Value;
+            Type* ft = g->type;
+            if (ft->params.size() != n) {
+              Diagnostic& d = diag_.error("E0149", diag_.L(Str("引数の数が違います: ") +
+                                                               str_from_int(ft->params.size()) + " 個必要です",
+                                                           Str("wrong number of arguments: expected ") +
+                                                               str_from_int(ft->params.size())));
+              d.spans.push(Span(e->line, e->col, e->len));
+            } else {
+              for (int i2 = 0; i2 < n; i2++)
+                need_assign(ft->params[i2], args[i2]->type, args[i2], "引数", "argument");
+            }
+            return ft->ret;
+          }
         }
         // モジュールの中のクラス
         if (cn.size() == 0 && cf.size() == 0) {
@@ -2958,8 +3039,51 @@ Type* Checker::check_call(Node* e) {
   return t_.t_unknown();
 }
 
+// ------------------------------------------------------------------ その場に書く関数
+// 名前を付けずに書いた関数（`func(a: int) -> bool { ... }`）。
+// ふつうの関数を1つ作り、式の値はその番号になる。外側の局所変数は見えないので、
+// 関数の値は「番号ひとつ」のままでよく、実行時の作りは変わらない（spec/syntax.md）
+Type* Checker::check_lambda(Node* e) {
+  if (e->resolved >= 0) return e->type ? e->type : t_.t_unknown();   // 二度は作らない
+  FuncDecl* fd = e->fdecl;
+  if (!fd) return t_.t_unknown();
+
+  FuncInfo* fi = new_func(prog_);
+  fi->name = Str("@func");        // 呼び出しの跡に出す名前
+  fi->module = unit_->module;
+  fi->file = unit_->display;
+  fi->decl = fd;
+  fd->info = fi;
+  for (int i = 0; i < fd->params.size(); i++) {
+    ParamInfo pi;
+    pi.name = fd->params[i].name;
+    pi.type = resolve_type(fd->params[i].type, unit_, fc_, fc_->cls);
+    fi->params.push(pi);
+    if (!fd->params[i].is_ref) continue;
+    // func(...) という型に ref は書けない。渡した先が借用だと分からないので断る
+    Diagnostic& d = diag_.error("E0157", diag_.L("その場に書く関数の引数に ref は書けません",
+                                                 "an inline function cannot take a ref parameter"));
+    d.spans.push(Span(fd->params[i].line, fd->params[i].col, 3));
+    d.help.push(diag_.L("書き換えて返したいものは、名前を付けた関数に渡します",
+                        "use a named function when the callee must write back"));
+  }
+  fi->ret = fd->ret ? resolve_type(fd->ret, unit_, fc_, fc_->cls) : t_.t_void();
+
+  FuncCtx* outer = fc_;
+  Unit* u = unit_;
+  check_func_body(fi, fd, u, 0, outer);
+  fc_ = outer;                    // 検査を続ける場所を戻す
+  unit_ = u;
+  diag_.set_file(u->display);
+
+  e->resolved = fi->index;
+  Vec<Type*> ps;
+  for (int i = 0; i < fi->params.size(); i++) ps.push(fi->params[i].type);
+  return t_.func_type(ps, fi->ret);
+}
+
 // ------------------------------------------------------------------ 関数の本体
-void Checker::check_func_body(FuncInfo* fi, FuncDecl* fd, Unit* u, ClassInfo* cls) {
+void Checker::check_func_body(FuncInfo* fi, FuncDecl* fd, Unit* u, ClassInfo* cls, FuncCtx* outer) {
   if (!fd || !fd->body) return;
   unit_ = u;
   diag_.set_file(u->display);
@@ -2967,6 +3091,13 @@ void Checker::check_func_body(FuncInfo* fi, FuncDecl* fd, Unit* u, ClassInfo* cl
   fc.fi = fi;
   fc.cls = cls;
   fc.ret = fi->ret;
+  fc.outer = outer;
+  // 外側の型引数はそのまま使える。実行時に型は消えるので、複製は要らない
+  if (outer)
+    for (int i = 0; i < outer->gnames.size(); i++) {
+      fc.gnames.push(outer->gnames[i]);
+      fc.gtypes.push(outer->gtypes[i]);
+    }
   for (int i = 0; i < fi->gparams.size(); i++) {
     fc.gnames.push(fi->gparams[i]);
     fc.gtypes.push(fi->gtypes[i]);

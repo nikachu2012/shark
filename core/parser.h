@@ -34,6 +34,7 @@ class Parser {
   // 宣言
   void parse_import();
   FuncDecl* parse_func(bool is_public, bool is_virtual, bool is_override, bool in_class);
+  void parse_signature(FuncDecl* f);
   ClassDecl* parse_class(bool is_public);
   GlobalDecl* parse_global(bool is_public, bool is_const);
   void parse_generic_params(Vec<GenericParam>* out);
@@ -67,6 +68,7 @@ class Parser {
   bool at_shr() const;      // 並んだ 2 つの > を >> とみなす
   bool at_shr_assign() const;
   Node* parse_primary();
+  Node* parse_lambda();
   Node* parse_fstring(const Token& t);
   void parse_args(Node* call);
 

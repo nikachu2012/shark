@@ -46,6 +46,7 @@ window.SharkLang = (function () {
   var SNIPPETS = [
     { label: 'main', doc: '入口の関数', body: 'func main() -> int {\n\t$0\n\treturn 0;\n}' },
     { label: 'func', doc: '関数', body: 'func ${1:name}(${2}) -> ${3:void} {\n\t$0\n}' },
+    { label: 'inline', doc: 'その場に書く関数（名前なし）', body: 'func(${1}) -> ${2:void} { $0 }' },
     { label: 'for', doc: '数え上げ', body: 'for var ${1:i} in range(${2:10}) {\n\t$0\n}' },
     { label: 'forin', doc: '中身を順に', body: 'for var ${1:x} in ${2:xs} {\n\t$0\n}' },
     { label: 'while', doc: '繰り返し', body: 'while ${1:cond} {\n\t$0\n}' },

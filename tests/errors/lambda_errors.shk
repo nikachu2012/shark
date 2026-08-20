@@ -1,0 +1,23 @@
+// その場に書く関数の誤り
+class Fish {
+  var size: int;
+  func init(size: int) { this.size = size; }
+  public func grow() -> func() -> void {
+    return func() -> void { this.size += 1; };   // this は見えない
+  }
+}
+
+func main() -> int {
+  var n = 0;
+  var bump = func() -> void { n += 1; };          // 外側の変数は見えない
+  var show = func() -> void { print(n); };        // 読むのも同じ
+  var swap = func(ref x: int) -> void { x = 1; }; // ref は書けない
+  var half = func(x: int) -> int { if x > 0 { return x / 2; } };  // 返さない道がある
+  var add = func here(a: int) -> int { return a; };               // 名前は付けられない
+  bump();
+  show();
+  swap(n);
+  print(half(4));
+  print(add(1));
+  return 0;
+}

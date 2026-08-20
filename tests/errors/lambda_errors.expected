@@ -1,0 +1,39 @@
+error[E0001]: その場に書く関数に名前は付けられません
+  --> lambda_errors.shk:16:18
+  16 |   var add = func here(a: int) -> int { return a; };               // 名前は付けられない
+     |                  ----
+  直し方: 名前を付けるなら、一番外側に func here(...) と書きます
+
+error[E0156]: その場に書いた関数の中からは this は見えません
+  --> lambda_errors.shk:6:29
+  6 |     return func() -> void { this.size += 1; };   // this は見えない
+    |                             ----
+  直し方: 使うものを引数で受け取るか、メソッドに名前を付けて渡します
+
+error[E0156]: 外側の変数 n は、その場に書いた関数の中からは見えません
+  --> lambda_errors.shk:12:31
+  12 |   var bump = func() -> void { n += 1; };          // 外側の変数は見えない
+     |                               -
+  直し方: 引数で受け取ります: func(n: ...) -> ... { ... }
+  直し方: どこからでも書き換えたい値なら、一番外側の var にします
+
+error[E0156]: 外側の変数 n は、その場に書いた関数の中からは見えません
+  --> lambda_errors.shk:13:37
+  13 |   var show = func() -> void { print(n); };        // 読むのも同じ
+     |                                     -
+  直し方: 引数で受け取ります: func(n: ...) -> ... { ... }
+  直し方: どこからでも書き換えたい値なら、一番外側の var にします
+
+error[E0157]: その場に書く関数の引数に ref は書けません
+  --> lambda_errors.shk:14:19
+  14 |   var swap = func(ref x: int) -> void { x = 1; }; // ref は書けない
+     |                   ---
+  直し方: 書き換えて返したいものは、名前を付けた関数に渡します
+
+error[E0153]: この関数は int を返しますが、返さずに終わる道があります
+  --> lambda_errors.shk:15:14
+  15 |   var half = func(x: int) -> int { if x > 0 { return x / 2; } };  // 返さない道がある
+     |              ----
+  直し方: 最後に return を書くか、else の側でも return します
+
+6 件の誤りがあります

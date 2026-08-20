@@ -97,6 +97,54 @@ while var line = f.read_line() {   // none が返るまで繰り返す
 取り出した変数はブロックの中だけで使える
 （[types/optional.md](types/optional.md)、[runtime/error.md](runtime/error.md)）。
 
+## その場に書く関数
+
+名前を付けずに、渡すその場に関数を書ける。書き方は名前のある関数と同じで、名前だけが無い。
+
+```shark
+func apply(n: int, f: func(int) -> int) -> int { return f(n); }
+
+print(apply(3, func(x: int) -> int { return x * 2; }));   // 6
+```
+
+値としての型は `func(引数の型, ...) -> 戻り値の型`。変数に入れる・配列や連想配列に入れる・
+関数から返す、のいずれもできる。戻り値を書かなければ `void` になる。
+
+```shark
+var note = func(s: string) -> void { print(s); };
+note("さめ");
+```
+
+### 外側の変数は見えない
+
+その場に書いた関数から見えるのは、**自分の引数と自分の中で作った変数**、それに
+**一番外側に書いたもの**（`var` `const` `func` `class`）だけ。
+外側の関数の局所変数と `this` は見えない。
+
+```shark
+func f() -> void {
+  var n = 0;
+  var bump = func() -> void { n += 1; };   // E0156: 外側の n は見えない
+}
+```
+
+こうする理由は3つ。
+
+- 関数の値が**どの関数かを指すだけ**で済む。値を抱え込まないので、渡しても写しても
+  余分なものが付いてこない（[runtime/memory.md](runtime/memory.md)）
+- 「代入はコピー」との食い違いが起きない。写した値を書き換えて外に届かない、
+  という分かりにくさが生まれない
+- 寿命が変わらない。参照カウントだけで後始末でき、循環も作れないまま
+
+渡したいものは引数で受け取る。どこからでも書き換えたい値は、一番外側の `var` にする。
+
+### 決めごと
+
+- 名前は付けられない。型引数（`<T>`）も書けない。要るときは一番外側に書く
+- 引数に `ref` は書けない（E0157）。`func(...)` という型に `ref` を書く場所が無く、
+  渡した先で借用かどうかを見分けられないため
+- 外側の関数の型引数（`<T>` の `T`）は、型の名前としてはそのまま使える
+
 ## 同じ名前の関数（オーバーロード）
 
 引数の**型か個数**が違えば、同じ名前の関数を何個でも定義できる。
@@ -273,6 +321,7 @@ print(2.0 ** 0.5);     // 1.4142135623730951
 program     := import* (declaration | statement)*
 declaration := funcDecl | classDecl | varDecl | constDecl
 funcDecl    := "public"? "func" IDENT genericParams? "(" params? ")" ("->" type)? block
+lambda      := "func" "(" params? ")" ("->" type)? block      # 式として書く（名前なし）
 classDecl   := "public"? "class" IDENT genericParams? (":" IDENT ("," IDENT)*)? classBody
 genericParams := "<" genericParam ("," genericParam)* ">"
 genericParam  := IDENT (":" IDENT ("+" IDENT)*)?

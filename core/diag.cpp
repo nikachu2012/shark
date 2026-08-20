@@ -55,6 +55,19 @@ static const Explain kExplain[] = {
    "空の [] や {} だけでは要素の型が決まりません。推論はその行だけで完結します。\n"
    "var xs: list<int> = []; のように型を書きます。",
    "An empty [] or {} does not determine the element type. Write var xs: list<int> = [];"},
+  {"E0156",
+   "その場に書いた関数（名前を付けずに書いた func(...) { ... }）からは、外側の関数の変数と this は\n"
+   "見えません。関数の値は「どの関数か」を指すだけで、値を抱え込まないためです。\n"
+   "使いたいものは引数で受け取るか、どこからでも書き換えたいなら一番外側の var にします。",
+   "An inline function cannot see the enclosing function's variables or this. A function value only\n"
+   "points at a function; it carries no captured values. Pass what you need as a parameter, or\n"
+   "declare it as a top-level var if it must be shared."},
+  {"E0157",
+   "その場に書く関数の引数に ref は書けません。値としての型は func(int) -> bool のように書き、\n"
+   "そこに ref を書く場所がないので、渡した先で借用かどうかを見分けられないためです。\n"
+   "書き換えて返したいものは、名前を付けた関数に渡します。",
+   "An inline function cannot take a ref parameter. The function type (func(int) -> bool) has no\n"
+   "place to record ref, so the callee could not tell a borrow from a copy. Use a named function."},
   {"E0201",
    "T? は「値がないかもしれない」型なので、T としてそのままは使えません。\n"
    "取り出し方は3つ: ?? で既定値を決める、if var で値がある時だけ処理する、! で断言する。",

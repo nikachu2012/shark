@@ -1,0 +1,97 @@
+// その場に書く関数（名前を付けない関数）
+import ./lambda_util;
+
+var log = "";
+var total = 0;
+var seen = 0;
+
+func apply(n: int, f: func(int) -> int) -> int { return f(n); }
+
+func pick(xs: list<int>, keep: func(int) -> bool) -> list<int> {
+  var out: list<int> = [];
+  for var x in xs {
+    if keep(x) { out.push(x); }
+  }
+  return out;
+}
+
+func max_by<T>(a: T, b: T, greater: func(T, T) -> bool) -> T {
+  if greater(a, b) { return a; }
+  return b;
+}
+
+class Fish {
+  var size: int;
+  func init(size: int) { this.size = size; }
+  public func size_of() -> int { return this.size; }
+  public func sum(xs: list<int>) -> int {
+    var add = func(a: int, b: int) -> int { return a + b; };
+    var s = this.size;
+    for var x in xs { s = add(s, x); }
+    return s;
+  }
+}
+
+// 一番外側の var に入れておける
+var triple = func(n: int) -> int { return n * 3; };
+
+func main() -> int {
+  // 引数として渡す
+  print(apply(3, func(x: int) -> int { return x * 2; }));
+  print(pick([1, 2, 3, 4, 5, 6], func(x: int) -> bool { return x % 2 == 0; }));
+
+  // 変数に入れて何度も呼ぶ。一番外側の変数は書き換えられる
+  var note = func(s: string) -> void { log += s; };
+  note("あ");
+  note("い");
+  print(log);
+
+  // 戻り値を書かなければ void
+  var bump = func() { total += 5; };
+  bump();
+  bump();
+  print(total);
+
+  // 一番外側に入れたものも呼べる
+  print(triple(7));
+
+  // その場で呼ぶ
+  print(func(a: int, b: int) -> int { return a * b; }(6, 7));
+
+  // 入れ子。中の関数からは、自分の引数と一番外側のものが見える
+  var edge = func(n: int) -> int {
+    var square = func(m: int) -> int { return m * m; };
+    return square(n) + 1;
+  };
+  print(edge(4));
+
+  // 関数を返す関数
+  var make = func() -> func(int) -> int {
+    return func(x: int) -> int { return x - 1; };
+  };
+  print(make()(10));
+
+  // 型引数のある関数にも渡せる
+  var big = max_by(Fish(3), Fish(8), func(a: Fish, b: Fish) -> bool {
+    return a.size_of() > b.size_of();
+  });
+  print(big.size_of());
+
+  // メソッドの中でも書ける
+  print(Fish(10).sum([1, 2, 3]));
+
+  // 配列と連想配列にも入る
+  var ops: list<func(int) -> int> = [
+    func(x: int) -> int { return x + 1; },
+    func(x: int) -> int { return x * x; },
+  ];
+  for var f in ops { print(f(5)); }
+  var by_name = {"倍": func(x: int) -> int { return x * 2; }};
+  if var g = by_name.get("倍") { print(g(21)); }
+
+  // 別のモジュールに置いたものも、そのまま呼べる
+  lambda_util.each([1, 2, 3], func(x: int) -> void { seen += x; });
+  print(seen);
+  print(lambda_util.scale(4));
+  return 0;
+}

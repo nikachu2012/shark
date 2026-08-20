@@ -103,6 +103,7 @@ frontend/
 | `Comparable` と `sort()` | あり（並べ替えは [stdlib/prelude.shk](../stdlib/prelude.shk) に Shark で書いてある） |
 | ジェネリクス（関数・クラス・制約 `<T: Comparable>`） | あり（型ごとの複製はしない） |
 | 関数オーバーロード（引数の型か個数で選ぶ） | あり |
+| その場に書く関数（`func(x: int) -> int { ... }`） | あり（外側の局所変数は捕まえない。ふつうの関数を1つ作り、値はその番号） |
 | `ref`（引数だけ・借用） | あり |
 | モジュール（`import`・`public`・相対パス・別名） | あり |
 | `task` `parallel` `channel`・取り消し | あり（スレッドは使わない） |

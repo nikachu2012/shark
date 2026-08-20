@@ -32,7 +32,9 @@ struct FuncCtx {
   bool in_task;
   Vec<Type*> gtypes;   // 型引数（T_Generic）
   Vec<Str> gnames;
-  FuncCtx() : fi(0), next_slot(0), max_slot(0), cls(0), ret(0), loop_depth(0), in_task(false) {}
+  FuncCtx* outer;      // その場に書いた関数のとき、それを囲む関数（診断にだけ使う）
+  FuncCtx() : fi(0), next_slot(0), max_slot(0), cls(0), ret(0), loop_depth(0), in_task(false),
+              outer(0) {}
 };
 
 class Checker {
@@ -64,7 +66,7 @@ class Checker {
   bool satisfies(Type* t, ClassInfo* iface);
 
   // --- 文 ---
-  void check_func_body(FuncInfo* fi, FuncDecl* fd, Unit* u, ClassInfo* cls);
+  void check_func_body(FuncInfo* fi, FuncDecl* fd, Unit* u, ClassInfo* cls, FuncCtx* outer = 0);
   void check_stmt(Node* s);
   void check_block(Node* b);
   void check_var_decl(Node* s);
@@ -85,6 +87,7 @@ class Checker {
   Type* check_list_lit(Node* e);
   Type* check_map_lit(Node* e);
   Type* check_ident(Node* e);
+  Type* check_lambda(Node* e);
   Type* check_task(Node* e);
   Type* check_parallel(Node* e);
   Type* check_try(Node* e);
@@ -107,6 +110,8 @@ class Checker {
   void push_scope();
   void pop_scope();
   GlobalInfo* find_global(const Str& name, Unit* u);
+  // 外側の関数の局所変数を、その場に書いた関数から使おうとしていないか（誤りを出したら true）
+  bool report_outer_local(const Str& name, Node* at);
   Str module_of_alias(const Str& alias, Unit* u, bool* found);
 
   // --- 診断の道具 ---

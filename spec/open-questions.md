@@ -95,6 +95,7 @@
 |---|---|---|
 | 抽象クラス／インタフェース | `virtual` と純粋仮想で表す。実装を持つ親は1つ、インタフェースは複数 | [types/class.md](types/class.md) |
 | 基本型ごとの関数の書き分け | 関数オーバーロードを入れる。暗黙変換が無いので完全一致で1つに決まる | [syntax.md](syntax.md) |
+| その場に書く関数の捕まえ方 | 捕まえない。見えるのは自分の引数と一番外側のものだけ。関数の値は「どの関数か」を指すだけで済み、「代入はコピー」と食い違わない | [syntax.md](syntax.md) |
 | ユーザー定義型の並べ替え | `Comparable` インタフェースと制約構文 `<T: Comparable>`。`This` 型を用意 | [types/generics.md](types/generics.md) |
 | 標準ライブラリの必須範囲 | 必須は `time` `math` `task` だけ。持たないモジュールの `import` は読み込み時エラー | [library/overview.md](library/overview.md) |
 | 剰余 `%` の符号 | 割られる数に従う（C 言語と同じ）。`-7 % 2` は `-1` | [types/primitive.md](types/primitive.md) |

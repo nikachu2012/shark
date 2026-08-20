@@ -9,6 +9,7 @@ namespace shark {
 
 struct FuncInfo;
 struct ClassInfo;
+struct FuncDecl;
 
 // まとめて確保し、まとめて捨てる
 //
@@ -60,7 +61,7 @@ enum NodeKind : uint8_t {
   // 式
   E_Int, E_Float, E_Bool, E_Str, E_Bytes, E_None, E_FStr, E_ListLit, E_MapLit,
   E_Ident, E_This, E_Super, E_Field, E_Index, E_Call, E_Unary, E_Binary,
-  E_Force, E_Task, E_Parallel, E_Try, E_Ref, E_TypeName,
+  E_Force, E_Task, E_Parallel, E_Try, E_Ref, E_TypeName, E_Lambda,
   // 文
   S_VarDecl, S_Assign, S_Expr, S_If, S_While, S_For, S_Break, S_Continue,
   S_Return, S_Block, S_Panic,
@@ -106,6 +107,7 @@ struct Node {
   Vec<FStrPart> parts;
   Vec<TypeExpr*> targs;  // 明示した型引数
   TypeExpr* tann;        // 型注釈
+  FuncDecl* fdecl;       // E_Lambda（その場に書いた関数）の中身
   Str bind;              // if var / while var / for var の変数名
   Str bind2;             // else var e
   bool is_const;
@@ -128,9 +130,9 @@ struct Node {
 
   Node()
       : kind(E_Int), line(0), col(0), len(0), ival(0), dval(0), a(0), b(0), c(0), tann(0),
-        is_const(false), optional_chain(false), type(0), bind_type(0), bind2_type(0), slot(-1),
-        slot2(-1), resolved(-1), resolved2(-1), opcode(0), rcls(0), rfunc(0), is_global(false),
-        is_ref_param(false), checked(false) {}
+        fdecl(0), is_const(false), optional_chain(false), type(0), bind_type(0), bind2_type(0),
+        slot(-1), slot2(-1), resolved(-1), resolved2(-1), opcode(0), rcls(0), rfunc(0),
+        is_global(false), is_ref_param(false), checked(false) {}
 };
 
 struct ParamDecl {

@@ -276,12 +276,10 @@ _ = file.write_bytes("shot.png", png);
 ```shark
 var count = 0;                        // 状態はふつうの変数
 
-func inc() -> void { count += 1; }    // 押されたときの動き
-
 func view() -> list<Widget> {         // いまどうあるべきか
   return [
     ui.label(f"{count} 回"),
-    ui.button("ふやす", inc),         // ← 関数をそのまま渡す
+    ui.button("ふやす", func() -> void { count += 1; }),   // ← 動きをその場に書く
   ];
 }
 
@@ -290,6 +288,9 @@ func main() -> int {
   return 0;
 }
 ```
+
+動きは名前を付けた関数でもよい（`func inc() -> void { count += 1; }` を作って
+`ui.button("ふやす", inc)`）。その場に書く形は [../syntax.md](../syntax.md) にある。
 
 関数のほかに、**名札**（`id`）でも受け取れる。まとめて振り分けたいときはこちら。
 

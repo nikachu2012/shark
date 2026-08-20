@@ -453,6 +453,12 @@ void CodeGen::gen_expr(Node* e) {
       emit_i32(0);
       break;
 
+    // その場に書いた関数。本体は別の関数として作ってあるので、番号を積むだけ
+    case E_Lambda:
+      emit(OP_CONST);
+      emit_i32(add_const(mk_func(e->resolved)));
+      break;
+
     case E_ListLit: {
       for (int i = 0; i < e->list.size(); i++) gen_expr(e->list[i]);
       emit(OP_NEW_LIST);

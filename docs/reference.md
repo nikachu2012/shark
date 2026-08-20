@@ -17,7 +17,7 @@ Shark は、**ゲーム機で動くプログラミング学習用ゲームの中
 | 最初 | `var` `func` `if` `for` `while` `print` `list` `map` `string` | 1〜7、11 |
 | 次 | `class` 継承 `T?` `Result` `try` | 8〜10 |
 | その次 | `ref` `virtual` `override` インタフェース | 4、8 |
-| 必要になったら | ジェネリクス `task` `parallel` `std.ui` | 8、14、15 |
+| 必要になったら | ジェネリクス その場に書く関数 `task` `parallel` `std.ui` | 7、8、14、15 |
 
 ---
 
@@ -324,6 +324,36 @@ print(abs(-3.0));    // float の方
 
 戻り値の型だけが違うものは定義できません。`math.abs` や `print` も、この仕組みで書かれています。
 
+### その場に書く関数
+
+名前を付けずに、渡すその場に書けます。書き方は上と同じで、名前だけがありません。
+
+```shark
+func apply(n: int, f: func(int) -> int) -> int { return f(n); }
+
+print(apply(3, func(x: int) -> int { return x * 2; }));   // 6
+```
+
+値としての型は `func(引数の型, ...) -> 戻り値の型` です。変数に入れる・配列や連想配列に入れる・
+関数から返す、のどれもできます。戻り値を書かなければ `-> void` と同じです。
+
+```shark
+var note = func(s: string) -> void { print(s); };
+note("さめ");
+```
+
+**外側の変数は見えません。**見えるのは自分の引数と自分の中で作った変数、
+それに一番外側に書いたもの（`var` `const` `func` `class`）だけです。
+
+```shark
+var n = 0;
+var bump = func() -> void { n += 1; };   // エラー(E0156): 外側の n は見えない
+```
+
+関数の値は「**どの関数か**」を指すだけで、値を持ち出しません。だから渡しても写しても
+余分なものが付いてこず、「コピーした値を書き換えたのに外に届かない」という迷いも起きません。
+使いたいものは引数で受け取り、どこからでも書き換えたい値は一番外側の `var` にします。
+
 → [spec/syntax.md](../spec/syntax.md)
 
 ---
@@ -493,10 +523,15 @@ print(max(fish_a, fish_b));  // Fish が Comparable を実装していれば
 ```
 
 複数要るときは `+` でつなぎます。制約の無い `T` には、代入とコピーしかできません。
-インタフェースを実装していない型を並べ替えるときは、比較の仕方をその場で渡します。
+インタフェースを実装していない型を扱うときは、比べ方をその場で渡します（7章）。
 
 ```shark
-fishes.sort_by(func(a: Fish, b: Fish) -> bool { return a.size() < b.size(); });
+func max_by<T>(a: T, b: T, greater: func(T, T) -> bool) -> T {
+  if greater(a, b) { return a; }
+  return b;
+}
+
+var big = max_by(a, b, func(x: Fish, y: Fish) -> bool { return x.size() > y.size(); });
 ```
 
 → [spec/types/class.md](../spec/types/class.md) / [generics.md](../spec/types/generics.md)
@@ -868,13 +903,13 @@ import std.ui;
 
 var count = 0;                        // 状態はふつうの変数
 
-func inc() -> void { count += 1; }    // 押されたときの動き
-func dec() -> void { count -= 1; }
-
 func view() -> list<Widget> {         // いまどうあるべきか
   return [
     ui.label(f"{count} 回"),
-    ui.row([ui.button("ふやす", inc), ui.button("へらす", dec)]),
+    ui.row([
+      ui.button("ふやす", func() -> void { count += 1; }),   // 押されたときの動き
+      ui.button("へらす", func() -> void { count -= 1; }),
+    ]),
   ];
 }
 
@@ -883,6 +918,9 @@ func main() -> int {
   return 0;
 }
 ```
+
+動きは名前を付けて渡してもかまいません（`ui.button("ふやす", inc)`）。長いものや、
+何か所からも使うものは、名前を付けた方が読みやすくなります。
 
 まとめて振り分けたいときは、関数の代わりに**名札**を渡して `update()` で受けます。
 

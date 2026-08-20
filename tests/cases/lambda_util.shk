@@ -1,0 +1,7 @@
+// 19_lambda.shk が取り込む助けのモジュール。
+// .expected を持たないので、これ自体は走らせない（tests/run.sh）
+public var scale = func(n: int) -> int { return n * 10; };
+
+public func each(xs: list<int>, f: func(int) -> void) -> void {
+  for var x in xs { f(x); }
+}
