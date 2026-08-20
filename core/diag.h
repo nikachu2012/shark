@@ -14,8 +14,8 @@ enum Severity { SEV_ERROR = 0, SEV_WARNING = 1 };
 
 struct Span {
   int line;    // 1 から
-  int col;     // 1 から（文字単位）
-  int len;     // 文字数
+  int col;     // 1 から（バイトでも表示幅でもなく、文字の数）
+  int len;     // 文字数。端末に並べるときの幅は、受け取った側が数える
   Str label;   // そこに付ける短い説明（空でもよい）
   Span() : line(0), col(0), len(0) {}
   Span(int l, int c, int n) : line(l), col(c), len(n) {}

@@ -31,7 +31,7 @@ struct Token {
   Str text;     // 識別子、文字列の中身、予約語の綴り
   int64_t ival;
   double dval;
-  int line, col, len;
+  int line, col, len;   // 桁と長さは文字の数（diag.h）。バイトではない
   int offset;   // ソース先頭からのバイト位置（f 文字列の解析に使う）
   Token() : kind(TK_EOF), ival(0), dval(0), line(1), col(1), len(0), offset(0) {}
 };

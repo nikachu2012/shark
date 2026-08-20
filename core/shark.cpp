@@ -259,20 +259,31 @@ Str format_diagnostic(const Diagnostic& d, const Str& source, bool color, Lang l
         r += src_line;
         r += "\n";
       }
-      // 下線
+      // 下線。桁は文字で数えるが、端末では全角が 2 つ分の幅を取るので、
+      // 位置も長さも見た目の幅に直してから並べる
       r += dim;
       r += "  ";
       for (int k = 0; k < num.size(); k++) r += " ";
       r += " | ";
       r += off;
       int col = s.col > 0 ? s.col - 1 : 0;
+      int len = s.len > 0 ? s.len : 1;
+      int at = 0;
       for (int k = 0; k < col; k++) {
-        if (k < src_line.size() && src_line[k] == '\t') r += "\t";
-        else r += " ";
+        if (at >= src_line.size()) { r += " "; continue; }   // 行の右を指しているとき
+        int cp = 0;
+        int adv = utf8_decode(src_line, at, &cp);
+        if (src_line[at] == '\t') r += "\t";
+        else {
+          int w = utf8_display_width(src_line.sub(at, adv));
+          for (int m = 0; m < w; m++) r += " ";
+        }
+        at += adv;
       }
       r += d.severity == SEV_ERROR ? red : yellow;
-      int len = s.len > 0 ? s.len : 1;
-      for (int k = 0; k < len; k++) r += "-";
+      int tail = utf8_offset(src_line, col + len);
+      int width = tail > at ? utf8_display_width(src_line.sub(at, tail - at)) : len;
+      for (int k = 0; k < width; k++) r += "-";
       if (s.label.size()) { r += " "; r += s.label; }
       r += off;
       r += "\n";

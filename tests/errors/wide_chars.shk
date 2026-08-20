@@ -1,0 +1,10 @@
+// 全角の文字が同じ行にあるときの、桁の数え方（spec/runtime/diagnostics.md）
+// 桁は文字の数で数える。バイト数でも、端末の幅でもない
+
+func main() -> int {
+  var greet = "こんにちは"; var a: int = greet;   // 日本語の後ろでもずれない
+  print("🦈");             var b: int = greet;   // 絵文字も 1 文字
+  var 名前 = 1;                                   // 名前には使えない
+  print(a + b + 名前);
+  return 0;
+}

@@ -153,7 +153,7 @@ Diagnostic {
   severity  // error / warning
   code      // "E0102"
   message   // "int と float は足せません"
-  spans     // 行・桁・長さ・そこに付ける短い説明
+  spans     // 行・桁・長さ・そこに付ける短い説明（桁と長さは文字の数）
   help      // 直し方。複数のこともある
 }
 ```

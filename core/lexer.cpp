@@ -91,6 +91,16 @@ const char* tok_name(TokKind k) {
   return "?";
 }
 
+// 桁と長さは、バイトではなく文字で数える（diag.h）。
+// UTF-8 の続きのバイト（10xxxxxx）は、文字の途中なので数えない
+static bool utf8_cont(char c) { return ((unsigned char)c & 0xC0) == 0x80; }
+static bool is_ascii(char c) { return (unsigned char)c < 0x80; }
+static int count_chars(const Str& s, int from, int to) {
+  int n = 0;
+  for (int k = from; k < to; k++) if (!utf8_cont(s[k])) n++;
+  return n;
+}
+
 static bool is_alpha(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
 static bool is_digit(char c) { return c >= '0' && c <= '9'; }
 static bool is_hex(char c) { return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
@@ -109,7 +119,7 @@ void Lexer::push(Vec<Token>* out, TokKind k, int line, int col, int start) {
   t.line = line;
   t.col = col;
   t.offset = start;
-  t.len = i_ - start;
+  t.len = count_chars(s_, start, i_);
   out->push(t);
 }
 
@@ -206,7 +216,10 @@ void Lexer::run(Vec<Token>* out) {
     if (c == '\n') { i_++; line_++; col_ = 1; continue; }
     // コメント
     if (c == '/' && i_ + 1 < s_.size() && s_[i_ + 1] == '/') {
-      while (i_ < s_.size() && s_[i_] != '\n') i_++;
+      while (i_ < s_.size() && s_[i_] != '\n') {
+        if (!utf8_cont(s_[i_])) col_++;
+        i_++;
+      }
       continue;
     }
     if (c == '/' && i_ + 1 < s_.size() && s_[i_ + 1] == '*') {
@@ -219,7 +232,7 @@ void Lexer::run(Vec<Token>* out) {
           if (depth == 0) break;
           continue;
         }
-        if (s_[i_] == '\n') { line_++; col_ = 1; } else col_++;
+        if (s_[i_] == '\n') { line_++; col_ = 1; } else if (!utf8_cont(s_[i_])) col_++;
         i_++;
       }
       if (depth != 0) {
@@ -343,7 +356,8 @@ void Lexer::run(Vec<Token>* out) {
           continue;
         }
         body.push(d);
-        i_++; col_++;
+        i_++;
+        if (!utf8_cont(d)) col_++;
       }
       if (!closed) {
         Diagnostic& d = diag_.error("E0002", diag_.L("文字列が閉じていません", "unterminated string"));
@@ -388,11 +402,20 @@ void Lexer::run(Vec<Token>* out) {
     }
     if (matched) continue;
 
+    // 文字の途中で切らない。日本語などが続くときは、まとめて 1 つの誤りにする
+    // （3 バイトの文字ひとつに 3 回出さない）
+    int bad = 0;
+    do {
+      i_++;
+      while (i_ < s_.size() && utf8_cont(s_[i_])) i_++;
+      bad++;
+    } while (i_ < s_.size() && !is_ascii(s_[i_]));
+    col_ += bad;
+
     Diagnostic& d = diag_.error("E0002", diag_.L("ここには書けない文字があります", "unexpected character"));
-    d.spans.push(Span(line, col, 1));
+    d.spans.push(Span(line, col, bad));
     d.help.push(diag_.L("識別子に使えるのは英数字と _ だけです（日本語は使えません）",
                         "identifiers may only use ASCII letters, digits and _"));
-    i_++; col_++;
   }
 
   Token t;
