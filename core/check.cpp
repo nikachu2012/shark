@@ -36,6 +36,8 @@ NativeStatus n_widget_background(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_padding(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_width(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_height(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_width_fr(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_height_fr(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_align(VM& vm, Value* args, int n, Value& out);
 
 void Checker::make_builtin_classes() {
@@ -129,12 +131,14 @@ void Checker::make_builtin_classes() {
         {"fg", t_.t_int()},          // 文字の色
         {"bg", t_.t_int()},          // 下地の色
         {"pad", t_.t_int()},         // 内側の余白
-        {"wid", t_.t_int()},         // 幅（0 なら中身から決める）
+        {"wid", t_.t_int()},         // 幅（画素。0 なら中身から決める）
         {"hei", t_.t_int()},         // 高さ（同上）
+        {"wfr", t_.t_float()},       // 幅の取り分（fr）。0 なら指定なし
+        {"hfr", t_.t_float()},       // 高さの取り分（同上）
         {"al", t_.t_int()},          // 寄せ方。0=左 1=中央 2=右
         {"act", t_.func_type(no_params, t_.t_void())},   // 押されたときに呼ぶ関数
     };
-    for (int i = 0; i < 14; i++) {
+    for (int i = 0; i < (int)(sizeof(wf) / sizeof(wf[0])); i++) {
       FieldInfo f;
       f.name = Str(wf[i].name);
       f.type = wf[i].type;
@@ -150,9 +154,12 @@ void Checker::make_builtin_classes() {
         {"padding", n_widget_padding, t_.t_int()},
         {"width", n_widget_width, t_.t_int()},
         {"height", n_widget_height, t_.t_int()},
+        // 画素ではなく取り分（fr）で決める形。int と float で書き分ける
+        {"width", n_widget_width_fr, t_.t_float()},
+        {"height", n_widget_height_fr, t_.t_float()},
         {"align", n_widget_align, t_.t_string()},
     };
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < (int)(sizeof(wm) / sizeof(wm[0])); i++) {
       FuncInfo* f = new_func(prog_);
       f->name = Str(wm[i].name);
       f->module = Str("std");
@@ -1379,6 +1386,18 @@ Type* Checker::check_ident(Node* e) {
     d.spans.push(Span(e->line, e->col, e->len));
     d.help.push(diag_.L(Str(e->name) + ".関数名(...) のように、中のものを呼びます",
                         Str("call something inside it: ") + e->name + ".name(...)"));
+    return t_.t_unknown();
+  }
+  // 型の名前。モジュールと同じで、そのままでは値にならない
+  if (e->name == "int" || e->name == "float" || e->name == "string" || e->name == "bool") {
+    Diagnostic& d = diag_.error("E0125", diag_.L(Str("型 ") + e->name + " はそのままでは値になりません",
+                                                 Str("type ") + e->name + " is not a value"));
+    d.spans.push(Span(e->line, e->col, e->len));
+    d.help.push(diag_.L(Str(e->name) + "(...) と書くと、その型に変換します",
+                        Str("convert with ") + e->name + "(...)"));
+    if (e->name == "float")
+      d.help.push(diag_.L("かぎりなく大きい数は float.infinity() と書きます",
+                          "the infinite value is float.infinity()"));
     return t_.t_unknown();
   }
   // その場に書いた関数からは、外側の局所変数は見えない
@@ -2968,6 +2987,26 @@ Type* Checker::check_call(Node* e) {
         resolve_overload(e, cf, cn, args, full);
         return e->type;
       }
+    }
+
+    // 型の名前に . を続ける形（float.infinity()）。
+    // 値ではなく**型**から値を作るもので、import は要らない。
+    // 型の名前は変数にできないので、同じ名前の変数と取り違えることはない
+    if (obj->kind == E_Ident && obj->name == "float" && !find_local(obj->name) &&
+        !find_global(obj->name, unit_)) {
+      if (mname == "infinity" && n == 0) {
+        e->opcode = CK_Native;
+        e->resolved = reg_.find("float.infinity");
+        callee->type = t_.t_float();
+        e->type = t_.t_float();
+        return e->type;
+      }
+      Diagnostic& d = diag_.error("E0135", diag_.L(Str("float に ") + mname + " はありません",
+                                                   Str("float has no member named ") + mname));
+      d.spans.push(Span(e->line, e->col, e->len));
+      d.help.push(diag_.L("あるのは: infinity()。ほかの計算は std.math にあります",
+                          "available: infinity(); other math lives in std.math"));
+      return t_.t_unknown();
     }
 
     // ふつうのメソッド

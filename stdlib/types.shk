@@ -213,6 +213,18 @@ class int {
 ///
 /// int とは混ぜて計算できない。float(n) で変換してから使う。
 class float {
+  /// かぎりなく大きい数。**型の名前から呼ぶ**（`float.infinity()`）。
+  ///
+  /// どんな数より大きく、足しても掛けてもそのまま。「かぎりが無い」ことを表す。
+  /// std.ui では、幅・高さの取り分（fr）に渡すと「余りぜんぶ」の意味になる。
+  ///
+  /// 例:
+  ///   var x = float.infinity();
+  ///   print(x);              // inf
+  ///   print(x > 1.0e308);    // true
+  ///   print(x + 1.0 == x);   // true
+  func infinity() -> float;
+
   /// 並べ替えのための比較。
   ///
   /// 例:

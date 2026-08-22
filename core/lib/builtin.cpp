@@ -1,4 +1,6 @@
 // builtin.cpp — import なしで使えるもの（spec/library/builtin.md）と、型ごとのメソッド
+#include <math.h>
+
 #include "../platform/platform.h"
 #include "../registry.h"
 #include "../value.h"
@@ -602,7 +604,17 @@ void register_builtin(Registry& r) {
   r.add_untyped("__fmt", n_fmt);
 }
 
+// float.infinity() — かぎりなく大きい数。型の名前から呼ぶ（core/check.cpp）。
+// 「かぎりが無い」ことを表すのに使う。std.ui では「余りぜんぶ」の意味になる
+static NativeStatus f_infinity(VM& vm, Value* a, int n, Value& out) {
+  (void)vm; (void)a; (void)n;
+  out = mk_float(HUGE_VAL);
+  return N_Ok;
+}
+
 void register_methods(Registry& r) {
+  r.add_untyped("float.infinity", f_infinity);
+
   r.add_untyped("string.len", s_len);
   r.add_untyped("string.sub", s_sub);
   r.add_untyped("string.find", s_find);

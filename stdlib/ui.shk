@@ -990,21 +990,42 @@ class Widget {
   ///   print(ui.get(0, 0));   // 255
   func padding(n: int) -> Widget;
 
-  /// 幅を決める（画素）。決めなければ中身から決まる。
+  /// 幅を決める。**int なら画素、float なら取り分**（fr）。
+  ///
+  /// 決めなければ中身から決まる。取り分は、横に並んだ仲間との比。
+  /// 大きさの決まっている部品を除いた**余り**を、書いた数の比で分け合う。
+  /// `float.infinity()` は「余りぜんぶ」。
+  ///
+  /// 縦に並んでいる部品に取り分を書くと、置ける幅いっぱいになる。
   ///
   /// 例:
   ///   ui.open(80, 40);
   ///   _ = ui.show([ui.label("l").width(50).background(ui.rgb(0, 255, 0))], 0, 0);
   ///   print(f"{ui.get(49, 0) != 0} {ui.get(50, 0) != 0}");   // true false
+  ///   ui.clear(0);
+  ///   // 幅 80 を 1:1 で分ける（間は 6 画素）
+  ///   _ = ui.show([ui.row([ui.label("a").width(1.0).background(ui.rgb(255, 0, 0)),
+  ///                        ui.label("b").width(1.0).background(ui.rgb(0, 0, 255))])], 0, 0);
+  ///   print(f"{ui.get(36, 0)} {ui.get(79, 0)}");   // 16711680 255
   func width(n: int) -> Widget;
+  func width(fr: float) -> Widget;
 
-  /// 高さを決める（画素）。
+  /// 高さを決める。**int なら画素、float なら取り分**（fr）。
+  ///
+  /// 取り分の分け方は width と同じで、こちらは縦に並んだ仲間との比。
+  /// 横に並んでいる部品に書くと、その並びの高さいっぱいになる。
   ///
   /// 例:
   ///   ui.open(80, 40);
   ///   _ = ui.show([ui.label("l").height(20).background(ui.rgb(0, 255, 0))], 0, 0);
   ///   print(f"{ui.get(0, 19) != 0} {ui.get(0, 20) != 0}");   // true false
+  ///   ui.clear(0);
+  ///   // 高さ 40 を 1:1 で分ける（間は 4 画素）
+  ///   _ = ui.show([ui.label("a").width(1.0).height(1.0).background(ui.rgb(255, 0, 0)),
+  ///                ui.label("b").width(1.0).height(1.0).background(ui.rgb(0, 0, 255))], 0, 0);
+  ///   print(f"{ui.get(0, 17)} {ui.get(0, 39)}");   // 16711680 255
   func height(n: int) -> Widget;
+  func height(fr: float) -> Widget;
 
   /// 親がくれた幅の中で、どこに寄せるか。`"left"` `"center"` `"right"`。
   ///

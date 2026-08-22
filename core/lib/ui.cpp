@@ -1073,7 +1073,7 @@ enum WidgetKind {
 };
 enum WidgetField {
   WF_Kind = 0, WF_Text, WF_Id, WF_A, WF_B, WF_C, WF_Kids,
-  WF_Fg, WF_Bg, WF_Pad, WF_Wid, WF_Hei, WF_Align, WF_Act, WF_Count
+  WF_Fg, WF_Bg, WF_Pad, WF_Wid, WF_Hei, WF_WidFr, WF_HeiFr, WF_Align, WF_Act, WF_Count
 };
 enum WidgetAlign { WA_Left = 0, WA_Center, WA_Right };
 
@@ -1140,29 +1140,51 @@ static bool make_widget(VM& vm, int kind, const Str& text, const Str& id, int64_
   o->fields.push(mk_int(-1));   // fg（-1 は指定なし）
   o->fields.push(mk_int(-1));   // bg
   o->fields.push(mk_int(0));    // pad
-  o->fields.push(mk_int(0));    // wid
+  o->fields.push(mk_int(0));    // wid（画素。0 は指定なし）
   o->fields.push(mk_int(0));    // hei
+  o->fields.push(mk_float(0));  // wid の取り分（fr）。0 は指定なし
+  o->fields.push(mk_float(0));  // hei の取り分
   o->fields.push(mk_int(WA_Left));
   // 押されたときに呼ぶ関数。持たないときは「値なし」を入れておく
   o->fields.push(action ? val_retain(*action) : mk_void());
   return true;
 }
 
-// 見た目を1つ変えたものを返す。**元は変えない**（すべての代入はコピー、と同じ考え）
-static NativeStatus widget_with(VM& vm, Value* a, int field, int64_t value, Value& out) {
+// 見た目を1つ変えたものを返す。**元は変えない**（すべての代入はコピー、と同じ考え）。
+// まず自分だけの実体を作り、field に value を入れる
+static InstObj* widget_copy(VM& vm, Value* a, Value& out) {
   Value* recv = val_deref(&a[0]);
   if (recv->k != V_Obj || recv->o->kind != O_Inst) {
     vm.panic(vm.L("部品ではありません", "not a widget"));
-    return N_Panic;
+    return 0;
   }
   Value copy = val_retain(*recv);
   obj_unique(copy);            // 参照が2つ以上あれば、ここで自分だけの実体になる
-  InstObj* o = as_inst(copy);
-  if (field < o->fields.size()) {
-    val_release(o->fields[field]);
-    o->fields[field] = mk_int(value);
-  }
   out = copy;
+  return as_inst(copy);
+}
+
+static void widget_put(InstObj* o, int field, const Value& v) {
+  if (field >= o->fields.size()) return;
+  val_release(o->fields[field]);
+  o->fields[field] = v;
+}
+
+static NativeStatus widget_with(VM& vm, Value* a, int field, int64_t value, Value& out) {
+  InstObj* o = widget_copy(vm, a, out);
+  if (!o) return N_Panic;
+  widget_put(o, field, mk_int(value));
+  return N_Ok;
+}
+
+// 幅と高さは「画素（int）」と「取り分（fr。float）」のどちらか一方で決まる。
+// あとから書いた方が残るので、書かなかった側は消しておく
+static NativeStatus widget_size(VM& vm, Value* a, int px_field, int fr_field, int64_t px,
+                                double fr, Value& out) {
+  InstObj* o = widget_copy(vm, a, out);
+  if (!o) return N_Panic;
+  widget_put(o, px_field, mk_int(px));
+  widget_put(o, fr_field, mk_float(fr));
   return N_Ok;
 }
 
@@ -1181,11 +1203,23 @@ NativeStatus n_widget_padding(VM& vm, Value* a, int n, Value& out) {
 }
 NativeStatus n_widget_width(VM& vm, Value* a, int n, Value& out) {
   (void)n;
-  return widget_with(vm, a, WF_Wid, val_deref(&a[1])->i, out);
+  return widget_size(vm, a, WF_Wid, WF_WidFr, val_deref(&a[1])->i, 0, out);
 }
 NativeStatus n_widget_height(VM& vm, Value* a, int n, Value& out) {
   (void)n;
-  return widget_with(vm, a, WF_Hei, val_deref(&a[1])->i, out);
+  return widget_size(vm, a, WF_Hei, WF_HeiFr, val_deref(&a[1])->i, 0, out);
+}
+// 取り分（fr）で決める形。余った場所を、書いた数の比で分け合う。
+// float.infinity() は「余りぜんぶ」。0 以下と NaN は指定なしとみなす
+NativeStatus n_widget_width_fr(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  double f = val_deref(&a[1])->f;
+  return widget_size(vm, a, WF_Wid, WF_WidFr, 0, f > 0 ? f : 0, out);
+}
+NativeStatus n_widget_height_fr(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  double f = val_deref(&a[1])->f;
+  return widget_size(vm, a, WF_Hei, WF_HeiFr, 0, f > 0 ? f : 0, out);
 }
 NativeStatus n_widget_align(VM& vm, Value* a, int n, Value& out) {
   (void)n;
@@ -1221,9 +1255,20 @@ static int64_t w_field(const Value& v, int i) {
 }
 // 入力欄が書き戻す先の var の番号（-1 なら名札で受ける形）
 static int w_var(const Value& v) { return w_kind(v) == WK_Field ? (int)w_a(v) : -1; }
+static double w_fieldf(const Value& v, int i) {
+  InstObj* o = as_inst(v);
+  return i < o->fields.size() ? o->fields[i].f : 0.0;
+}
 static int w_pad(const Value& v) { return (int)w_field(v, WF_Pad); }
 static int w_wid(const Value& v) { return (int)w_field(v, WF_Wid); }
 static int w_hei(const Value& v) { return (int)w_field(v, WF_Hei); }
+// その向きの取り分（fr）。0 なら指定なし
+static double w_fr(const Value& v, bool horiz) {
+  double f = w_fieldf(v, horiz ? WF_WidFr : WF_HeiFr);
+  return f > 0 ? f : 0.0;
+}
+// float.infinity() を渡されたか（＝余りぜんぶ）。これより大きい数は float に無い
+static bool fr_is_fill(double f) { return f > 1.0e308; }
 static int w_align(const Value& v) { return (int)w_field(v, WF_Align); }
 // 指定が無ければ、いまの見た目の色を使う
 static uint32_t w_fg(const Value& v) {
@@ -1419,8 +1464,61 @@ static Box measure(const Value& v) {
   return b;
 }
 
+// --- 取り分（fr）を配る ---------------------------------------------------
+// 中に、その向きの取り分を書いた子がいるか（ui.row / ui.column だけ）
+static bool kids_want_fr(const Value& v, bool horiz) {
+  int k = w_kind(v);
+  if (k != WK_Row && k != WK_Column) return false;
+  ListObj* kids = w_kids(v);
+  for (int i = 0; i < kids->v.size(); i++) if (w_fr(kids->v[i], horiz) > 0) return true;
+  return false;
+}
+
+
+// 縦か横に並べたときの、子ひとりひとりの大きさ。
+// 取り分を書いていない子は中身の大きさのまま。**余った場所**を、書いた数の比で分ける。
+//
+//   ui.row([a.width(1.0), b.width(2.0)])   余りを 1:2 で分ける
+//   ui.row([a, b.width(float.infinity())]) a は中身の大きさ、b が残り全部
+//
+// float.infinity()（余りぜんぶ）が混じっている並びでは、ふつうの取り分は
+// 中身の大きさに戻り、余りは infinity を書いた子どうしで等分する
+static void axis_sizes(ListObj* k, bool horiz, int avail, int gap, Vec<int>& out) {
+  int n = k->v.size();
+  out.clear();
+  bool fill = false;
+  for (int i = 0; i < n; i++) if (fr_is_fill(w_fr(k->v[i], horiz))) fill = true;
+
+  double wsum = 0;
+  int fixed = n > 1 ? gap * (n - 1) : 0;
+  for (int i = 0; i < n; i++) {
+    Box b = measure(k->v[i]);
+    out.push(horiz ? b.w : b.h);
+    double f = w_fr(k->v[i], horiz);
+    if (f > 0 && (!fill || fr_is_fill(f))) wsum += fill ? 1.0 : f;
+    else fixed += out[i];              // 大きさの決まっている子。ここは配らない
+  }
+  if (wsum <= 0) return;               // 取り分を書いた子がいない
+
+  double left = avail - fixed;
+  if (left < 0) left = 0;
+  double acc = 0;
+  int done = 0;
+  for (int i = 0; i < n; i++) {
+    double f = w_fr(k->v[i], horiz);
+    if (!(f > 0 && (!fill || fr_is_fill(f)))) continue;
+    acc += fill ? 1.0 : f;
+    // ここまでに配る量から数えることで、丸めの誤差がたまらない（合計は必ず left）
+    int upto = (int)(left * acc / wsum + 0.5);
+    out[i] = upto - done;
+    done = upto;
+  }
+}
+
 // --- 描いて、触られたかを見る ---------------------------------------------
-static void place(const Value& v, int x, int y, int avail);
+// 親がくれる場所（avail_w × avail_h）の中に置く。取り分（fr）を書いた向きは、
+// 親がそこに配ったぶんがそのまま渡ってくる（下の axis_sizes）
+static void place(const Value& v, int x, int y, int avail_w, int avail_h);
 
 static void place_button(const Value& v, int x, int y, const Box& b) {
   bool over = inside(x, y, b.w, b.h);
@@ -1689,18 +1787,24 @@ static int yy_of_row(const Value& row, int cy, int ch, int h) {
   return ch > h ? cy + (ch - h) / 2 : cy;
 }
 
-static void place(const Value& v, int x, int y, int avail) {
+static void place(const Value& v, int x, int y, int avail_w, int avail_h) {
   Box b = measure(v);
   int w = b.w, h = b.h;
+  // 取り分（fr）を書いた向きは、親が配ってくれたぶんいっぱいに広がる
+  if (w_fr(v, true) > 0 && avail_w > 0) w = avail_w;
+  if (w_fr(v, false) > 0 && avail_h > 0) h = avail_h;
+  // 取り分を書いた子がいる入れ物も、置ける場所いっぱいに広がる。
+  // 中身の大きさのままだと、子に配る余りがそもそも無いため
+  if (w_wid(v) <= 0 && w_fr(v, true) <= 0 && avail_w > w && kids_want_fr(v, true)) w = avail_w;
+  if (w_hei(v) <= 0 && w_fr(v, false) <= 0 && avail_h > h && kids_want_fr(v, false)) h = avail_h;
   // 区切り線は、置ける幅いっぱいに引く
-  if (w_kind(v) == WK_Divider && w_wid(v) <= 0) w = avail;
-  if (w > avail && avail > 0 && w_wid(v) <= 0 && w_kind(v) == WK_Divider) w = avail;
+  if (w_kind(v) == WK_Divider && w_wid(v) <= 0) w = avail_w;
 
   // 寄せ方は「親がくれた幅の中で、自分をどこに置くか」
   int al = w_align(v);
-  if (avail > w) {
-    if (al == WA_Center) x += (avail - w) / 2;
-    else if (al == WA_Right) x += avail - w;
+  if (avail_w > w) {
+    if (al == WA_Center) x += (avail_w - w) / 2;
+    else if (al == WA_Right) x += avail_w - w;
   }
 
   int64_t bg = w_field(v, WF_Bg);
@@ -1727,20 +1831,25 @@ static void place(const Value& v, int x, int y, int avail) {
     }
     case WK_Column: {
       ListObj* k = w_kids(v);
+      Vec<int> hs;
+      axis_sizes(k, false, ch, gap_y(), hs);   // 縦に並べる。余りは高さの取り分へ
       int yy = cy;
       for (int i = 0; i < k->v.size(); i++) {
-        place(k->v[i], cx, yy, cw);
-        yy += measure(k->v[i]).h + gap_y();
+        place(k->v[i], cx, yy, cw, hs[i]);
+        yy += hs[i] + gap_y();
       }
       break;
     }
     case WK_Row: {
       ListObj* k = w_kids(v);
+      Vec<int> ws;
+      axis_sizes(k, true, cw, gap_x(), ws);    // 横に並べる。余りは幅の取り分へ
       int xx = cx;
       for (int i = 0; i < k->v.size(); i++) {
-        Box c = measure(k->v[i]);
-        place(k->v[i], xx, yy_of_row(v, cy, ch, c.h), c.w);
-        xx += c.w + gap_x();
+        // 高さの取り分を書いた子は、並びの高さいっぱいに伸びる
+        int hh = w_fr(k->v[i], false) > 0 ? ch : measure(k->v[i]).h;
+        place(k->v[i], xx, yy_of_row(v, cy, ch, hh), ws[i], hh);
+        xx += ws[i] + gap_x();
       }
       break;
     }
@@ -1855,13 +1964,18 @@ static NativeStatus show_at(VM& vm, Value* a, int x, int y, Value& out) {
   g_focus_next = g_focus;
   if (g_click_seen) g_focus_next.clear();   // どこも押されなければ焦点は外れる
 
-  // 使える幅は、置き始めた場所から見て、面の中に残っているぶん
+  // 使える場所は、置き始めたところから見て、面の中に残っているぶん。
+  // 高さも同じように数えるので、いちばん外側でも取り分（fr）が使える
   int avail = g_w - x * 2;
   if (avail < 1) avail = g_w > x ? g_w - x : 1;
+  int avail_h = g_h - y * 2;
+  if (avail_h < 1) avail_h = g_h > y ? g_h - y : 1;
+  Vec<int> hs;
+  axis_sizes(view, false, avail_h, gap_y(), hs);   // 縦に並べる
   int cy = y;
   for (int i = 0; i < view->v.size(); i++) {
-    place(view->v[i], x, cy, avail);
-    cy += measure(view->v[i]).h + gap_y();
+    place(view->v[i], x, cy, avail, hs[i]);
+    cy += hs[i] + gap_y();
   }
   g_focus = g_focus_next;
   // 押しは受け取った部品が使い切る。こうすると、同じ回にもう一度 ui.show() しても
