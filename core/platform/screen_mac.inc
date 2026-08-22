@@ -413,6 +413,13 @@ void text_input(bool on, const char* initial, int x, int y, int h) {
     if (!g_sink) return;
     sendb(g_sink, "setDrawsBackground:", false);
     sendb(g_sink, "setRichText:", false);
+    // 受け皿は**見えないもの**。ここを透けさせておかないと、OS の入力欄が持っている
+    // カーソルまで出てきて、こちらが描くカーソルと2本に見える。
+    // 透かすのは見た目だけなので、キーも変換も今までどおり受け取れる
+    ((void (*)(Obj, Sel, double))msgSend)(g_sink, S("setAlphaValue:"), 0.0);
+    // 新しい macOS はカーソルを別の層に描く。そちらは透明の色で消す
+    Obj clear = send(C("NSColor"), "clearColor");
+    if (clear) sendv1(g_sink, "setInsertionPointColor:", clear);
   }
   // 面の画素 → 窓の点。窓の縦は下から数えるので裏返す
   double k = (double)g.scale / (double)g.dpi;

@@ -556,6 +556,10 @@ static int g_caret = 0, g_anchor = 0;   // 文字の数
 static int g_scroll = 0;                // 左に隠している文字の数
 static bool g_dragging = false;         // なぞって選んでいる最中
 static int g_drag_anchor = 0;           // なぞり始めた文字
+// 押されたところ。焦点が移るのは次の回で、変換の受け皿（IME）もそのときできる。
+// 受け皿に位置を入れられるのはそれからなので、どこを押されたかを持ち越す
+static int g_want_caret = -1;
+static Str g_want_id;                   // その位置を入れたい入力欄の名札
 static bool g_lang_ja = true;           // 内蔵メニューの言い方
 
 // 右で押したときのメニュー
@@ -1292,15 +1296,21 @@ static int gap_x() { return ui_unit() * 3 / 4; }      // 横に並べたとき�
 static int pad_x() { return ui_unit() * 5 / 8; }      // ボタンの内側の余白（横）
 static int pad_y() { return ui_unit() * 3 / 8; }      // 同じく縦
 static int slide_w() { return ui_unit() * 12; }       // つまみの長さ
-static int field_pad_x() {                            // 入力欄の内側の余白
-  int n = ui_unit() / 3;
+// 入力欄の内側の余白。ボタンと同じにして、横に並べたときに背が揃うようにする
+static int field_pad_x() {
+  int n = pad_x();
   return n < 3 ? 3 : n;
 }
 static int field_pad_y() {
-  int n = ui_unit() / 6;
+  int n = pad_y();
   return n < 2 ? 2 : n;
 }
 static int field_w() { return ui_unit() * 15; }       // 入力欄の長さ
+// 入力欄のカーソルの太さ。字が大きいほど太くする（内蔵の 5×7 なら 1 画素）
+static int caret_w() {
+  int n = ui_unit() / 8;
+  return n < 1 ? 1 : n;
+}
 // チェックの四角
 static int box_w() {
   int h = ui_unit() - 2;
@@ -1357,6 +1367,8 @@ static void ui_reset_widgets() {
   g_menu_pick = -1;
   g_caret = g_anchor = g_scroll = g_drag_anchor = 0;
   g_dragging = false;
+  g_want_caret = -1;
+  g_want_id.clear();
   g_focus.clear();
   g_hit_id.clear();
   g_hit_text.clear();
@@ -1654,6 +1666,13 @@ static int char_at_x(const Str& s, int from, int x0, int mx) {
   return i;
 }
 
+// 文字と文字の**あいだ**が、画素のどこにあたるか。字はその枠の左端から描かれるので、
+// 境目はその1つ手前にある。ここを外すと、カーソルが右どなりの字に重なって見える
+static int edge_x(const Str& s, int from, int upto, int x0) {
+  if (upto < from) upto = from;
+  return x0 + text_px_width(sub_chars(s, from, upto - from), 1) - 1;
+}
+
 // 入力欄の中で、右で押したときに出すもの
 static void field_menu(int x, int y, const Str& id) {
   Vec<Str> items;
@@ -1669,7 +1688,8 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
   Str id = w_id(v);
   bool over = inside(x, y, b.w, b.h);
   bool focused = g_focus.size() > 0 && g_focus == id;
-  int tx = x + field_pad_x(), ty = y + field_pad_y();
+  int tx = x + field_pad_x(), ty = y + (b.h - line_h(1)) / 2;
+  if (ty < y) ty = y;
   int room = b.w - field_pad_x() * 2;
 
   // --- 押された・なぞられた ---
@@ -1678,6 +1698,10 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
     if (!focused) { g_scroll = 0; g_anchor = g_caret = utf8_len(text); }
     int i = char_at_x(text, g_scroll, tx, g_mx);
     sel_set(text, i, 0);
+    // 選んでいるところを移植層が持つ形（macOS の窓）では、受け皿は焦点が移る
+    // 次の回にできるので、いまの sel_set はまだ効かない。押されたところを
+    // 覚えておいて、受け皿ができてから入れ直す
+    if (!focused && sel_from_platform()) { g_want_caret = i; g_want_id = id; }
     g_drag_anchor = i;
     g_dragging = true;
   } else if (over && g_mpress[2]) {   // 右で押したら、切り貼りのメニュー
@@ -1713,9 +1737,15 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
   if (focused) {
     bool was_composing = g_marked.size() > 0;
     Str conf;
-    input_frame(tx, ty, b.h - field_pad_y() * 2, text, &conf, &marked);
+    input_frame(tx, ty, line_h(1), text, &conf, &marked);
     if (g_press[SKEY_Enter] && !was_composing) g_focus_next.clear();
     text = conf;
+    // 受け皿ができた最初の回。押されたところにカーソルを合わせる
+    if (g_want_caret >= 0 && g_want_id == id) {
+      sel_set(text, g_want_caret, 0);
+      g_want_caret = -1;
+      g_want_id.clear();
+    }
     if (!(conf == w_text(v))) {
       int slot = w_var(v);
       if (slot >= 0 && g_vm) {   // ref で受けた形。その var を直に書き換える
@@ -1755,14 +1785,19 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
   span(x, y + b.h - 1, b.w, edge);
   for (int i = 0; i < b.h; i++) { put(x, y + i, edge); put(x + b.w - 1, y + i, edge); }
 
+  // カーソルと帯は、字の少し上から少し下まで。字と同じところに揃える
+  int top = ty - 1, bot = ty + line_h(1);
+  if (top < y + 1) top = y + 1;
+  if (bot > y + b.h - 2) bot = y + b.h - 2;
+
   // 選んでいるところに帯を敷く
   if (focused && ln > 0) {
     int a = st < scroll ? scroll : st;
-    int ax = tx + text_px_width(sub_chars(text, scroll, a - scroll), 1);
-    int bx = tx + text_px_width(sub_chars(text, scroll, st + ln - scroll), 1);
+    int ax = edge_x(text, scroll, a, tx);
+    int bx = edge_x(text, scroll, st + ln, tx);
     if (bx > x + b.w - field_pad_x()) bx = x + b.w - field_pad_x();
     if (bx > ax)
-      for (int i = 2; i < b.h - 2; i++) span(ax, y + i, bx - ax, blend(g_bg, g_accent, 0.5));
+      for (int i = top; i <= bot; i++) span(ax, i, bx - ax, blend(g_bg, g_accent, 0.5));
   }
 
   Str shown = sub_chars(text, scroll, utf8_len(text) - scroll);
@@ -1770,14 +1805,21 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
   put_text(tx, ty, shown, 1, w_fg(v));
 
   if (focused) {
-    int cx = tx + text_px_width(sub_chars(text, scroll, caret - scroll), 1);
+    int cx = edge_x(text, scroll, caret, tx);
     if (marked.size() > 0) {   // 変換中のところに下線
       int mw = text_px_width(marked, 1);
-      span(cx, y + b.h - field_pad_y(), mw, g_accent);
+      span(cx + 1, ty + line_h(1) - 1, mw, g_accent);
       cx += mw;
     }
-    if (ln == 0 || marked.size() > 0)
-      for (int i = 2; i < b.h - 2; i++) put(cx, y + i, g_accent);
+    // カーソルは差し色で、字の大きさに合わせて太く引く。枠も差し色だが、
+    // 太さが違うので見分けがつく（枠は1画素の線）
+    if (ln == 0 || marked.size() > 0) {
+      int cw = caret_w();
+      int cx0 = cx - (cw - 1) / 2;
+      if (cx0 < x + 1) cx0 = x + 1;                          // 枠には掛けない
+      if (cx0 + cw > x + b.w - 1) cx0 = x + b.w - 1 - cw;
+      for (int i = top; i <= bot; i++) span(cx0, i, cw, g_accent);
+    }
   }
 }
 
@@ -1978,6 +2020,8 @@ static NativeStatus show_at(VM& vm, Value* a, int x, int y, Value& out) {
     cy += hs[i] + gap_y();
   }
   g_focus = g_focus_next;
+  // 押された入力欄に焦点が来なかったら、覚えておいた位置は捨てる
+  if (g_want_caret >= 0 && !(g_focus == g_want_id)) { g_want_caret = -1; g_want_id.clear(); }
   // 押しは受け取った部品が使い切る。こうすると、同じ回にもう一度 ui.show() しても
   // 二度は効かない（ui.run が、状態を変えたあとすぐ描き直すのに要る）
   if (g_hit_any) { g_mpress[0] = false; g_mpress[2] = false; }
