@@ -67,7 +67,7 @@ make web-test       # 作ったものを node で確かめる
 
 ```
 ./shark run examples/paint.shk      # 下の層。マウスで描く
-./shark run examples/counter.shk    # 上の層。部品を配列で返す
+./shark run examples/counter.shk    # 上の層。部品を組んで返す
 ```
 
 **下の層**は、画素の並び1枚（面）と、押された・動いたという出来事だけ。
@@ -85,26 +85,26 @@ while ui.poll() {
 }
 ```
 
-**上の層**は、「いまどうあるべきか」を **`Widget` の配列にして返す**だけ。
+**上の層**は、「いまどうあるべきか」を **`Widget` 1つに組んで返す**だけ。
 くり返しも描き直しも `ui.run()` が引き受けるので、**書くのは「いまの姿」1つ**で済む。
 
 ```shark
 var count = 0;                        // 状態はふつうの変数
 
-func view() -> list<Widget> {         // いまどうあるべきか
-  return [
+func view() -> Widget {               // いまどうあるべきか
+  return ui.col([                     // 縦に並べる。横は ui.row、格子は ui.grid
     ui.label(f"{count} 回"),
     ui.row([
       ui.button("ふやす", func() -> void { count += 1; }),   // 押されたときの動き
       ui.button("へらす", func() -> void { count -= 1; }),
     ]),
-  ];
+  ]);
 }
 
 ui.run("かうんた", 420, 300, view);
 ```
 
-- 呼び出しにブロックを続ける記法は言語に無いので、入れ子は**配列**で表す
+- 呼び出しにブロックを続ける記法は言語に無いので、入れ子は `ui.col` / `ui.row` / `ui.grid` に**配列**で渡して表す
 - **押されたときの動きは部品に持たせる。**名前を付けた関数を渡してもよいし、
   まとめて振り分けたいときは、名札を渡して `update(hit)` で受けてもよい
 - 部品は状態を持たない。値は呼んだ側が持って毎回渡し直すので、

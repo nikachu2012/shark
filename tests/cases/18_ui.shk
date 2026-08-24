@@ -3,8 +3,8 @@ import std.ui;
 
 // 宣言的な入り口（ui.run）に渡すもの
 var t_count = 0;
-func t_view() -> list<Widget> {
-  return [ui.label(f"n={t_count}"), ui.button("ふやす", "inc")];
+func t_view() -> Widget {
+  return ui.col([ui.label(f"n={t_count}"), ui.button("ふやす", "inc")]);
 }
 func t_update(hit: string) -> void {
   if hit == "inc" { t_count += 1; }
@@ -16,8 +16,15 @@ var t_name = "abc";
 // 部品に関数を持たせる形
 var t_acted = 0;
 func t_act() -> void { t_acted += 1; }
-func t_view2() -> list<Widget> {
-  return [ui.button("ふやす", t_act), ui.checkbox("いれる", t_act, true)];
+func t_view2() -> Widget {
+  return ui.col([ui.button("ふやす", t_act), ui.checkbox("いれる", t_act, true)]);
+}
+
+// 格子を升ごとの関数から作る形に渡すもの。呼ばれた順も見る
+var t_cells = "";
+func t_cell(r: int, c: int) -> Widget {
+  t_cells += f"{r}{c} ";
+  return ui.label(f"{r}{c}").background(ui.rgb(0, 0, 255));
 }
 // 押された部品の関数を呼ぶ（ui.run が中でしているのと同じこと）
 func t_call() -> void {
@@ -131,19 +138,19 @@ func main() -> int {
   ui.quit();
   print(ui.poll());
 
-  // --- 宣言的な層（Widget を配列にして返す）---
+  // --- 宣言的な層（Widget を組んで1つ返す）---
   ui.open(120, 80);
   ui.theme(ui.rgb(20, 20, 28), ui.rgb(230, 230, 230), ui.rgb(76, 155, 232));
   ui.clear(0);
-  var v: list<Widget> = [
+  var v: Widget = ui.col([
     ui.label("hi"),
     ui.row([ui.button("ok", "ok"), ui.button("no", "no")]),
     ui.checkbox("on", "on", true),
     ui.slider("vol", 50, 0, 100),
     ui.field("name", "abc"),
     ui.space(4),
-    ui.column([ui.label("a"), ui.label("b")]),
-  ];
+    ui.col([ui.label("a"), ui.label("b")]),
+  ]);
   var hit = ui.show(v);
   print(f"[{hit}] {ui.value()} [{ui.text_value()}]");   // 誰も触っていない
   print(ui.get(4, 4) != 0);      // 左上に文字が出ている（h の左の縦棒）
@@ -151,12 +158,12 @@ func main() -> int {
 
   ui.clear(0);
   print(hits(0, 0, 120, 80));    // 消えている
-  var hit2 = ui.show([ui.label("l")], 40, 30);   // 置く場所を決める
+  var hit2 = ui.show(ui.label("l"), 40, 30);   // 置く場所を決める
   print(f"[{hit2}] {ui.get(41, 30) != 0} {ui.get(4, 4) != 0}");
 
   // --- ref で受ける入力欄（名札は返らず、変数を直に書き換える）---
   ui.clear(0);
-  var hit3 = ui.show([ui.field(ref t_name)]);
+  var hit3 = ui.show(ui.field(ref t_name));
   print(f"[{hit3}] [{t_name}] {ui.edited()}");   // 誰も打っていないので、そのまま
   print(hits(0, 0, 120, 80) > 0);                // 枠は描かれている
 
@@ -174,25 +181,84 @@ func main() -> int {
   ui.clear(0);
   var base = ui.label("l");
   var painted = base.color(ui.rgb(255, 0, 0)).background(ui.rgb(0, 0, 255)).padding(3);
-  _ = ui.show([base], 0, 0);
+  _ = ui.show(base, 0, 0);
   print(f"{ui.get(1, 0)} {ui.get(0, 0)}");        // 既定の色 / 下地なし
   ui.clear(0);
-  _ = ui.show([painted], 0, 0);
+  _ = ui.show(painted, 0, 0);
   print(f"{ui.get(4, 3)} {ui.get(0, 0)}");        // 変えた色 / 下地は塗られている
   ui.clear(0);
-  _ = ui.show([ui.label("l").width(40).height(20).background(ui.rgb(0, 255, 0))], 0, 0);
+  _ = ui.show(ui.label("l").width(40).height(20).background(ui.rgb(0, 255, 0)), 0, 0);
   print(f"{ui.get(39, 19) != 0} {ui.get(40, 19) != 0} {ui.get(39, 20) != 0}");
 
   // --- 寄せ方と、新しい部品 ---
   ui.clear(0);
-  _ = ui.show([ui.center([ui.label("l")])], 0, 0);
+  _ = ui.show(ui.center([ui.label("l")]), 0, 0);
   print(hits(0, 0, 46, 8) + hits(54, 0, 100, 8));   // 真ん中に寄っている（両端は空）
   ui.clear(0);
-  _ = ui.show([ui.label("l").align("right")], 0, 0);
+  _ = ui.show(ui.label("l").align("right"), 0, 0);
   print(hits(0, 0, 90, 8));                        // 右に寄っている
   ui.clear(0);
-  _ = ui.show([ui.divider()], 0, 0);
+  _ = ui.show(ui.divider(), 0, 0);
   print(hits(0, 0, 100, 20));                      // 幅いっぱいの線
+
+  // --- いちばん外の入れ物は、寄せていなければ置ける幅いっぱい（区切り線と寄せは面の幅を見る）---
+  ui.clear(0);
+  _ = ui.show(ui.col([ui.divider(), ui.label("l").align("right")]), 0, 0);
+  print(f"{ui.get(99, 2) != 0} {hits(0, 6, 80, 20)} {hits(90, 6, 100, 20) > 0}");
+  ui.clear(0);
+  _ = ui.show(ui.col([ui.label("l")]).align("right"), 0, 0);   // 寄せた入れ物は、かたまりで寄る
+  print(f"{hits(0, 0, 90, 8)} {hits(90, 0, 100, 8) > 0}");
+
+  // --- 中の入れ物は、中身に合わせて伸び縮みする ---
+  ui.clear(0);
+  var green = ui.rgb(0, 255, 0);
+  _ = ui.show(ui.col([
+    ui.row([ui.label("ab")]).background(green),         // 下地は中身の幅だけ
+    ui.col([ui.label("wxyz"), ui.divider()]),           // 中の区切り線も、中の col の幅だけ
+    ui.divider(),                                       // いちばん外の子は、面の幅いっぱい
+  ]), 0, 0);
+  var tw2 = ui.text_width("ab");
+  var tw4 = ui.text_width("wxyz");
+  print(f"{ui.get(tw2 - 1, 0) != 0} {ui.get(tw2, 0)} {ui.get(99, 0)}");
+  print(f"{hits(tw4, 20, 100, 30)} {hits(0, 20, tw4, 30) > 0} {hits(90, 30, 100, 40) > 0}");
+
+  // --- 格子（列の幅はいちばん広い升に、行の高さはいちばん高い升に揃う）---
+  ui.clear(0);
+  var blue = ui.rgb(0, 0, 255);
+  _ = ui.show(ui.grid(2, [ui.label("a").background(red), ui.label("b").background(blue),
+                          ui.label("ccc").background(red), ui.label("d").background(blue)]), 0, 0);
+  var cw = ui.text_width("ccc");
+  print(f"{cw} {ui.get(0, 0)} {ui.get(cw + 11, 3)} {ui.get(0, 12)} {ui.get(cw + 6, 12)}");
+  ui.clear(0);
+  // 升に取り分を書くと、その列が余りを分け合う（幅 100、間 6 → 47 ずつ）
+  _ = ui.show(ui.grid(2, [ui.label("a").width(1.0).background(red), ui.label("b").width(1.0).background(blue),
+                          ui.label("c"), ui.label("d")]), 0, 0);
+  print(f"{ui.get(46, 0)} {ui.get(47, 0)} {ui.get(99, 0)}");
+  // 取り分は Widget.width(float) / height(float)。int の形とは本体が別で、
+  // 保存したバイトコード（単一バイナリ）から読み戻しても float の本体につながること
+  ui.clear(0);
+  _ = ui.show(ui.col([ui.label("a").width(1.0).height(1.0).background(red),
+                      ui.label("b").width(1.0).height(1.0).background(blue)]), 0, 0);
+  print(f"{ui.get(99, 27)} {ui.get(0, 28)} {ui.get(99, 59)}");
+  ui.clear(0);
+  _ = ui.show(ui.grid(3, 2, t_cell), 0, 0);        // 升ごとの関数から作る（3 行 2 列）
+  print(f"[{t_cells}] {ui.get(0, 24) != 0} {ui.get(0, 36) != 0}");
+  ui.clear(0);
+  _ = ui.show(ui.grid(3, [ui.label("a"), ui.label("b"), ui.label("c"), ui.label("d")]), 0, 0);
+  print(hits(0, 0, 100, 60) > 0);                  // 列の数で割り切れなくてもよい
+  ui.clear(0);
+  _ = ui.show(ui.grid(3, []), 0, 0);
+  print(hits(0, 0, 100, 60));                      // 空なら何も描かない
+
+  // --- 取り分は、入れ物が大きさを決めていなければ、入れ物ごしに外まで効く ---
+  ui.clear(0);
+  var tall = ui.label("b").height(float.infinity()).background(blue);
+  _ = ui.show(ui.col([ui.label("a"), ui.row([ui.label("x"), tall])]), 0, 0);
+  print(f"{ui.get(12, 59)} {ui.get(0, 59)}");            // b は下まで伸びる。x はそのまま
+  ui.clear(0);
+  _ = ui.show(ui.col([ui.label("a"),
+                      ui.row([ui.label("x"), tall]).height(20).background(green)]), 0, 0);
+  print(f"{ui.get(12, 31)} {hits(0, 32, 100, 60)}");     // 画素で決めた入れ物で、そこから下へは効かない
 
   // --- 文字入力（画面が無いので、変換は任せられない）---
   ui.open(120, 40);
@@ -214,7 +280,7 @@ func main() -> int {
   // メニューは、いちばん上に描かれる
   ui.menu(0, 0, ["あ"]);
   ui.clear(0);
-  _ = ui.show([ui.label("l")], 0, 0);
+  _ = ui.show(ui.label("l"), 0, 0);
   print(hits(0, 0, 160, 30) > 4);         // 部品より上にメニューが出ている
   ui.menu_close();
 

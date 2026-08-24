@@ -3,9 +3,9 @@ import std.ui;
 
 var name = "";
 
-func view() -> list<Widget> {
+func view() -> Widget {
   var tmp = "";
-  return [ui.field(ref tmp), ui.field(name)];   // E0307 / E0301
+  return ui.col([ui.field(ref tmp), ui.field(name)]);   // E0307 / E0301
 }
 
 func main() -> int {

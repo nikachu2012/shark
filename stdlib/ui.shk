@@ -5,13 +5,13 @@
 /// 画面に描く。点・線・四角・円・文字と、キーとマウス。
 ///
 /// 層が2つある。**下の層**は画素の並び（面）1枚と、押された・動いたという出来事だけ。
-/// **上の層**は、部品を `Widget` の配列にして返すと、そのとおりに描いてくれる。
+/// **上の層**は、部品を組んで `Widget` 1つにして返すと、そのとおりに描いてくれる。
 /// 混ぜて使ってよい。上の層は下の層で書かれている。
 ///
 /// 動かし方は、どちらの層でも毎回おなじ3つのくり返しになる。
 ///
 ///   1. ui.poll()      押された・動いた を取り込む
-///   2. 描く            ui.clear / ui.fill_rect / ui.text … か、ui.show(部品の配列)
+///   2. 描く            ui.clear / ui.fill_rect / ui.text … か、ui.show(部品)
 ///   3. ui.present()   描いたものを画面に出す
 ///
 /// 画面を持たない機種でも、そのまま動く。描く先が**見えない面**になるだけで、
@@ -648,7 +648,7 @@ func font_name() -> string;
 ///
 /// 書くのは2つだけ。状態はふつうの変数で持つ。
 ///
-///   view()        いまどうあるべきか（部品の配列）を返す
+///   view()        いまどうあるべきか（部品1つ。並べるなら ui.col などに入れる）を返す
 ///   update(hit)   押されたものの名札を受け取って、状態を変える
 ///
 /// 中でしていること。
@@ -674,25 +674,26 @@ func font_name() -> string;
 ///
 /// 例:
 ///   var count = 0;
-///   func view() -> list<Widget> {
-///     return [ui.label(f"{count} 回"), ui.button("ふやす", "inc")];
+///   func view() -> Widget {
+///     return ui.col([ui.label(f"{count} 回"), ui.button("ふやす", "inc")]);
 ///   }
 ///   func update(hit: string) -> void {
 ///     if hit == "inc" { count += 1; }
 ///   }
 ///   ui.run("かうんた", 200, 100, view, update);
 ///   print(count);   // 0
-func run(title: string, width: int, height: int, view: func() -> list<Widget>, update: func(string) -> void) -> void;
-func run(title: string, width: int, height: int, view: func() -> list<Widget>) -> void;
+func run(title: string, width: int, height: int, view: func() -> Widget, update: func(string) -> void) -> void;
+func run(title: string, width: int, height: int, view: func() -> Widget) -> void;
 
 /// 文字を出す部品。
 ///
 /// 部品は `Widget` という値で、作っただけでは何も起きない。
-/// 配列に入れて ui.show() に渡すと、そこで初めて描かれる。
+/// ui.show() に渡すと、そこで初めて描かれる。並べるときは
+/// ui.col / ui.row / ui.grid に配列で入れて、1つにする。
 ///
 /// 例:
 ///   ui.open(80, 40);
-///   _ = ui.show([ui.label("こんにちは")]);
+///   _ = ui.show(ui.label("こんにちは"));
 ///   print(ui.get(5, 4) != 0);   // true
 func label(text: string) -> Widget;
 
@@ -715,7 +716,7 @@ func label(text: string) -> Widget;
 /// 例:
 ///   var n = 0;
 ///   ui.open(120, 40);
-///   _ = ui.show([ui.button("ふやす", func() -> void { n += 1; })]);
+///   _ = ui.show(ui.button("ふやす", func() -> void { n += 1; }));
 ///   print(n);   // 0（まだ押していない）
 func button(label: string, id: string) -> Widget;
 func button(label: string, action: func() -> void) -> Widget;
@@ -735,7 +736,7 @@ func button(label: string, action: func() -> void) -> Widget;
 /// 例:
 ///   ui.open(80, 40);
 ///   var on = true;
-///   var hit = ui.show([ui.checkbox("音を出す", "sound", on)]);
+///   var hit = ui.show(ui.checkbox("音を出す", "sound", on));
 ///   if hit == "sound" { on = ui.value() == 1; }
 ///   print(on);   // true
 func checkbox(label: string, id: string, on: bool) -> Widget;
@@ -754,7 +755,7 @@ func checkbox(label: string, action: func() -> void, on: bool) -> Widget;
 /// 例:
 ///   ui.open(120, 40);
 ///   var vol = 40;
-///   var hit = ui.show([ui.slider("vol", vol, 0, 100)]);
+///   var hit = ui.show(ui.slider("vol", vol, 0, 100));
 ///   if hit == "vol" { vol = ui.value(); }
 ///   print(vol);   // 40
 func slider(id: string, value: int, lo: int, hi: int) -> Widget;
@@ -798,7 +799,7 @@ func slider(action: func() -> void, value: int, lo: int, hi: int) -> Widget;
 ///   ui.open(140, 60);
 ///   var name = "さめ";
 ///   var nick = "しゃち";
-///   var hit = ui.show([ui.field(ref name), ui.field("nick", nick)]);
+///   var hit = ui.show(ui.col([ui.field(ref name), ui.field("nick", nick)]));
 ///   if hit == "nick" { nick = ui.text_value(); }
 ///   print(f"[{hit}] {name} {nick}");   // [] さめ しゃち
 func field(ref value: string) -> Widget;
@@ -808,39 +809,82 @@ func field(id: string, value: string) -> Widget;
 ///
 /// 例:
 ///   ui.open(80, 60);
-///   _ = ui.show([ui.label("上"), ui.space(20), ui.label("下")]);
+///   _ = ui.show(ui.col([ui.label("上"), ui.space(20), ui.label("下")]));
 ///   print(ui.height());   // 60
 func space(h: int) -> Widget;
 
 /// 中身を縦に並べる部品。
 ///
-/// ui.show() に渡す配列は、そもそも縦に並ぶ。これを使うのは、
-/// 横並び（ui.row）の中に縦の並びを入れたいときなど。
+/// 部品を並べるいちばんふつうの入れ物で、view() が返す1つは、たいていこれになる。
+/// 横並び（ui.row）の中に縦の並びを入れるのにも使う。
+///
+/// 大きさは**中身に合わせて伸び縮みする**。幅はいちばん広い子、高さは子の合計
+/// （ui.row はその逆）。だから .background() も中身のぶんだけ塗られる。
+/// 広げたいときは、取り分（.width(1.0) など）か画素（.width(n)）を書く。
+/// 中の部品に書いた取り分も、入れ物ごしに効く（下の width / height）。
+///
+/// **いちばん外（ui.show に渡した部品）だけ**は、寄せていなければ置ける幅
+/// いっぱいに広がる。だからいちばん外の並びでは、区切り線（ui.divider）や
+/// 寄せ（.align）が面の幅を見る。ui.row も ui.grid も同じ。
 ///
 /// 例:
 ///   ui.open(120, 60);
-///   _ = ui.show([ui.row([
-///     ui.column([ui.label("左上"), ui.label("左下")]),
-///     ui.column([ui.label("右上"), ui.label("右下")]),
-///   ])]);
+///   _ = ui.show(ui.row([
+///     ui.col([ui.label("左上"), ui.label("左下")]),
+///     ui.col([ui.label("右上"), ui.label("右下")]),
+///   ]));
 ///   print(ui.get(5, 4) != 0);   // true
-func column(children: list<Widget>) -> Widget;
+func col(children: list<Widget>) -> Widget;
 
 /// 中身を横に並べる部品。
 ///
 /// 例:
 ///   ui.open(160, 40);
-///   _ = ui.show([ui.row([ui.button("はい", "yes"), ui.button("いいえ", "no")])]);
+///   _ = ui.show(ui.row([ui.button("はい", "yes"), ui.button("いいえ", "no")]));
 ///   print(ui.width());   // 160
 func row(children: list<Widget>) -> Widget;
 
+/// 格子。cols 列に、左上から右へ、いっぱいになれば次の行へと升を詰める。
+///
+/// 列の幅はその列でいちばん広い升、行の高さはその行でいちばん高い升に揃う。
+/// だから升の大きさがまちまちでも、縦の線が通る。升の数が列の数で割り切れなくても
+/// よい（最後の行が途中で終わる）。
+///
+/// 升に取り分（`.width(1.0)` など）を書くと、その列（行）の取り分になり、
+/// 余りを分け合う。
+///
+/// **升ごとの関数から作る形**もある。cell(行, 列) が返す部品を、同じ順に詰める。
+/// 行も列も 0 から数える。
+///
+/// 引数:
+///   cols    列の数（1 以上）
+///   cells   升に入れる部品。左上から右へ
+///   rows    行の数（関数から作る形）
+///   cell    升を作る関数。行と列を受け取る
+///
+/// 例:
+///   ui.open(100, 60);
+///   var red = ui.rgb(255, 0, 0);
+///   var blue = ui.rgb(0, 0, 255);
+///   _ = ui.show(ui.grid(2, [ui.label("a").background(red), ui.label("b").background(blue),
+///                           ui.label("ccc").background(red), ui.label("d").background(blue)]), 0, 0);
+///   var w = ui.text_width("ccc");                  // 左の列は "ccc" の幅に揃う
+///   print(f"{ui.get(0, 0)} {ui.get(w + 11, 3)}");   // 16711680 255
+///
+///   func cell(r: int, c: int) -> Widget { return ui.button(f"{r},{c}", f"{r}-{c}"); }
+///   ui.clear(0);
+///   _ = ui.show(ui.grid(3, 3, cell));
+///   print(f"{ui.get(5, 5) != 0} {ui.get(5, 59) != 0}");   // true false
+func grid(cols: int, cells: list<Widget>) -> Widget;
+func grid(rows: int, cols: int, cell: func(int, int) -> Widget) -> Widget;
+
 /// 中身をまとめて、置ける幅の真ん中に置く。
 ///
-/// `ui.column(中身).align("center")` と同じ。中身どうしの並びは変わらない。
+/// `ui.col(中身).align("center")` と同じ。中身どうしの並びは変わらない。
 ///
 /// 例:
 ///   ui.open(120, 40);
-///   _ = ui.show([ui.center([ui.label("まんなか")])], 0, 0);
+///   _ = ui.show(ui.center([ui.label("まんなか")]), 0, 0);
 ///   print(ui.width());   // 120
 func center(children: list<Widget>) -> Widget;
 
@@ -848,12 +892,13 @@ func center(children: list<Widget>) -> Widget;
 ///
 /// 例:
 ///   ui.open(80, 40);
-///   _ = ui.show([ui.label("上"), ui.divider(), ui.label("下")], 0, 0);
+///   _ = ui.show(ui.col([ui.label("上"), ui.divider(), ui.label("下")]), 0, 0);
 ///   print(ui.get(0, 10) != 0 || ui.get(40, 10) != 0);   // true
 func divider() -> Widget;
 
-/// 部品の配列を描いて、押されたものの名札を返す。
+/// 部品を描いて、押されたものの名札を返す。
 ///
+/// 渡すのは部品1つ。いくつも並べるときは ui.col / ui.row / ui.grid に入れて1つにする。
 /// 誰も押していなければ空の文字。値を持つ部品（checkbox、slider、field）なら、
 /// 新しい値は ui.value() か ui.text_value() で取れる。
 ///
@@ -863,17 +908,17 @@ func divider() -> Widget;
 /// 置く場所は左上から (4, 4)。x と y を渡すとそこに置く。
 ///
 /// 引数:
-///   view    部品の配列
+///   view    部品
 ///   x, y    置く場所（省くと 4, 4）
 ///
 /// 例:
 ///   ui.open(120, 60);
 ///   var count = 0;
-///   var hit = ui.show([ui.label(f"{count} 回"), ui.button("ふやす", "inc")]);
+///   var hit = ui.show(ui.col([ui.label(f"{count} 回"), ui.button("ふやす", "inc")]));
 ///   if hit == "inc" { count += 1; }
 ///   print(count);   // 0
-func show(view: list<Widget>) -> string;
-func show(view: list<Widget>, x: int, y: int) -> string;
+func show(view: Widget) -> string;
+func show(view: Widget, x: int, y: int) -> string;
 
 /// 直前の ui.show() で、ref で渡した変数が書き換わったか。
 ///
@@ -883,7 +928,7 @@ func show(view: list<Widget>, x: int, y: int) -> string;
 /// 例:
 ///   ui.open(140, 40);
 ///   var name = "さめ";
-///   _ = ui.show([ui.field(ref name)]);
+///   _ = ui.show(ui.field(ref name));
 ///   print(ui.edited());   // false（何も打たれていない）
 func edited() -> bool;
 
@@ -923,7 +968,7 @@ func action() -> func() -> void;
 /// 例:
 ///   ui.open(120, 40);
 ///   var vol = 30;
-///   if ui.show([ui.slider("vol", vol, 0, 100)]) == "vol" { vol = ui.value(); }
+///   if ui.show(ui.slider("vol", vol, 0, 100)) == "vol" { vol = ui.value(); }
 ///   print(vol);   // 30
 func value() -> int;
 
@@ -932,7 +977,7 @@ func value() -> int;
 /// 例:
 ///   ui.open(140, 40);
 ///   var name = "";
-///   if ui.show([ui.field("name", name)]) == "name" { name = ui.text_value(); }
+///   if ui.show(ui.field("name", name)) == "name" { name = ui.text_value(); }
 ///   print(f"[{name}]");   // []
 func text_value() -> string;
 
@@ -948,14 +993,14 @@ func text_value() -> string;
 /// 例:
 ///   ui.open(80, 40);
 ///   ui.theme(ui.rgb(20, 20, 28), ui.rgb(230, 230, 230), ui.rgb(76, 155, 232));
-///   _ = ui.show([ui.button("押す", "go")]);
+///   _ = ui.show(ui.button("押す", "go"));
 ///   print(ui.get(5, 5) != 0);   // true
 func theme(bg: int, fg: int, accent: int) -> void;
 
 
 // ------------------------------------------------------------ 部品の見た目
 
-/// 画面に出す部品。ui.label() などで作り、配列に入れて ui.show() に渡す。
+/// 画面に出す部品。ui.label() などで作り、ui.col / ui.row / ui.grid で組んで ui.show() に渡す。
 ///
 /// 見た目を変えるメソッドは、**変えたものを返す**（元は変わらない）。
 /// だから鎖のようにつないで書ける。
@@ -963,14 +1008,14 @@ func theme(bg: int, fg: int, accent: int) -> void;
 /// 例:
 ///   ui.open(120, 60);
 ///   var w = ui.label("さめ").color(ui.rgb(255, 200, 0)).padding(4);
-///   _ = ui.show([w], 0, 0);
+///   _ = ui.show(w, 0, 0);
 ///   print(ui.width());   // 120
 class Widget {
   /// 文字の色を変える。
   ///
   /// 例:
   ///   ui.open(80, 40);
-  ///   _ = ui.show([ui.label("l").color(ui.rgb(255, 0, 0))], 0, 0);
+  ///   _ = ui.show(ui.label("l").color(ui.rgb(255, 0, 0)), 0, 0);
   ///   print(ui.get(1, 0));   // 16711680
   func color(c: int) -> Widget;
 
@@ -978,7 +1023,7 @@ class Widget {
   ///
   /// 例:
   ///   ui.open(80, 40);
-  ///   _ = ui.show([ui.label("l").background(ui.rgb(0, 0, 255))], 0, 0);
+  ///   _ = ui.show(ui.label("l").background(ui.rgb(0, 0, 255)), 0, 0);
   ///   print(ui.get(0, 0));   // 255
   func background(c: int) -> Widget;
 
@@ -986,7 +1031,7 @@ class Widget {
   ///
   /// 例:
   ///   ui.open(80, 40);
-  ///   _ = ui.show([ui.label("l").padding(4).background(ui.rgb(0, 0, 255))], 0, 0);
+  ///   _ = ui.show(ui.label("l").padding(4).background(ui.rgb(0, 0, 255)), 0, 0);
   ///   print(ui.get(0, 0));   // 255
   func padding(n: int) -> Widget;
 
@@ -1000,12 +1045,12 @@ class Widget {
   ///
   /// 例:
   ///   ui.open(80, 40);
-  ///   _ = ui.show([ui.label("l").width(50).background(ui.rgb(0, 255, 0))], 0, 0);
+  ///   _ = ui.show(ui.label("l").width(50).background(ui.rgb(0, 255, 0)), 0, 0);
   ///   print(f"{ui.get(49, 0) != 0} {ui.get(50, 0) != 0}");   // true false
   ///   ui.clear(0);
   ///   // 幅 80 を 1:1 で分ける（間は 6 画素）
-  ///   _ = ui.show([ui.row([ui.label("a").width(1.0).background(ui.rgb(255, 0, 0)),
-  ///                        ui.label("b").width(1.0).background(ui.rgb(0, 0, 255))])], 0, 0);
+  ///   _ = ui.show(ui.row([ui.label("a").width(1.0).background(ui.rgb(255, 0, 0)),
+  ///                       ui.label("b").width(1.0).background(ui.rgb(0, 0, 255))]), 0, 0);
   ///   print(f"{ui.get(36, 0)} {ui.get(79, 0)}");   // 16711680 255
   func width(n: int) -> Widget;
   func width(fr: float) -> Widget;
@@ -1015,15 +1060,37 @@ class Widget {
   /// 取り分の分け方は width と同じで、こちらは縦に並んだ仲間との比。
   /// 横に並んでいる部品に書くと、その並びの高さいっぱいになる。
   ///
+  /// 取り分は**親がくれた場所の余り**を分けるもの。入れ物（ui.row / ui.col / ui.grid）が
+  /// その向きの大きさを決めていなければ、中の部品の取り分は**入れ物ごしに外まで効く**。
+  /// だから row の中のボタンに書くだけで、その row が col の余りを取り、ボタンが下まで伸びる。
+  /// 入れ物に画素の大きさ（.height(n)）か入れ物自身の取り分を書くと、そちらが勝つ。
+  ///
+  /// ```
+  /// ui.col([
+  ///   ui.label("上"),
+  ///   ui.row([ui.button("a", "a"),
+  ///           ui.button("b", "b").height(float.infinity())]),   // ← row も一緒に、余りまで広がる
+  /// ])
+  /// ```
+  ///
   /// 例:
   ///   ui.open(80, 40);
-  ///   _ = ui.show([ui.label("l").height(20).background(ui.rgb(0, 255, 0))], 0, 0);
+  ///   _ = ui.show(ui.label("l").height(20).background(ui.rgb(0, 255, 0)), 0, 0);
   ///   print(f"{ui.get(0, 19) != 0} {ui.get(0, 20) != 0}");   // true false
   ///   ui.clear(0);
   ///   // 高さ 40 を 1:1 で分ける（間は 4 画素）
-  ///   _ = ui.show([ui.label("a").width(1.0).height(1.0).background(ui.rgb(255, 0, 0)),
-  ///                ui.label("b").width(1.0).height(1.0).background(ui.rgb(0, 0, 255))], 0, 0);
+  ///   _ = ui.show(ui.col([ui.label("a").width(1.0).height(1.0).background(ui.rgb(255, 0, 0)),
+  ///                       ui.label("b").width(1.0).height(1.0).background(ui.rgb(0, 0, 255))]), 0, 0);
   ///   print(f"{ui.get(0, 17)} {ui.get(0, 39)}");   // 16711680 255
+  ///   ui.clear(0);
+  ///   // row の中の b に書くだけで、row が col の余りを取り、b が下まで伸びる
+  ///   var b = ui.label("b").height(float.infinity()).background(ui.rgb(0, 0, 255));
+  ///   _ = ui.show(ui.col([ui.label("a"), ui.row([ui.label("x"), b])]), 0, 0);
+  ///   print(ui.get(12, 39));   // 255
+  ///   ui.clear(0);
+  ///   // 入れ物が大きさを決めていれば、そこで止まる（row は 12 のまま）
+  ///   _ = ui.show(ui.col([ui.label("a"), ui.row([ui.label("x"), b]).height(12)]), 0, 0);
+  ///   print(f"{ui.get(12, 23) != 0} {ui.get(12, 39)}");   // true 0
   func height(n: int) -> Widget;
   func height(fr: float) -> Widget;
 
@@ -1031,7 +1098,7 @@ class Widget {
   ///
   /// 例:
   ///   ui.open(80, 40);
-  ///   _ = ui.show([ui.label("l").align("right")], 0, 0);
+  ///   _ = ui.show(ui.label("l").align("right"), 0, 0);
   ///   print(ui.get(1, 1) != 0);   // false
   func align(a: string) -> Widget;
 }

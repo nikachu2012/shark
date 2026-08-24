@@ -126,7 +126,7 @@ frontend/
 | `std.json` | あり | |
 | `std.os` | あり | `os.run` は移植層が持つときだけ |
 | `std.crypto` | あり | ハッシュ（SHA-256/512、SHA-1、MD5、HMAC）は自前。乱数のもとは移植層から取り、真の乱数か安全な乱数かを `crypto.source()` が返す |
-| `std.ui` | あり | 描くところは全部自前（点・線・円・5×7 の字形）。宣言的な層（`Widget` の配列）も同じ層の上に載せてある。画面は移植層の `PlatformScreen` で、`shark` コマンドは窓か端末に出す（下）。日本語は FreeType があれば出せる（任意。下） |
+| `std.ui` | あり | 描くところは全部自前（点・線・円・5×7 の字形）。宣言的な層（`Widget` を `ui.col` / `ui.row` / `ui.grid` で組む）も同じ層の上に載せてある。画面は移植層の `PlatformScreen` で、`shark` コマンドは窓か端末に出す（下）。日本語は FreeType があれば出せる（任意。下） |
 | `std.test` | あり | 1件ずつ順に走らせる |
 
 ### 実装での細かい決めごと
@@ -159,7 +159,7 @@ frontend/
 | 削ったもの | 理由・代わり |
 |---|---|
 | `std.net` `std.http` | 移植層のノンブロッキング通信から作る必要がある。`import` すると E0501 が返る |
-| `ui.window(...) { }` の記法 | 呼び出しにブロックを続ける記法が言語に無い。宣言的な UI は**部品の配列を返す形**で入れてある（[spec/library/ui.md](../spec/library/ui.md)、[ui-declarative.md](../spec/library/ui-declarative.md)） |
+| `ui.window(...) { }` の記法 | 呼び出しにブロックを続ける記法が言語に無い。宣言的な UI は**部品を入れ子にして1つ返す形**（入れ子は配列で渡す）で入れてある（[spec/library/ui.md](../spec/library/ui.md)、[ui-declarative.md](../spec/library/ui-declarative.md)） |
 | 内蔵の字形での日本語 | 内蔵は ASCII だけ。日本語は FreeType（任意の外部ライブラリ）で出す |
 | 実行時コンパイル（JIT） | 仕様でも任意機能。いまは常に仮想マシンで実行する。結果は変わらない |
 | `shark fmt` | 整形の規則がまだ決まっていない（[spec/open-questions.md](../spec/open-questions.md)） |
@@ -388,7 +388,13 @@ Windows では窓も端末も持たない（`0`）。見えない面には描け
 
 `Widget` は処理系が持つクラス（`Error` と同じ扱い。`core/check.cpp` の
 `make_builtin_classes`）で、中身は書く人からは見えない。作るのは `ui.label()` などで、
-`ui.show()` が配列をたどって、測って・描いて・触られたかを見る。状態は持たない。
+`ui.show()` が部品の木をたどって、測って・描いて・触られたかを見る。状態は持たない。
+入れ物は `ui.col` / `ui.row` / `ui.grid`。格子は列ごとの幅と行ごとの高さを先に測り
+（`grid_axes`）、余りは取り分（fr）で配る（`distribute`。縦横の並びと同じ関数）。
+取り分は、入れ物がその向きの大きさを決めていなければ**中身から受け継ぐ**（`eff_fr`）。
+row の中の部品に書いた `float.infinity()` で、row ごと外の余りまで広がるのはこのため。
+升ごとの関数から作る `ui.grid(行, 列, cell)` は Shark で書いてある
+（`stdlib/prelude_ui.shk`）。ネイティブからは Shark の関数を呼び戻せないため。
 
 型検査がクラスを作るのは処理系を作った後なので、関数の表には**名前だけ同じ仮の型**で
 登録しておき、クラスができたところで差し替える（`ui_bind_widget_class`）。
@@ -561,7 +567,8 @@ panic: メモリを使いすぎました
   登録は `register_modules()` 1か所にまとめ、**表の指紋**をファイルに入れて突き合わせる。
   合わなければ読まずに止める
 - `Error.message` のような処理系が持つメソッドだけは関数ポインタを書けないので、
-  名前で保存し、読むときに `builtin_native_method()` でつなぎ直す
+  名前で保存し、読むときに `builtin_native_method()` でつなぎ直す。引く鍵は名前と**引数の型**
+  （`Widget.width` は int（画素）と float（取り分）で本体が別）
 - 指紋は名前と引数の数だけでなく、**引数と戻り値の型・`ref` で受けるか**まで見る。
   型だけ変えたホスト関数と古いバイトコードが、そのままつながらないようにするため
 

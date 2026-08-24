@@ -18,16 +18,17 @@ var sound = true;
 var volume = 60;
 var name = "さめ";
 
-// いまどうあるべきか。押されたときの動きは、その場に書く
-func view() -> list<Widget> {
-  return [
+// いまどうあるべきか（部品を ui.col で縦に組んで、1つ返す）。
+// 押されたときの動きは、その場に書く
+func view() -> Widget {
+  return ui.col([
     ui.center([ui.label("かうんた").color(ui.rgb(120, 200, 255))]),
     ui.divider(),
     ui.label(f"{count} 回おした"),
     ui.row([
       ui.button("ふやす", func() -> void { count += 1; }),
       ui.button("へらす", func() -> void { count -= 1; }),
-      ui.button("もどす", func() -> void { count = 0; }),
+      ui.button("もどす", func() -> void { count = 0; }).height(float.infinity()),
     ]),
     ui.space(4),
     ui.checkbox("音を出す", func() -> void { sound = ui.value() == 1; }, sound),
@@ -42,7 +43,7 @@ func view() -> list<Widget> {
     ui.label(f"こんにちは、{name} さん"),
     ui.space(4),
     ui.button("おわる", func() -> void { ui.quit(); }).align("right"),
-  ];
+  ]);
 }
 
 func main() -> int {

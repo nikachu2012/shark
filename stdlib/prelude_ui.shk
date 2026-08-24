@@ -11,13 +11,16 @@
 // 入力欄は ref で変数を渡すと、打たれるたびにその変数が書き換わる
 //   ui.field(ref name)
 //
+// 格子を升ごとの関数から作る形（ui.grid(rows, cols, cell)）もここにある。
+// 処理系（ネイティブ）からは Shark の関数を呼び戻せないので、関数を受ける形は Shark で書く。
+//
 // 状態は書く人がふつうの変数で持つ。ここは覚えない。
 // 処理系はこのファイルを埋め込んで持ち、std.ui を入れたときだけ読み込む
 // （core/shark.cpp）。core/prelude.h は tools/prelude.py がここから作る。
 import std.ui;
 
 public func run(title: string, width: int, height: int,
-                view: func() -> list<Widget>,
+                view: func() -> Widget,
                 update: func(string) -> void) -> void {
   var k = ui.scale();
   ui.open(title, width * k, height * k);
@@ -56,9 +59,21 @@ public func run(title: string, width: int, height: int,
 
 // 部品に関数を持たせる書き方。update は要らない
 public func run(title: string, width: int, height: int,
-                view: func() -> list<Widget>) -> void {
+                view: func() -> Widget) -> void {
   run(title, width, height, view, __ui_ignore);
 }
 
 func __ui_ignore(hit: string) -> void {
+}
+
+// 格子を、升ごとの関数から作る。cell(行, 列) が返す部品を左上から右へ詰める。
+// 並べ方は ui.grid(cols, cells) と同じ（core/lib/ui.cpp）
+public func grid(rows: int, cols: int, cell: func(int, int) -> Widget) -> Widget {
+  var cells: list<Widget> = [];
+  for var r in range(rows) {
+    for var c in range(cols) {
+      cells.push(cell(r, c));
+    }
+  }
+  return ui.grid(cols, cells);
 }

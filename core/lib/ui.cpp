@@ -1061,11 +1061,12 @@ static NativeStatus u_font_name(VM& vm, Value* a, int n, Value& out) {
 }
 
 // ------------------------------------------------------------ 宣言的な層
-// 「今どうあるべきか」を **Widget の配列にして返す**（spec/library/ui.md）。
-// 呼び出しにブロックを続ける記法は言語に無いので、入れ子は配列で表す。
+// 「今どうあるべきか」を **Widget 1つにして返す**（spec/library/ui.md）。
+// 呼び出しにブロックを続ける記法は言語に無いので、入れ子は ui.col / ui.row / ui.grid に
+// 配列で渡して表す。
 //
-//   func view(count: int) -> list<Widget> {
-//     return [ui.label(f"{count} 回"), ui.button("押す", "inc")];
+//   func view(count: int) -> Widget {
+//     return ui.col([ui.label(f"{count} 回"), ui.button("押す", "inc")]);
 //   }
 //   var hit = ui.show(view(count));     // 描いて、押されたものの名札が返る
 //
@@ -1073,7 +1074,7 @@ static NativeStatus u_font_name(VM& vm, Value* a, int n, Value& out) {
 // 値は呼んだ側が持つ。だから「今の状態」と「画面」がずれない。
 enum WidgetKind {
   WK_Label = 0, WK_Button, WK_Checkbox, WK_Slider, WK_Field, WK_Space, WK_Column, WK_Row,
-  WK_Divider
+  WK_Divider, WK_Grid
 };
 enum WidgetField {
   WF_Kind = 0, WF_Text, WF_Id, WF_A, WF_B, WF_C, WF_Kids,
@@ -1417,6 +1418,7 @@ static bool inside(int x, int y, int w, int h) {
 struct Box { int w, h; };
 
 static Box measure(const Value& v);
+static void grid_axes(const Value& v, int avail_w, int avail_h, Vec<int>& cw, Vec<int>& rh);
 
 // 中身そのものの大きさ（余白も指定も入れない）
 static Box intrinsic(const Value& v) {
@@ -1460,6 +1462,13 @@ static Box intrinsic(const Value& v) {
       }
       break;
     }
+    case WK_Grid: {
+      Vec<int> cw, rh;
+      grid_axes(v, 0, 0, cw, rh);
+      for (int i = 0; i < cw.size(); i++) b.w += cw[i] + (i + 1 < cw.size() ? gap_x() : 0);
+      for (int i = 0; i < rh.size(); i++) b.h += rh[i] + (i + 1 < rh.size() ? gap_y() : 0);
+      break;
+    }
     default: break;
   }
   return b;
@@ -1477,60 +1486,141 @@ static Box measure(const Value& v) {
 }
 
 // --- 取り分（fr）を配る ---------------------------------------------------
-// 中に、その向きの取り分を書いた子がいるか（ui.row / ui.column だけ）
-static bool kids_want_fr(const Value& v, bool horiz) {
+static bool is_container(const Value& v) {
   int k = w_kind(v);
-  if (k != WK_Row && k != WK_Column) return false;
-  ListObj* kids = w_kids(v);
-  for (int i = 0; i < kids->v.size(); i++) if (w_fr(kids->v[i], horiz) > 0) return true;
-  return false;
+  return k == WK_Row || k == WK_Column || k == WK_Grid;
 }
 
+static int grid_cols(const Value& v);   // 下（格子）で定義
 
-// 縦か横に並べたときの、子ひとりひとりの大きさ。
-// 取り分を書いていない子は中身の大きさのまま。**余った場所**を、書いた数の比で分ける。
+// その部品の取り分（fr）。自分に書いていなければ、**入れ物は中身から受け継ぐ**。
+// だから ui.row の中のボタンに .height(float.infinity()) と書くだけで、
+// その row も外（col）の余りを求めて広がり、ボタンが下まで伸びる。
+// 入れ物にその向きの大きさ（画素）を書いてあれば、そこで止まる。
+//
+// 受け継ぎ方は、伸び縮み（measure）と同じ考え方。
+//   重なる向き（col の幅、row の高さ）      … いちばん大きいもの
+//   積み上がる向き（col の高さ、row の幅）  … 合計
+//   格子                                    … 列（行）ごとのいちばん大きいものの合計
+static double eff_fr(const Value& v, bool horiz) {
+  double f = w_fr(v, horiz);
+  if (f > 0) return f;
+  if (!is_container(v)) return 0;
+  if (horiz ? w_wid(v) > 0 : w_hei(v) > 0) return 0;   // 画素で決めてあれば、そこで止まる
+  ListObj* k = w_kids(v);
+  int kind = w_kind(v);
+  if (kind == WK_Grid) {
+    int cols = grid_cols(v);
+    int n = k->v.size();
+    int rows = (n + cols - 1) / cols;
+    int m = horiz ? cols : rows;
+    double acc = 0;
+    for (int j = 0; j < m; j++) {
+      double mx = 0;
+      for (int i = 0; i < n; i++) {
+        if ((horiz ? i % cols : i / cols) != j) continue;
+        double c = eff_fr(k->v[i], horiz);
+        if (c > mx) mx = c;
+      }
+      acc += mx;
+    }
+    return acc;
+  }
+  bool stack = (kind == WK_Row) == horiz;   // その向きに積み上がるか
+  double acc = 0;
+  for (int i = 0; i < k->v.size(); i++) {
+    double c = eff_fr(k->v[i], horiz);
+    if (stack) acc += c;
+    else if (c > acc) acc = c;
+  }
+  return acc;
+}
+
+// 余った場所を取り分の比で配る。sizes は中身の大きさ、frs はそれぞれの取り分（0 は無し）。
+// 取り分を書いていないものは中身の大きさのまま。**余った場所**を、書いた数の比で分ける。
 //
 //   ui.row([a.width(1.0), b.width(2.0)])   余りを 1:2 で分ける
 //   ui.row([a, b.width(float.infinity())]) a は中身の大きさ、b が残り全部
 //
 // float.infinity()（余りぜんぶ）が混じっている並びでは、ふつうの取り分は
-// 中身の大きさに戻り、余りは infinity を書いた子どうしで等分する
-static void axis_sizes(ListObj* k, bool horiz, int avail, int gap, Vec<int>& out) {
-  int n = k->v.size();
-  out.clear();
+// 中身の大きさに戻り、余りは infinity を書いたものどうしで等分する
+static void distribute(Vec<int>& sizes, const Vec<double>& frs, int avail, int gap) {
+  int n = sizes.size();
   bool fill = false;
-  for (int i = 0; i < n; i++) if (fr_is_fill(w_fr(k->v[i], horiz))) fill = true;
+  for (int i = 0; i < n; i++) if (fr_is_fill(frs[i])) fill = true;
 
   double wsum = 0;
   int fixed = n > 1 ? gap * (n - 1) : 0;
   for (int i = 0; i < n; i++) {
-    Box b = measure(k->v[i]);
-    out.push(horiz ? b.w : b.h);
-    double f = w_fr(k->v[i], horiz);
+    double f = frs[i];
     if (f > 0 && (!fill || fr_is_fill(f))) wsum += fill ? 1.0 : f;
-    else fixed += out[i];              // 大きさの決まっている子。ここは配らない
+    else fixed += sizes[i];            // 大きさの決まっているもの。ここは配らない
   }
-  if (wsum <= 0) return;               // 取り分を書いた子がいない
+  if (wsum <= 0) return;               // 取り分を書いたものがいない
 
   double left = avail - fixed;
   if (left < 0) left = 0;
   double acc = 0;
   int done = 0;
   for (int i = 0; i < n; i++) {
-    double f = w_fr(k->v[i], horiz);
+    double f = frs[i];
     if (!(f > 0 && (!fill || fr_is_fill(f)))) continue;
     acc += fill ? 1.0 : f;
     // ここまでに配る量から数えることで、丸めの誤差がたまらない（合計は必ず left）
     int upto = (int)(left * acc / wsum + 0.5);
-    out[i] = upto - done;
+    sizes[i] = upto - done;
     done = upto;
   }
+}
+
+// 縦か横に並べたときの、子ひとりひとりの大きさ
+static void axis_sizes(ListObj* k, bool horiz, int avail, int gap, Vec<int>& out) {
+  Vec<double> frs;
+  out.clear();
+  for (int i = 0; i < k->v.size(); i++) {
+    Box b = measure(k->v[i]);
+    out.push(horiz ? b.w : b.h);
+    frs.push(eff_fr(k->v[i], horiz));
+  }
+  distribute(out, frs, avail, gap);
+}
+
+// 格子の、列ごとの幅と行ごとの高さ。升は左上から右へ、いっぱいになれば次の行へ詰める。
+// 列の幅はその列でいちばん広い升、行の高さはその行でいちばん高い升。
+// 升に取り分（fr）を書いてあれば、その列（行）の取り分になり、余りを配る。
+// avail が 0 のときは配らない（中身の大きさを測るだけ）
+static int grid_cols(const Value& v) {
+  int c = (int)w_a(v);
+  return c < 1 ? 1 : c;
+}
+static void grid_axes(const Value& v, int avail_w, int avail_h, Vec<int>& cw, Vec<int>& rh) {
+  ListObj* k = w_kids(v);
+  int cols = grid_cols(v);
+  int n = k->v.size();
+  int rows = (n + cols - 1) / cols;
+  Vec<double> cf, rf;
+  cw.clear();
+  rh.clear();
+  for (int c = 0; c < cols; c++) { cw.push(0); cf.push(0); }
+  for (int r = 0; r < rows; r++) { rh.push(0); rf.push(0); }
+  for (int i = 0; i < n; i++) {
+    int c = i % cols, r = i / cols;
+    Box b = measure(k->v[i]);
+    if (b.w > cw[c]) cw[c] = b.w;
+    if (b.h > rh[r]) rh[r] = b.h;
+    double fw = eff_fr(k->v[i], true), fh = eff_fr(k->v[i], false);
+    if (fw > cf[c]) cf[c] = fw;
+    if (fh > rf[r]) rf[r] = fh;
+  }
+  if (avail_w > 0) distribute(cw, cf, avail_w, gap_x());
+  if (avail_h > 0) distribute(rh, rf, avail_h, gap_y());
 }
 
 // --- 描いて、触られたかを見る ---------------------------------------------
 // 親がくれる場所（avail_w × avail_h）の中に置く。取り分（fr）を書いた向きは、
 // 親がそこに配ったぶんがそのまま渡ってくる（下の axis_sizes）
-static void place(const Value& v, int x, int y, int avail_w, int avail_h);
+// root は、ui.show() に渡された（いちばん外の）部品のときだけ true
+static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool root = false);
 
 static void place_button(const Value& v, int x, int y, const Box& b) {
   bool over = inside(x, y, b.w, b.h);
@@ -1829,21 +1919,25 @@ static int yy_of_row(const Value& row, int cy, int ch, int h) {
   return ch > h ? cy + (ch - h) / 2 : cy;
 }
 
-static void place(const Value& v, int x, int y, int avail_w, int avail_h) {
+static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool root) {
   Box b = measure(v);
   int w = b.w, h = b.h;
-  // 取り分（fr）を書いた向きは、親が配ってくれたぶんいっぱいに広がる
-  if (w_fr(v, true) > 0 && avail_w > 0) w = avail_w;
-  if (w_fr(v, false) > 0 && avail_h > 0) h = avail_h;
-  // 取り分を書いた子がいる入れ物も、置ける場所いっぱいに広がる。
-  // 中身の大きさのままだと、子に配る余りがそもそも無いため
-  if (w_wid(v) <= 0 && w_fr(v, true) <= 0 && avail_w > w && kids_want_fr(v, true)) w = avail_w;
-  if (w_hei(v) <= 0 && w_fr(v, false) <= 0 && avail_h > h && kids_want_fr(v, false)) h = avail_h;
+  // 取り分（fr）のある向きは、親が配ってくれたぶんいっぱいに広がる
+  // （入れ物は、中身の取り分も受け継ぐ。eff_fr）
+  if (eff_fr(v, true) > 0 && avail_w > 0) w = avail_w;
+  if (eff_fr(v, false) > 0 && avail_h > 0) h = avail_h;
+  // 寄せ方は「親がくれた幅の中で、自分をどこに置くか」
+  int al = w_align(v);
+  // 入れ物（ui.col / ui.row / ui.grid）の大きさは**中身に合わせて伸び縮みする**（上の measure）。
+  // ただし、いちばん外（ui.show に渡された部品）だけは、寄せていなければ置ける幅いっぱいに
+  // 広がる。こうすると、いちばん外の並びでは、区切り線や寄せ（.align）が面の幅を見られる。
+  // 寄せた入れ物（ui.center など）は中身の大きさのまま、そのかたまりを寄せる
+  if (root && is_container(v) && w_wid(v) <= 0 && w_fr(v, true) <= 0 && al == WA_Left &&
+      avail_w > w)
+    w = avail_w;
   // 区切り線は、置ける幅いっぱいに引く
   if (w_kind(v) == WK_Divider && w_wid(v) <= 0) w = avail_w;
 
-  // 寄せ方は「親がくれた幅の中で、自分をどこに置くか」
-  int al = w_align(v);
   if (avail_w > w) {
     if (al == WA_Center) x += (avail_w - w) / 2;
     else if (al == WA_Right) x += avail_w - w;
@@ -1888,10 +1982,30 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h) {
       axis_sizes(k, true, cw, gap_x(), ws);    // 横に並べる。余りは幅の取り分へ
       int xx = cx;
       for (int i = 0; i < k->v.size(); i++) {
-        // 高さの取り分を書いた子は、並びの高さいっぱいに伸びる
-        int hh = w_fr(k->v[i], false) > 0 ? ch : measure(k->v[i]).h;
+        // 高さの取り分のある子は、並びの高さいっぱいに伸びる
+        int hh = eff_fr(k->v[i], false) > 0 ? ch : measure(k->v[i]).h;
         place(k->v[i], xx, yy_of_row(v, cy, ch, hh), ws[i], hh);
         xx += ws[i] + gap_x();
+      }
+      break;
+    }
+    case WK_Grid: {
+      ListObj* k = w_kids(v);
+      int cols = grid_cols(v);
+      Vec<int> gw, gh;
+      grid_axes(v, cw, ch, gw, gh);            // 列の幅と行の高さ。余りは取り分へ
+      int yy = cy;
+      for (int r = 0; r < gh.size(); r++) {
+        int xx = cx;
+        for (int c = 0; c < cols; c++) {
+          int i = r * cols + c;
+          if (i >= k->v.size()) break;
+          // 横に並べたときと同じく、背の低い升は行の真ん中に置く
+          int hh = eff_fr(k->v[i], false) > 0 ? gh[r] : measure(k->v[i]).h;
+          place(k->v[i], xx, yy_of_row(v, yy, gh[r], hh), gw[c], hh);
+          xx += gw[c] + gap_x();
+        }
+        yy += gh[r] + gap_y();
       }
       break;
     }
@@ -1966,15 +2080,25 @@ static NativeStatus u_space(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_widget(vm, WK_Space, Str(), Str(), A(a, 0)->i, 0, 0, 0, out) ? N_Ok : N_Panic;
 }
-static NativeStatus u_column(VM& vm, Value* a, int n, Value& out) {
+static NativeStatus u_col(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_widget(vm, WK_Column, Str(), Str(), 0, 0, 0, A(a, 0), out) ? N_Ok : N_Panic;
+}
+// 格子。cols 列に、左上から順に詰める
+static NativeStatus u_grid(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  int64_t cols = A(a, 0)->i;
+  if (cols < 1) {
+    vm.panic(vm.L("格子の列の数は 1 以上にします", "grid column count must be 1 or more"));
+    return N_Panic;
+  }
+  return make_widget(vm, WK_Grid, Str(), Str(), cols, 0, 0, A(a, 1), out) ? N_Ok : N_Panic;
 }
 static NativeStatus u_row(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_widget(vm, WK_Row, Str(), Str(), 0, 0, 0, A(a, 0), out) ? N_Ok : N_Panic;
 }
-// 中身をまとめて、置ける幅の真ん中に置く（ui.column(...).align("center") と同じ）
+// 中身をまとめて、置ける幅の真ん中に置く（ui.col(...).align("center") と同じ）
 static NativeStatus u_center(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   if (!make_widget(vm, WK_Column, Str(), Str(), 0, 0, 0, A(a, 0), out)) return N_Panic;
@@ -1992,7 +2116,7 @@ static NativeStatus u_divider(VM& vm, Value* a, int n, Value& out) {
 // --- 出す -----------------------------------------------------------------
 static NativeStatus show_at(VM& vm, Value* a, int x, int y, Value& out) {
   if (!need_open(vm)) return N_Panic;
-  ListObj* view = as_list(*A(a, 0));
+  Value* view = A(a, 0);
   g_lang_ja = (vm.lang() == LANG_JA);
   menu_hit();          // メニューが出ていれば、押しはそちらが先に受ける
   g_hit_id.clear();
@@ -2012,13 +2136,7 @@ static NativeStatus show_at(VM& vm, Value* a, int x, int y, Value& out) {
   if (avail < 1) avail = g_w > x ? g_w - x : 1;
   int avail_h = g_h - y * 2;
   if (avail_h < 1) avail_h = g_h > y ? g_h - y : 1;
-  Vec<int> hs;
-  axis_sizes(view, false, avail_h, gap_y(), hs);   // 縦に並べる
-  int cy = y;
-  for (int i = 0; i < view->v.size(); i++) {
-    place(view->v[i], x, cy, avail, hs[i]);
-    cy += hs[i] + gap_y();
-  }
+  place(*view, x, y, avail, avail_h, true);
   g_focus = g_focus_next;
   // 押された入力欄に焦点が来なかったら、覚えておいた位置は捨てる
   if (g_want_caret >= 0 && !(g_focus == g_want_id)) { g_want_caret = -1; g_want_id.clear(); }
@@ -2213,7 +2331,7 @@ void register_ui(Registry& r) {
   r.add("ui.font_builtin", u_font_builtin, tv);
   r.add("ui.font_name", u_font_name, ts);
 
-  // 宣言的な層（Widget を配列にして返す）。
+  // 宣言的な層（Widget を1つ返す。入れ子は ui.col / ui.row / ui.grid に配列で渡す）。
   // Widget の本物のクラスは型検査のときに作られるので、ここでは仮の型で登録しておく
   Type* tw = widget_stub(t);
   Type* tlw = t.list_of(tw);
@@ -2226,8 +2344,9 @@ void register_ui(Registry& r) {
   // 型検査は一番外側の var だけを通す（check.cpp の E0307）
   r.mark_ref0_var(r.add("ui.field", u_field_ref, tw, ts));
   r.add("ui.space", u_space, tw, ti);
-  r.add("ui.column", u_column, tw, tlw);
+  r.add("ui.col", u_col, tw, tlw);
   r.add("ui.row", u_row, tw, tlw);
+  r.add("ui.grid", u_grid, tw, ti, tlw);
   r.add("ui.center", u_center, tw, tlw);
   r.add("ui.divider", u_divider, tw);
   Vec<Type*> no_params;
@@ -2238,8 +2357,8 @@ void register_ui(Registry& r) {
   r.add("ui.edited", u_edited, tb);
   r.add("ui.has_action", u_has_action, tb);
   r.add("ui.action", u_action, tact);
-  r.add("ui.show", u_show, ts, tlw);
-  r.add("ui.show", u_show_at, ts, tlw, ti, ti);
+  r.add("ui.show", u_show, ts, tw);
+  r.add("ui.show", u_show_at, ts, tw, ti, ti);
   r.add("ui.value", u_value, ti);
   r.add("ui.text_value", u_text_value, ts);
   r.add("ui.theme", u_theme, tv, ti, ti, ti);

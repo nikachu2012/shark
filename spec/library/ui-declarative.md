@@ -2,10 +2,10 @@
 
 **これは、いま動くものの仕様ではない。**
 
-宣言的な UI は[ui.md](ui.md) の「宣言的な層」として**配列を返す形で作ってある**。
+宣言的な UI は[ui.md](ui.md) の「宣言的な層」として、**入れ子を配列で渡し、部品1つを返す形で作ってある**。
 
 ```shark
-return [ui.label(f"{count} 回"), ui.button("押す", "inc")];   // ← いま動く形
+return ui.col([ui.label(f"{count} 回"), ui.button("押す", "inc")]);   // ← いま動く形
 ```
 
 入力欄に `ref` で変数を渡す形（下の `ui.text_field(ref value)`）だけは、

@@ -109,7 +109,7 @@ void Checker::make_builtin_classes() {
 
   // class Widget — std.ui の宣言的な層で使う入れ物（spec/library/ui.md）。
   // 作るのは ui.label() などで、中身は書く人からは見えない。
-  // list<Widget> に入れ子にして持ち、ui.show() に渡す
+  // ui.col / ui.row / ui.grid に list<Widget> で入れ子にして持ち、いちばん外の1つを ui.show() に渡す
   if (reg_.has_module(Str("std.ui"))) {
     c_widget_ = new_class(prog_);
     c_widget_->name = Str("Widget");
@@ -126,7 +126,7 @@ void Checker::make_builtin_classes() {
                                      //      field が書き戻す var の番号）
         {"b", t_.t_int()},           // slider の下
         {"c", t_.t_int()},           // slider の上
-        {"kids", t_.list_of(tw)},    // column / row の中身
+        {"kids", t_.list_of(tw)},    // col / row / grid の中身
         // ここから下は見た目の指定（鎖でつないで変える）。-1 と 0 は「指定なし」
         {"fg", t_.t_int()},          // 文字の色
         {"bg", t_.t_int()},          // 下地の色

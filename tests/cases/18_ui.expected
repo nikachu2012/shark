@@ -46,6 +46,18 @@ true false false
 0
 0
 100
+true 0 true
+0 true
+true 0 0
+0 true true
+18 16711680 255 16711680 255
+16711680 0 255
+16711680 0 255
+[00 01 10 11 20 21 ] true false
+true
+0
+255 0
+255 0
 false
 [さめ] []
 []
