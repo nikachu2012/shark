@@ -200,15 +200,20 @@ NativeStatus n_widget_background(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_padding(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_width(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_height(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_width_fr(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_height_fr(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_align(VM& vm, Value* args, int n, Value& out);
 
-NativeFn builtin_native_method(const Str& cls, const Str& name, int nparams) {
+NativeFn builtin_native_method(const Str& cls, const Str& name, const Vec<ParamInfo>& params) {
+  int nparams = params.size();
   if (cls == "Widget" && nparams == 1) {
+    // 幅と高さは、int なら画素、float なら取り分（fr）で、本体が別
+    bool fr = params[0].type && params[0].type->kind == T_Float;
     if (name == "color") return n_widget_color;
     if (name == "background") return n_widget_background;
     if (name == "padding") return n_widget_padding;
-    if (name == "width") return n_widget_width;
-    if (name == "height") return n_widget_height;
+    if (name == "width") return fr ? n_widget_width_fr : n_widget_width;
+    if (name == "height") return fr ? n_widget_height_fr : n_widget_height;
     if (name == "align") return n_widget_align;
   }
   if (cls == "Error") {

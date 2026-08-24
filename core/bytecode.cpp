@@ -398,7 +398,7 @@ bool bytecode_write(Program& prog, const Registry& reg, const BytecodeHeader& h,
     for (int k = 0; k < f->lines.size(); k++) w.uv((uint64_t)f->lines[k]);
     // 処理系が持つメソッド（Error など）は、名前でつなぎ直す。関数ポインタは書けない
     if (f->is_native && !builtin_native_method(f->owner ? f->owner->name : Str(), f->name,
-                                               f->params.size())) {
+                                               f->params)) {
       *err = L(lang, "この処理系関数はバイトコードに保存できません",
                "this native function cannot be saved to bytecode");
       *err += ": ";
@@ -710,7 +710,7 @@ bool bytecode_read(const Str& in, Program* prog, TypeTable& types, const Registr
     for (int k = 0; k < nlines; k++) f->lines.push((uint32_t)r.uv());
     if (f->is_native) {
       f->native = builtin_native_method(f->owner ? f->owner->name : Str(), f->name,
-                                        f->params.size());
+                                        f->params);
       if (!f->native) {
         *err = L(lang, "この処理系にない処理系関数を呼んでいます",
                  "the bytecode needs a native function this runtime does not have");

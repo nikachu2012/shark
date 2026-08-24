@@ -88,9 +88,10 @@ void register_modules(Registry& r, const Config& cfg);
 // 保存したバイトコードが、いまの処理系の表と合っているかを見るのに使う
 uint64_t registry_signature(const Registry& r);
 
-// 処理系が持つクラス（Error）のメソッドの本体を、名前で引く（本体は lib/builtin.cpp）。
-// 保存したバイトコードを読み戻すとき、関数ポインタをつなぎ直すのに使う
-NativeFn builtin_native_method(const Str& cls, const Str& name, int nparams);
+// 処理系が持つクラス（Error、Widget）のメソッドの本体を、名前と引数の型で引く
+// （本体は lib/builtin.cpp）。保存したバイトコードを読み戻すとき、関数ポインタをつなぎ直すのに使う。
+// 名前と数だけでは足りない（Widget.width は int と float で別の本体）ので、引数の並びごと渡す
+NativeFn builtin_native_method(const Str& cls, const Str& name, const Vec<ParamInfo>& params);
 
 // std.test の記録（フロントエンドが読む）
 void test_begin();
