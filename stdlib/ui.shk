@@ -691,6 +691,9 @@ func run(title: string, width: int, height: int, view: func() -> Widget) -> void
 /// ui.show() に渡すと、そこで初めて描かれる。並べるときは
 /// ui.col / ui.row / ui.grid に配列で入れて、1つにする。
 ///
+/// 長い文が置ける幅（親がくれた幅か、.width(n) で決めた幅）に入らないときは、
+/// **折り返して**何行かになる。折り目はその行の空白、無ければ字の手前。
+///
 /// 例:
 ///   ui.open(80, 40);
 ///   _ = ui.show(ui.label("こんにちは"));

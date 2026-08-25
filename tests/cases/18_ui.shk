@@ -301,6 +301,19 @@ func main() -> int {
   act();
   print(f"{t_acted} {hits(0, 0, 120, 60) > 0}");   // 何もしない関数／描かれている
 
+  // --- 長い文は、置ける幅で折り返す ---
+  ui.font_builtin();   // ui.run が機種のフォントを読んでいるので、内蔵に戻して字幅を揃える
+  ui.open(30, 40);
+  ui.clear(0);
+  _ = ui.show(ui.label("aaaa bbbb"), 0, 0);        // 空白で折れて2行
+  print(f"{hits(0, 0, 30, 8) > 0} {hits(0, 8, 30, 16) > 0} {hits(24, 0, 30, 16)}");
+  ui.clear(0);
+  _ = ui.show(ui.label("ccdd").width(12), 0, 0);   // 空白が無ければ字の手前で折る
+  print(f"{hits(0, 0, 12, 8) > 0} {hits(0, 8, 12, 16) > 0} {hits(12, 0, 30, 40)}");
+  ui.clear(0);
+  _ = ui.show(ui.col([ui.label("eeee ffff"), ui.label("gg").background(green)]), 0, 0);
+  print(f"{ui.get(0, 20) != 0} {hits(0, 0, 30, 16) > 0}");   // 折れたぶん、次は下へ
+
   // --- PNG ---
   ui.open(4, 4);
   ui.clear(red);

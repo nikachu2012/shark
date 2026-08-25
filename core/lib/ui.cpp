@@ -482,6 +482,64 @@ static int text_px_width(const Str& s, int scale) {
   return best;
 }
 
+// 描ける幅（画素）に折り返す。改行を差し込んだ文字列を返す。
+// 折り目は、その行に空白があればそこ（英語の単語を切らない）、
+// 無ければ（日本語など）入り切らなくなった字の手前。
+// 行頭の1字は、幅より広くてもそのまま出す（無限に折らないため）
+static Str wrap_text(const Str& s, int max_w, int scale) {
+  if (max_w <= 0) return s;
+  const char* sd = s.data();
+  Str out, line;
+  int line_w = 0;    // いま組んでいる行の幅
+  int sp_at = -1;    // 行の中のいちばん後ろの空白（line の中のバイト位置）
+  int sp_w = 0;      // その空白までの幅（空白を含む）
+  int at = 0;
+  while (at < s.size()) {
+    int cp = 0;
+    int adv = utf8_decode(s, at, &cp);
+    if (adv <= 0) break;
+    if (cp == '\n') {
+      out += line;
+      out.push('\n');
+      line.clear();
+      line_w = 0; sp_at = -1; sp_w = 0;
+      at += adv;
+      continue;
+    }
+    int cw = advance_of(cp, scale);
+    // 行末からあふれた空白は、折り目そのものにする（次の行の頭に空白を残さない）
+    if (cp == ' ' && line_w > 0 && line_w + cw > max_w) {
+      out += line;
+      out.push('\n');
+      line.clear();
+      line_w = 0; sp_at = -1; sp_w = 0;
+      at += adv;
+      continue;
+    }
+    while (line_w > 0 && line_w + cw > max_w) {
+      if (sp_at >= 0) {   // 空白まで戻って折る
+        out += line.sub(0, sp_at);
+        out.push('\n');
+        Str rest = line.sub(sp_at + 1, line.size() - sp_at - 1);
+        line = rest;
+        line_w -= sp_w;
+        sp_at = -1; sp_w = 0;
+      } else {            // 空白が無ければ、この字の手前で折る
+        out += line;
+        out.push('\n');
+        line.clear();
+        line_w = 0;
+      }
+    }
+    if (cp == ' ') { sp_at = line.size(); sp_w = line_w + cw; }
+    line.append(sd + at, adv);
+    line_w += cw;
+    at += adv;
+  }
+  out += line;
+  return out;
+}
+
 static NativeStatus draw_text(VM& vm, Value* a, int scale, Value& out) {
   if (!need_open(vm)) return N_Panic;
   put_text((int)A(a, 0)->i, (int)A(a, 1)->i, as_str(*A(a, 2))->s, scale, to_color(A(a, 3)->i));
@@ -1417,19 +1475,28 @@ static bool inside(int x, int y, int w, int h) {
 // --- 大きさを測る ---------------------------------------------------------
 struct Box { int w, h; };
 
-static Box measure(const Value& v);
+static Box measure(const Value& v, int wrap_w = 0);
 static void grid_axes(const Value& v, int avail_w, int avail_h, Vec<int>& cw, Vec<int>& rh);
 
-// 中身そのものの大きさ（余白も指定も入れない）
-static Box intrinsic(const Value& v) {
+// 中身そのものの大きさ（余白も指定も入れない）。
+// wrap_w が正なら、文字（ui.label）はその幅で折り返して測る
+static Box intrinsic(const Value& v, int wrap_w) {
   Box b;
   b.w = 0;
   b.h = 0;
   switch (w_kind(v)) {
-    case WK_Label:
-      b.w = text_px_width(w_text(v), 1);
-      b.h = line_h(1) + (text_lines(w_text(v)) - 1) * line_pitch(1);
+    case WK_Label: {
+      const Str& raw = w_text(v);
+      if (wrap_w > 0 && text_px_width(raw, 1) > wrap_w) {
+        Str t = wrap_text(raw, wrap_w, 1);
+        b.w = text_px_width(t, 1);
+        b.h = line_h(1) + (text_lines(t) - 1) * line_pitch(1);
+      } else {
+        b.w = text_px_width(raw, 1);
+        b.h = line_h(1) + (text_lines(raw) - 1) * line_pitch(1);
+      }
       break;
+    }
     case WK_Button:
       b.w = text_px_width(w_text(v), 1) + pad_x() * 2;
       b.h = line_h(1) + pad_y() * 2;
@@ -1445,7 +1512,7 @@ static Box intrinsic(const Value& v) {
     case WK_Column: {
       ListObj* k = w_kids(v);
       for (int i = 0; i < k->v.size(); i++) {
-        Box c = measure(k->v[i]);
+        Box c = measure(k->v[i], wrap_w);
         if (c.w > b.w) b.w = c.w;
         b.h += c.h;
         if (i + 1 < k->v.size()) b.h += gap_y();
@@ -1474,10 +1541,12 @@ static Box intrinsic(const Value& v) {
   return b;
 }
 
-// 外から見た大きさ。内側の余白（padding）と、決め打ちの幅・高さを入れる
-static Box measure(const Value& v) {
-  Box b = intrinsic(v);
+// 外から見た大きさ。内側の余白（padding）と、決め打ちの幅・高さを入れる。
+// wrap_w は「親がくれる幅」。幅を画素で決めてあれば、折り返しはそちらに合わせる
+static Box measure(const Value& v, int wrap_w) {
   int p = w_pad(v);
+  int inner = w_wid(v) > 0 ? w_wid(v) : wrap_w;
+  Box b = intrinsic(v, inner > p * 2 ? inner - p * 2 : 0);
   b.w += p * 2;
   b.h += p * 2;
   if (w_wid(v) > 0) b.w = w_wid(v);
@@ -1573,12 +1642,14 @@ static void distribute(Vec<int>& sizes, const Vec<double>& frs, int avail, int g
   }
 }
 
-// 縦か横に並べたときの、子ひとりひとりの大きさ
-static void axis_sizes(ListObj* k, bool horiz, int avail, int gap, Vec<int>& out) {
+// 縦か横に並べたときの、子ひとりひとりの大きさ。
+// wrap_w は折り返しに使う幅（縦に並べるとき、子がもらえる幅）
+static void axis_sizes(ListObj* k, bool horiz, int avail, int gap, Vec<int>& out,
+                       int wrap_w = 0) {
   Vec<double> frs;
   out.clear();
   for (int i = 0; i < k->v.size(); i++) {
-    Box b = measure(k->v[i]);
+    Box b = measure(k->v[i], horiz ? 0 : wrap_w);
     out.push(horiz ? b.w : b.h);
     frs.push(eff_fr(k->v[i], horiz));
   }
@@ -1924,7 +1995,7 @@ static int yy_of_row(const Value& row, int cy, int ch, int h) {
 }
 
 static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool root) {
-  Box b = measure(v);
+  Box b = measure(v, avail_w);
   int w = b.w, h = b.h;
   // 取り分（fr）のある向きは、親が配ってくれたぶんいっぱいに広がる
   // （入れ物は、中身の取り分も受け継ぐ。eff_fr）
@@ -1958,7 +2029,15 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
   cb.h = ch;
 
   switch (w_kind(v)) {
-    case WK_Label: put_text(cx, cy, w_text(v), 1, w_fg(v)); break;
+    case WK_Label: {
+      // 測ったとき（measure）と同じ幅で折り返して描く
+      int lw = (w_wid(v) > 0 ? w_wid(v) : avail_w) - p * 2;
+      if (lw > 0 && text_px_width(w_text(v), 1) > lw)
+        put_text(cx, cy, wrap_text(w_text(v), lw, 1), 1, w_fg(v));
+      else
+        put_text(cx, cy, w_text(v), 1, w_fg(v));
+      break;
+    }
     case WK_Button: place_button(v, cx, cy, cb); break;
     case WK_Checkbox: place_checkbox(v, cx, cy, cb); break;
     case WK_Slider: place_slider(v, cx, cy, cb); break;
@@ -1972,7 +2051,7 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
     case WK_Column: {
       ListObj* k = w_kids(v);
       Vec<int> hs;
-      axis_sizes(k, false, ch, gap_y(), hs);   // 縦に並べる。余りは高さの取り分へ
+      axis_sizes(k, false, ch, gap_y(), hs, cw);   // 縦に並べる。余りは高さの取り分へ
       int yy = cy;
       for (int i = 0; i < k->v.size(); i++) {
         place(k->v[i], cx, yy, cw, hs[i]);
@@ -1987,7 +2066,7 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
       int xx = cx;
       for (int i = 0; i < k->v.size(); i++) {
         // 高さの取り分のある子は、並びの高さいっぱいに伸びる
-        int hh = eff_fr(k->v[i], false) > 0 ? ch : measure(k->v[i]).h;
+        int hh = eff_fr(k->v[i], false) > 0 ? ch : measure(k->v[i], ws[i]).h;
         place(k->v[i], xx, yy_of_row(v, cy, ch, hh), ws[i], hh);
         xx += ws[i] + gap_x();
       }
@@ -2005,7 +2084,7 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
           int i = r * cols + c;
           if (i >= k->v.size()) break;
           // 横に並べたときと同じく、背の低い升は行の真ん中に置く
-          int hh = eff_fr(k->v[i], false) > 0 ? gh[r] : measure(k->v[i]).h;
+          int hh = eff_fr(k->v[i], false) > 0 ? gh[r] : measure(k->v[i], gw[c]).h;
           place(k->v[i], xx, yy_of_row(v, yy, gh[r], hh), gw[c], hh);
           xx += gw[c] + gap_x();
         }
