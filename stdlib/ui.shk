@@ -53,11 +53,14 @@ module std.ui;
 ///
 /// 窓の出る機種では、窓の縁を引いて大きさを変えられる。変えると次の ui.poll() で
 /// 面も同じ大きさに作り直され、ui.width() / ui.height() が新しい数を返す。
+/// resizable に false を渡すと、大きさの**変わらない**窓になる
+/// （端末に出しているときは、もともと端末の側が入る大きさに縮めて出す）。
 ///
 /// 引数:
-///   title    窓の名札。付けられない機種では使われない
-///   width    横の画素の数（1〜16384）
-///   height   縦の画素の数（1〜16384）
+///   title      窓の名札。付けられない機種では使われない
+///   width      横の画素の数（1〜16384）
+///   height     縦の画素の数（1〜16384）
+///   resizable  窓の縁を引いて大きさを変えられるか。省くと true
 ///
 /// 例:
 ///   ui.open(64, 32);
@@ -65,6 +68,7 @@ module std.ui;
 ///   ui.close();
 func open(width: int, height: int) -> void;
 func open(title: string, width: int, height: int) -> void;
+func open(title: string, width: int, height: int, resizable: bool) -> void;
 
 /// 面を捨て、画面を開いていれば閉じる。
 ///
@@ -662,13 +666,14 @@ func font_name() -> string;
 ///   4. 何か押されていれば update() を呼び、**その場で描き直す**
 ///   5. 窓が閉じられるか ui.quit() まで、2 に戻る
 ///
-/// 部品に関数を持たせているなら、update は要らない（4つの形）。
+/// 部品に関数を持たせているなら、update は要らない（update を省いた形）。
 ///
 /// 引数:
 ///   title           窓の名札
 ///   width, height   見た目の大きさ（細かい画面では自動で細かく取る）
 ///   view            いまの姿を返す関数
 ///   update          押されたものの名札を受け取る関数（省ける）
+///   resizable       窓の縁を引いて大きさを変えられるか。省くと true
 ///
 /// 注意:
 ///   画面が無いところ（SHARK_UI=off など）では、1回だけ描いて返る。
@@ -686,7 +691,9 @@ func font_name() -> string;
 ///   ui.run("かうんた", 200, 100, view, update);
 ///   print(count);   // 0
 func run(title: string, width: int, height: int, view: func() -> Widget, update: func(string) -> void) -> void;
+func run(title: string, width: int, height: int, view: func() -> Widget, update: func(string) -> void, resizable: bool) -> void;
 func run(title: string, width: int, height: int, view: func() -> Widget) -> void;
+func run(title: string, width: int, height: int, view: func() -> Widget, resizable: bool) -> void;
 
 /// 文字を出す部品。
 ///

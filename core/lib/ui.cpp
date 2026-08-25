@@ -123,8 +123,13 @@ static void span(int x, int y, int w, uint32_t c) {
 static NativeStatus u_open(VM& vm, Value* a, int n, Value& out) {
   Str title;
   int64_t w, h;
-  if (n >= 3) { title = as_str(*A(a, 0))->s; w = A(a, 1)->i; h = A(a, 2)->i; }
-  else { title = Str("Shark"); w = A(a, 0)->i; h = A(a, 1)->i; }
+  bool resizable = true;   // 省いたときは、縁を引いて大きさを変えられる窓
+  if (n >= 3) {
+    title = as_str(*A(a, 0))->s; w = A(a, 1)->i; h = A(a, 2)->i;
+    if (n >= 4) resizable = A(a, 3)->b;
+  } else {
+    title = Str("Shark"); w = A(a, 0)->i; h = A(a, 1)->i;
+  }
   if (w <= 0 || h <= 0) {
     vm.panic(vm.L("面の大きさは 1 以上にします", "surface size must be 1 or more"));
     return N_Panic;
@@ -155,6 +160,8 @@ static NativeStatus u_open(VM& vm, Value* a, int n, Value& out) {
   g_visible = s && s->open(title.c_str(), g_w, g_h);
   // 窓の縁を引いている間もこちらで描き直せるように、口があれば渡しておく
   if (g_visible && s->set_redraw) s->set_redraw(ui_live_redraw);
+  // 大きさを変えられない窓を頼まれたときは、移植層に伝える（持たない機種では素通し）
+  if (g_visible && s->set_resizable) s->set_resizable(resizable);
   out = mk_void();
   return N_Ok;
 }
@@ -2415,6 +2422,7 @@ void register_ui(Registry& r) {
 
   r.add("ui.open", u_open, tv, ti, ti);
   r.add("ui.open", u_open, tv, ts, ti, ti);
+  r.add("ui.open", u_open, tv, ts, ti, ti, tb);
   r.add("ui.close", u_close, tv);
   r.add("ui.width", u_width, ti);
   r.add("ui.height", u_height, ti);

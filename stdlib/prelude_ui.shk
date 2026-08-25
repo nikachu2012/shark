@@ -21,9 +21,10 @@ import std.ui;
 
 public func run(title: string, width: int, height: int,
                 view: func() -> Widget,
-                update: func(string) -> void) -> void {
+                update: func(string) -> void,
+                resizable: bool) -> void {
   var k = ui.scale();
-  ui.open(title, width * k, height * k);
+  ui.open(title, width * k, height * k, resizable);
   if ui.font_name() == "" { _ = ui.font(12 * k); }
 
   // 画面が無いところ（SHARK_UI=off など）では、1回だけ描いて返る。
@@ -57,10 +58,22 @@ public func run(title: string, width: int, height: int,
   ui.close();
 }
 
+// resizable を省いた形。窓は縁を引いて大きさを変えられる
+public func run(title: string, width: int, height: int,
+                view: func() -> Widget,
+                update: func(string) -> void) -> void {
+  run(title, width, height, view, update, true);
+}
+
 // 部品に関数を持たせる書き方。update は要らない
 public func run(title: string, width: int, height: int,
                 view: func() -> Widget) -> void {
-  run(title, width, height, view, __ui_ignore);
+  run(title, width, height, view, __ui_ignore, true);
+}
+
+public func run(title: string, width: int, height: int,
+                view: func() -> Widget, resizable: bool) -> void {
+  run(title, width, height, view, __ui_ignore, resizable);
 }
 
 func __ui_ignore(hit: string) -> void {

@@ -290,6 +290,14 @@ func main() -> int {
   print(f"{ui.width()}x{ui.height()} {t_count}");   // 面は残る／押されていないので 0
   print(hits(0, 0, 100, 30) > 0);                   // 何か描かれている
 
+  // 末尾に resizable を付けた形（画面が無いので、面が変わるだけ）
+  ui.run("ためし", 100, 60, t_view, t_update, false);
+  print(f"{ui.width()}x{ui.height()}");
+  ui.run("ためし", 90, 50, t_view, false);          // update を省いた形にも付く
+  print(f"{ui.width()}x{ui.height()}");
+  ui.open("ためし", 40, 30, false);                 // ui.open にも渡せる
+  print(f"{ui.width()}x{ui.height()}");
+
   // --- 部品に持たせた関数 ---
   ui.open(120, 60);
   ui.clear(0);

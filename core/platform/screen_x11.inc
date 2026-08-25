@@ -69,6 +69,20 @@ enum {
   StructureNotifyMask = 1L << 17,
 };
 
+// 窓の大きさの希望（XSetWMNormalHints）。使うものだけ書き写す
+struct SizeHints {
+  long flags;
+  int x, y;
+  int width, height;
+  int min_width, min_height;
+  int max_width, max_height;
+  int width_inc, height_inc;
+  struct { int x, y; } min_aspect, max_aspect;
+  int base_width, base_height;
+  int win_gravity;
+};
+enum { PMinSize = 1L << 4, PMaxSize = 1L << 5 };
+
 // --- 引いてくる関数 -------------------------------------------------------
 Display* (*OpenDisplay)(const char*) = 0;
 int (*CloseDisplay)(Display*) = 0;
@@ -94,6 +108,7 @@ int (*Pending)(Display*) = 0;
 int (*NextEvent)(Display*, Event*) = 0;
 XID (*InternAtom)(Display*, const char*, int) = 0;
 int (*SetWMProtocols)(Display*, XID, XID*, int) = 0;
+void (*SetWMNormalHints)(Display*, XID, SizeHints*) = 0;   // 無くてもよい
 XID (*LookupKeysym)(KeyEvent*, int) = 0;
 int (*LookupString)(KeyEvent*, char*, int, XID*, void*) = 0;
 int (*XFree_)(void*) = 0;
@@ -172,6 +187,7 @@ bool load() {
   ok &= grab(&LookupString, "XLookupString");
   ok &= grab(&XFree_, "XFree");
   grab(&SetDetectableAutoRepeat, "XkbSetDetectableAutoRepeat");   // 無くてもよい
+  grab(&SetWMNormalHints, "XSetWMNormalHints");                    // 無くてもよい
   grab(&SetErrorHandler, "XSetErrorHandler");
   if (!ok) return false;
   if (SetErrorHandler) SetErrorHandler((void*)quiet_error);
@@ -405,6 +421,23 @@ void pump() {
   }
 }
 
+// 縁を引いて大きさを変えられるかを切り替える。窓の管理者（WM）への希望として、
+// 変えられなくするときは最小と最大を今の大きさに固定する
+void set_resizable(bool on) {
+  if (!g.open || !SetWMNormalHints) return;
+  SizeHints h = {};
+  h.flags = PMinSize | PMaxSize;
+  if (on) {
+    h.min_width = 1; h.min_height = 1;
+    h.max_width = 32767; h.max_height = 32767;
+  } else {
+    h.min_width = h.max_width = g.sw * g.scale;
+    h.min_height = h.max_height = g.sh * g.scale;
+  }
+  SetWMNormalHints(g.dpy, g.win, &h);
+  Flush(g.dpy);
+}
+
 bool poll(ScreenEvent* out) {
   if (!g.open) return false;
   if (qn == 0) pump();
@@ -421,7 +454,7 @@ bool poll(ScreenEvent* out) {
 // 変換つきの文字入力（XIM）はまだ持たない。打たれた文字がそのまま入る
 const PlatformScreen kX11Screen = {x11::screen_scale, x11::open, x11::close,
                                   x11::present,      x11::poll, true,
-                                  0, 0, 0, 0, 0, 0, 0, 0};
+                                  0, 0, 0, 0, 0, 0, 0, 0, x11::set_resizable};
 
 const PlatformScreen* x11_screen() { return x11::load() ? &kX11Screen : 0; }
 

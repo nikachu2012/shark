@@ -691,6 +691,14 @@ bool text_state(Str* confirmed, Str* marked) {
 
 void set_redraw(bool (*fn)(int, int)) { g.redraw = fn; }
 
+// 縁を引いて大きさを変えられるかを切り替える（8 = NSWindowStyleMaskResizable）
+void set_resizable(bool on) {
+  if (!g.open || !g.win) return;
+  unsigned long style = ((unsigned long (*)(Obj, Sel))msgSend)(g.win, S("styleMask"));
+  if (on) style |= 8; else style &= ~(unsigned long)8;
+  ((void (*)(Obj, Sel, unsigned long))msgSend)(g.win, S("setStyleMask:"), style);
+}
+
 bool poll(ScreenEvent* out) {
   if (!g.open) return false;
   if (qn == 0) pump();
@@ -709,7 +717,7 @@ const PlatformScreen kMacScreen = {mac::screen_scale,  mac::open,           mac:
                                   mac::text_input,    mac::text_state,
                                   mac::text_selection, mac::text_select,
                                   mac::text_replace,  mac::clipboard_get,  mac::clipboard_set,
-                                  mac::set_redraw};
+                                  mac::set_redraw,    mac::set_resizable};
 
 const PlatformScreen* mac_screen() { return mac::load() ? &kMacScreen : 0; }
 
