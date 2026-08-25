@@ -50,6 +50,7 @@ const char* tok_name(TokKind k) {
     case TK_Semi: return ";";
     case TK_Colon: return ":";
     case TK_Dot: return ".";
+    case TK_Ellipsis: return "...";
     case TK_Arrow: return "->";
     case TK_Question: return "?";
     case TK_QDot: return "?.";
@@ -374,7 +375,7 @@ void Lexer::run(Vec<Token>* out) {
     struct Sym { const char* s; TokKind k; };
     // 長いものから先に見る（"<<=" は "<=" より前）
     static const Sym syms[] = {
-      {"<<=", TK_ShlAssign},
+      {"<<=", TK_ShlAssign}, {"...", TK_Ellipsis},
       {"->", TK_Arrow}, {"??", TK_QQ}, {"?.", TK_QDot}, {"==", TK_Eq}, {"!=", TK_Ne},
       {"<=", TK_Le}, {">=", TK_Ge}, {"&&", TK_AndAnd}, {"||", TK_OrOr},
       {"+=", TK_PlusAssign}, {"-=", TK_MinusAssign}, {"*=", TK_StarAssign}, {"/=", TK_SlashAssign},

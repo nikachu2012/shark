@@ -103,6 +103,7 @@ struct Node {
   Node* b;               // 右 / 添字 / 本体
   Node* c;               // それ以外（else など）
   Vec<Node*> list;       // 引数、要素、文の並び
+  Vec<Str> argnames;     // E_Call: 引数に付けた名前（"" は位置で渡したもの）。誰も付けなければ空
   Vec<MapPair> pairs;
   Vec<FStrPart> parts;
   Vec<TypeExpr*> targs;  // 明示した型引数
@@ -121,6 +122,7 @@ struct Node {
   int slot2;       // 2つ目（else var など）
   int resolved;    // 関数・フィールド・ネイティブの番号
   int resolved2;   // 補助（vslot など）
+  int vararg_from; // E_Call: ここから後ろの引数を list に束ねて渡す（-1 は束ねない）
   int opcode;      // 演算の種類
   ClassInfo* rcls;
   FuncInfo* rfunc;
@@ -131,7 +133,7 @@ struct Node {
   Node()
       : kind(E_Int), line(0), col(0), len(0), ival(0), dval(0), a(0), b(0), c(0), tann(0),
         fdecl(0), is_const(false), optional_chain(false), type(0), bind_type(0), bind2_type(0),
-        slot(-1), slot2(-1), resolved(-1), resolved2(-1), opcode(0), rcls(0), rfunc(0),
+        slot(-1), slot2(-1), resolved(-1), resolved2(-1), vararg_from(-1), opcode(0), rcls(0), rfunc(0),
         is_global(false), is_ref_param(false), checked(false) {}
 };
 
@@ -139,8 +141,9 @@ struct ParamDecl {
   Str name;
   TypeExpr* type;
   bool is_ref;
+  bool is_variadic;   // 末尾の ...（可変長）。type には要素の型が入る
   int line, col, len;
-  ParamDecl() : type(0), is_ref(false), line(0), col(0), len(0) {}
+  ParamDecl() : type(0), is_ref(false), is_variadic(false), line(0), col(0), len(0) {}
 };
 
 struct GenericParam {

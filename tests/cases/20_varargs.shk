@@ -1,0 +1,77 @@
+// 可変長引数とキーワード引数（spec/syntax.md）
+func sum(xs: int...) -> int {
+  var t = 0;
+  for var x in xs { t += x; }   // xs は list<int>
+  return t;
+}
+
+func join(sep: string, parts: string...) -> string {
+  var out = "";
+  var i = 0;
+  for var p in parts {
+    if i > 0 { out += sep; }
+    out += p;
+    i += 1;
+  }
+  return out;
+}
+
+func box(name: string, width: int, height: int) -> string {
+  return f"{name} {width}x{height}";
+}
+
+// 個数がぴったりのものを優先する
+func hit(x: int) -> string { return "one"; }
+func hit(xs: int...) -> string { return "many"; }
+
+// list を受け取るものと、可変長は別の関数
+func kind(xs: list<int>) -> string { return "list"; }
+func kind(xs: int...) -> string { return "vararg"; }
+
+// ジェネリクスと可変長
+func first<T>(xs: T...) -> T? {
+  if xs.len() == 0 { return none; }
+  return xs[0];
+}
+
+class Fish {
+  var name: string;
+  var size: int;
+  func init(name: string, size: int) { this.name = name; this.size = size; }
+  public func desc() -> string { return f"{this.name}({this.size})"; }
+  public func feed(amount: int...) -> int {
+    var t = 0;
+    for var a in amount { t += a; }
+    this.size += t;
+    return this.size;
+  }
+}
+
+// キーワード引数と可変長を混ぜる
+func tag(name: string, xs: int...) -> string {
+  return f"{name}:{xs.len()}";
+}
+
+func main() -> int {
+  print(sum());                             // 0個でもよい
+  print(sum(1, 2, 3));
+  print(join("-", "a", "b", "c"));
+  print(box("A", 3, 4));
+  print(box("B", height: 5, width: 6));     // 名前を付ければ並びは自由
+  print(box(name: "C", width: 1, height: 2));
+  var f = Fish(size: 3, name: "sam");       // init もキーワードで呼べる
+  print(f.desc());
+  print(f.feed(1, 2, 3));                   // メソッドの可変長
+  print(first(7, 8) ?? -1);
+  print(hit(5));
+  print(hit(5, 6));
+  print(hit());
+  print(kind([1, 2]));
+  print(kind(1, 2));
+  print(kind());
+  print(tag(name: "t"));
+  print(tag("u", 1, 2));
+  var t = task sum(1, 2, 3);                // タスクにも渡せる
+  print(t.wait());
+  return 0;
+}

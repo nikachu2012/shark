@@ -68,6 +68,28 @@ static const Explain kExplain[] = {
    "書き換えて返したいものは、名前を付けた関数に渡します。",
    "An inline function cannot take a ref parameter. The function type (func(int) -> bool) has no\n"
    "place to record ref, so the callee could not tell a borrow from a copy. Use a named function."},
+  {"E0158",
+   "可変長引数は、最後の引数に1つだけ書けます。func f(xs: int...) のように書くと、\n"
+   "余った引数がまとめて list<int> になって xs に入ります。ref は付けられず、\n"
+   "その場に書く関数（名前のない func）にも書けません。",
+   "A variadic parameter (...) may only appear once, as the last parameter. In\n"
+   "func f(xs: int...) the extra arguments are collected into a list<int>. It cannot be ref,\n"
+   "and an inline function cannot take one."},
+  {"E0159",
+   "呼び出しでは f(width: 3) のように、引数に名前を付けて渡せます（キーワード引数）。\n"
+   "名前を付けた引数は、位置で渡す引数より後ろに書き、同じ名前は1回だけです。\n"
+   "型変換・処理系が持つ関数・関数の値には、名前を付けて渡せません。\n"
+   "print と write だけは、sep:（値の区切り）と end:（終わりの文字）を名前で渡せます。",
+   "A call may name its arguments, like f(width: 3). Named arguments must come after\n"
+   "positional ones, and each name may be used once. Conversions, native functions\n"
+   "and function values do not take named arguments; print and write are the\n"
+   "exception, accepting sep: (separator) and end: (ending)."},
+  {"E0160",
+   "可変長引数（...）を持つ関数は、そのままでは値にできません。\n"
+   "値としての型 func(...) -> ... に、可変長を表す書き方が無いためです。\n"
+   "渡したいときは、list を受け取る関数を書いて、それを渡します。",
+   "A function with a variadic (...) parameter cannot be used as a value, because the\n"
+   "function value type has no way to express it. Wrap it in a function taking a list."},
   {"E0201",
    "T? は「値がないかもしれない」型なので、T としてそのままは使えません。\n"
    "取り出し方は3つ: ?? で既定値を決める、if var で値がある時だけ処理する、! で断言する。",

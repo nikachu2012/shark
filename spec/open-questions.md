@@ -113,3 +113,4 @@
 | バージョン間の互換 | ソースコード上で動きが変わらなければよい。バイトコードは変えてよい | [library/overview.md](library/overview.md) |
 | テストの書き方 | `test_` で始まる関数。`test.eq` などで確かめる | [library/test.md](library/test.md) |
 | メモリを使いすぎたとき | 実行中に使う量の上限をホストが決め、超えたら実行時エラーで止める。読み込みのぶんは数えず、確保そのものは断らない | [runtime/memory.md](runtime/memory.md), [runtime/embedding.md](runtime/embedding.md) |
+| 可変長引数とキーワード引数 | 最後の引数の `...` で余りを list に束ねて受け取る。呼び出しは `名前: 値` で並びを自由にできる（省略は無し）。束ねるのは呼ぶ側なので仮想マシンは変えない | [syntax.md](syntax.md) |

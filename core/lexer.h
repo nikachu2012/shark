@@ -11,7 +11,7 @@ enum TokKind : uint8_t {
   TK_EOF = 0, TK_Ident, TK_Int, TK_Float, TK_Str, TK_FStr, TK_Bytes,
   // 記号
   TK_LParen, TK_RParen, TK_LBrace, TK_RBrace, TK_LBracket, TK_RBracket,
-  TK_Comma, TK_Semi, TK_Colon, TK_Dot, TK_Arrow, TK_Question, TK_QDot, TK_QQ,
+  TK_Comma, TK_Semi, TK_Colon, TK_Dot, TK_Ellipsis, TK_Arrow, TK_Question, TK_QDot, TK_QQ,
   TK_Bang, TK_Plus, TK_Minus, TK_Star, TK_Slash, TK_Percent,
   TK_Assign, TK_PlusAssign, TK_MinusAssign, TK_StarAssign, TK_SlashAssign,
   TK_Eq, TK_Ne, TK_Lt, TK_Le, TK_Gt, TK_Ge, TK_AndAnd, TK_OrOr, TK_Amp, TK_Plus2,

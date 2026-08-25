@@ -339,6 +339,16 @@ void CodeGen::gen_ref(Node* e) {
 }
 
 // ------------------------------------------------------------------ 呼び出し
+int CodeGen::gen_args(Node* e) {
+  int n = e->list.size();
+  for (int i = 0; i < n; i++) gen_expr(e->list[i]);
+  if (e->vararg_from < 0) return n;
+  // 余った引数を list に束ねる（呼ばれる側は list を1つ受け取る）
+  emit(OP_NEW_LIST);
+  emit_i32(n - e->vararg_from);
+  return e->vararg_from + 1;
+}
+
 void CodeGen::gen_call(Node* e) {
   Node* callee = e->a;
   bool has_recv = (e->slot2 == 1);
@@ -355,16 +365,17 @@ void CodeGen::gen_call(Node* e) {
     emit(OP_NEW_INST);
     emit_i32(idx);
     if (e->resolved >= 0) {
-      for (int i = 0; i < n; i++) gen_expr(e->list[i]);
+      int pushed = gen_args(e);
       emit(OP_CALL);
       emit_i32(e->resolved);
-      emit_i32(n + 1);   // init は this を返す
+      emit_i32(pushed + 1);   // init は this を返す
     }
     return;
   }
 
   int skip = -1;
   bool args_done = false;
+  int pushed = 0;
   if (has_recv) {
     Node* recv = callee->a;
     bool lvalue = recv->kind == E_Ident || recv->kind == E_Field || recv->kind == E_Index ||
@@ -381,10 +392,10 @@ void CodeGen::gen_call(Node* e) {
     } else if (by_ref && (recv->kind == E_Index || recv->kind == E_Field) && n > 0) {
       // 受け手の場所は、引数を作り終えてから決める
       // （引数の中で同じ配列が伸びると、場所が動いてしまうため）
-      for (int i = 0; i < n; i++) gen_expr(e->list[i]);
+      pushed = gen_args(e);
       gen_ref(recv);
       emit(OP_ROT_UNDER);
-      emit_i32(n);
+      emit_i32(pushed);
       args_done = true;
     } else if (by_ref) {
       gen_ref(recv);
@@ -394,9 +405,8 @@ void CodeGen::gen_call(Node* e) {
     if (opt) skip = emit_jump(OP_JUMP_IF_NONE);
   }
   if (e->opcode == CK_Value) gen_expr(callee);
-  if (!args_done)
-    for (int i = 0; i < n; i++) gen_expr(e->list[i]);
-  int total = n + (has_recv ? 1 : 0);
+  if (!args_done) pushed = gen_args(e);
+  int total = pushed + (has_recv ? 1 : 0);
   switch (e->opcode) {
     case CK_Func:
       emit(OP_CALL);
@@ -415,7 +425,7 @@ void CodeGen::gen_call(Node* e) {
       break;
     case CK_Value:
       emit(OP_CALL_VALUE);
-      emit_i32(n);
+      emit_i32(pushed);
       break;
     case CK_CmpDyn:
       emit(OP_CMP_DYN);
@@ -609,10 +619,10 @@ void CodeGen::gen_expr(Node* e) {
 
     case E_Task: {
       Node* call = e->a;
-      for (int i = 0; i < call->list.size(); i++) gen_expr(call->list[i]);
+      int pushed = gen_args(call);
       emit(OP_TASK);
       emit_i32(call->resolved);
-      emit_i32(call->list.size());
+      emit_i32(pushed);
       break;
     }
 

@@ -15,7 +15,7 @@ namespace shark {
 
 // ファイルの先頭 4 バイト。単一バイナリの中に埋めたときも同じ
 extern const char kBytecodeMagic[4];   // "SHKC"
-const int kBytecodeVersion = 2;   // 2 で、文字列を表にまとめ、見張りを足した
+const int kBytecodeVersion = 4;   // 4 で、print/write が sep と end を最後の2引数として受ける形にした
 // 見張り（checksum）の置き場所。目印 4 バイトと版 4 バイトのうしろ
 const int kChecksumAt = 8;
 

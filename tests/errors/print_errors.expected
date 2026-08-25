@@ -1,24 +1,32 @@
 error[E0148]: print に渡せる値がありません
   --> print_errors.shk:13:9
-  13 |   print(nothing());     // 値がない
+  13 |   print(nothing());       // 値がない
      |         -------
   直し方: この呼び出しは何も返しません。返す関数を書くか、値を渡します
 
 error[E0136]: to_string() は Priv の中からしか呼べません
   --> print_errors.shk:14:9
-  14 |   print(Priv(1));       // to_string() が見えない
+  14 |   print(Priv(1));         // to_string() が見えない
      |         ----
   直し方: 外から呼ばせたいときは public を付けます
   直し方: print はクラスを出すとき to_string() を呼びます
 
-error[E0140]: print(...) には値を1つ渡します
-  --> print_errors.shk:15:3
-  15 |   print();              // 引数が足りない
-     |   -----
+error[E0148]: print に渡せる値がありません
+  --> print_errors.shk:15:12
+  15 |   print(1, nothing());    // 2つ目に値がない
+     |            -------
+  直し方: この呼び出しは何も返しません。返す関数を書くか、値を渡します
 
-error[E0140]: print(...) には値を1つ渡します
-  --> print_errors.shk:16:3
-  16 |   print(1, 2);          // 多すぎる
-     |   -----
+error[E0159]: print で名前を付けて渡せるのは sep: と end: だけです
+  --> print_errors.shk:16:18
+  16 |   print(1, sepp: "-");    // 使えない名前
+     |                  ---
+  直し方: 値の区切りは sep: "-"、終わりの文字は end: "" のように書きます
 
-4 件の誤りがあります
+error[E0101]: sepの型が合いません: string に int は入りません
+  --> print_errors.shk:17:17
+  17 |   print(1, sep: 2);       // sep は string
+     |                 - int
+  直し方: string(...) で文字列にします
+
+5 件の誤りがあります

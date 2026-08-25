@@ -14,16 +14,21 @@ static Value* A(Value* args, int i) { return val_deref(&args[i]); }
 static const Str& S(Value* args, int i) { return ((StrObj*)A(args, i)->o)->s; }
 
 // ------------------------------------------------------------------ 入出力
+// いくつでも受け取り、sep で区切って出し、最後に end を足す。print と write で共通。
+// sep と end は check.cpp が必ず最後の2つに並べる
+// （既定は sep が空白、end は print が改行・write が空。spec/library/builtin.md）
 static NativeStatus n_print(VM& vm, Value* a, int n, Value& out) {
-  (void)n;
-  vm.write_out(val_to_display(*A(a, 0)) + "\n");
   out = mk_void();
-  return N_Ok;
-}
-static NativeStatus n_write(VM& vm, Value* a, int n, Value& out) {
-  (void)n;
-  vm.write_out(val_to_display(*A(a, 0)));
-  out = mk_void();
+  if (n < 2) return N_Ok;   // 型検査を通っていれば来ない
+  const Str& sep = S(a, n - 2);
+  const Str& end = S(a, n - 1);
+  Str s;
+  for (int i = 0; i < n - 2; i++) {
+    if (i) s += sep;
+    s += val_to_display(*A(a, i));
+  }
+  s += end;
+  vm.write_out(s);
   return N_Ok;
 }
 static NativeStatus n_input(VM& vm, Value* a, int n, Value& out) {
@@ -590,7 +595,7 @@ void register_builtin(Registry& r) {
   Type* tr = t.simple(T_Range);
 
   r.add_untyped("print", n_print);
-  r.add_untyped("write", n_write);
+  r.add_untyped("write", n_print);   // 同じ実装。既定の end だけ check.cpp が変える
   r.add("input", n_input, t.optional_of(ts));
   r.add("sleep", n_sleep, tv, tf);
   r.add("assert", n_assert, tv, tb, ts);

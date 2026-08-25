@@ -74,5 +74,23 @@ func main() -> int {
   write(" / ");
   write(Rock(9));
   print("");
+
+  // 複数の値は空白で区切って出す。print() は改行だけ
+  print("答え:", 42, true);
+  print(1, Fish("こい", 60), [2, 3]);
+  print();
+  write("a", 1);
+  write("!");
+  print("");
+
+  // sep: で区切りを、end: で終わりを変えられる（名前は後ろならどの順でもよい）
+  print(1, 2, 3, sep: "-");
+  print("あ", "い", sep: "");
+  write("x", end: "|");
+  write("y", end: "|");
+  print("", end: "\n");
+  var sp = "・";
+  print("a", "b", end: "!\n", sep: sp);
+  print(Fish("ふな", 15), Rock(1), sep: " と ");
   return 0;
 }

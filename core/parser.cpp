@@ -217,14 +217,14 @@ FuncDecl* Parser::parse_func(bool is_public, bool is_virtual, bool is_override, 
                diag_.L("例: func add(a: int, b: int) -> int { }", "example: func add(a: int) -> int { }"));
   }
   if (at(TK_Lt)) parse_generic_params(&f->gparams);
-  parse_signature(f);
+  parse_signature(f, true);
   if (in_class && at(TK_Semi)) { p_++; return f; }  // 純粋仮想
   f->body = parse_block();
   return f;
 }
 
 // ( 引数 ) -> 戻り値。名前のある関数と、その場に書く関数で共通
-void Parser::parse_signature(FuncDecl* f) {
+void Parser::parse_signature(FuncDecl* f, bool allow_variadic) {
   expect(TK_LParen, "引数は ( で始めます", "expected ( for the parameter list");
   if (!at(TK_RParen)) {
     do {
@@ -236,6 +236,34 @@ void Parser::parse_signature(FuncDecl* f) {
       else { error_here(diag_.L("引数の名前が要ります", "expected a parameter name"), Str()); p_++; }
       if (!expect(TK_Colon, "引数には型注釈が要ります", "a parameter needs a type annotation")) break;
       pd.type = parse_type();
+      if (at(TK_Ellipsis)) {
+        // 可変長。余った引数がまとめて list になって入る（spec/syntax.md）
+        const Token& t = cur();
+        p_++;
+        pd.is_variadic = true;
+        if (!allow_variadic) {
+          Diagnostic& d = diag_.error("E0158", diag_.L("その場に書く関数に可変長引数（...）は書けません",
+                                                       "an inline function cannot take a variadic (...) parameter"));
+          d.spans.push(Span(t.line, t.col, 3));
+          d.help.push(diag_.L("要るときは、名前を付けた関数を一番外側に書きます",
+                              "use a named function at the top level instead"));
+          pd.is_variadic = false;
+        } else if (pd.is_ref) {
+          Diagnostic& d = diag_.error("E0158", diag_.L("可変長引数（...）に ref は付けられません",
+                                                       "a variadic (...) parameter cannot be ref"));
+          d.spans.push(Span(t.line, t.col, 3));
+          d.help.push(diag_.L("ref を外します。まとめて受け取る list は呼んだ側とは別の値です",
+                              "drop the ref; the collected list is its own value"));
+          pd.is_ref = false;
+        }
+      }
+      if (f->params.size() > 0 && f->params.back().is_variadic) {
+        Diagnostic& d = diag_.error("E0158", diag_.L("可変長引数（...）は、最後の引数に1つだけ書けます",
+                                                     "only the last parameter may be variadic (...)"));
+        d.spans.push(Span(pd.line, pd.col, pd.len > 0 ? pd.len : 1));
+        d.help.push(diag_.L("... の引数をいちばん後ろへ移します", "move the ... parameter to the end"));
+        f->params.back().is_variadic = false;
+      }
       f->params.push(pd);
     } while (eat(TK_Comma));
   }
@@ -266,7 +294,7 @@ Node* Parser::parse_lambda() {
     Vec<GenericParam> ignored;
     parse_generic_params(&ignored);
   }
-  parse_signature(f);
+  parse_signature(f, false);
   f->body = parse_block();
   n->fdecl = f;
   return n;
@@ -766,9 +794,40 @@ Node* Parser::parse_power() {
 
 void Parser::parse_args(Node* call) {
   p_++;  // (
+  bool any_named = false;
+  Vec<Str> names;
   if (!at(TK_RParen)) {
-    do { call->list.push(parse_expr()); } while (eat(TK_Comma));
+    do {
+      if (at(TK_Ident) && peek(1).kind == TK_Colon) {
+        // 名前を付けて渡す（キーワード引数）: f(width: 3)
+        Str nm = cur().text;
+        int nline = cur().line, ncol = cur().col, nlen = cur().len;
+        p_ += 2;
+        for (int i = 0; i < names.size(); i++) {
+          if (!(names[i] == nm)) continue;
+          Diagnostic& d = diag_.error("E0159", diag_.L(Str("引数 ") + nm + " に2回渡しています",
+                                                       Str("argument ") + nm + " is given twice"));
+          d.spans.push(Span(nline, ncol, nlen));
+          d.help.push(diag_.L("同じ名前は1回だけ書けます", "each name may be given only once"));
+          break;
+        }
+        names.push(nm);
+        any_named = true;
+        call->list.push(parse_expr());
+        continue;
+      }
+      if (any_named) {
+        Diagnostic& d = diag_.error("E0159", diag_.L("名前を付けた引数の後ろに、名前のない引数は書けません",
+                                                     "a positional argument cannot follow a named argument"));
+        d.spans.push(Span(cur().line, cur().col, cur().len > 0 ? cur().len : 1));
+        d.help.push(diag_.L("この引数にも 名前: 値 と書くか、名前を付けた引数より前へ移します",
+                            "name this argument too, or move it before the named ones"));
+      }
+      names.push(Str());
+      call->list.push(parse_expr());
+    } while (eat(TK_Comma));
   }
+  if (any_named) call->argnames = names;
   expect(TK_RParen, "呼び出しは ) で閉じます", "expected ) to close the call");
 }
 

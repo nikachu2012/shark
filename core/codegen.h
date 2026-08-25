@@ -22,6 +22,8 @@ class CodeGen {
   void gen_default(Type* t);
   void gen_call(Node* e);
   void gen_ref(Node* e);
+  // 呼び出しの引数を積む。可変長のぶんは list に束ねる。積んだ値の数を返す
+  int  gen_args(Node* e);
 
   int  emit(uint8_t op);
   void emit_i32(int v);

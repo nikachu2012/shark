@@ -181,6 +181,56 @@ class Fish {
 }
 ```
 
+## 可変長引数
+
+最後の引数の型に `...` を付けると、余った引数をいくつでも受け取れる。
+受け取った側では、まとめて1つの `list` になっている。
+
+```shark
+func sum(xs: int...) -> int {
+  var t = 0;
+  for var x in xs { t += x; }      // xs は list<int>
+  return t;
+}
+
+print(sum());          // 0
+print(sum(1, 2, 3));   // 6
+```
+
+### 決めごと
+
+- 書けるのは**最後の引数に1つだけ**。`ref` は付けられない（E0158）
+- 0個でもよい。そのときの list は空
+- その場に書く関数（名前のない func）には書けない。値としての型 `func(...)` に
+  可変長を表す書き方が無いため、**可変長の関数は値にもできない**（E0160）。
+  要るときは list を受け取る関数を書いて渡す
+- 同じ名前で**個数がぴったり合う**関数があれば、そちらを優先する
+- `f(xs: list<int>)` と `f(xs: int...)` は別の関数として定義できる。
+  `f([1, 2])` は list の方、`f(1, 2)` は可変長の方になる
+
+## キーワード引数
+
+呼び出しでは `名前: 値` と書いて、引数に名前を付けて渡せる。
+名前は関数を定義したときの引数の名前で、付ければ並びは自由になる。
+
+```shark
+func window(title: string, width: int, height: int) -> void { ... }
+
+window("さめ", 320, 240);                       // 位置で渡す
+window("さめ", height: 240, width: 320);        // 名前で渡す
+window(title: "さめ", width: 320, height: 240);
+```
+
+### 決めごと
+
+- 名前を付けた引数は、**位置で渡す引数より後ろ**に書く。同じ名前は1回だけ（E0159）
+- 渡す個数は変わらない（省略できる引数は無い）
+- 可変長の引数（`...`）に名前は付けられない。名前で渡せるのは、その前の引数だけ
+- オーバーロードの選び方は変わらない。**名前と型の両方が合う**ものを選ぶ
+- 処理系が持つ関数（`math.abs` など）・型変換・関数の値には使えない（E0159）。
+  例外は `print` と `write` の `sep:` `end:`（[library/builtin.md](library/builtin.md)）だけ
+- 引数は、書いた順ではなく**関数を定義したときの並びの順**に評価される
+
 ## 型引数の制約
 
 型引数の後ろに `: インタフェース名` を書くと、それを実装した型だけを受け取れる。
@@ -331,7 +381,9 @@ fieldDecl   := "var" IDENT ":" type ";"
 methodDecl  := ("virtual" | "override")? "func" IDENT "(" params? ")" ("->" type)?
                (block | ";")
 params      := param ("," param)*
-param       := "ref"? IDENT ":" type
+param       := "ref"? IDENT ":" type "..."?     # ... は最後の引数だけ（可変長）
+args        := arg ("," arg)*
+arg         := (IDENT ":")? expr                # 名前を付けるのは、位置で渡す引数の後ろだけ
 block       := "{" statement* "}"
 statement   := varDecl | assign | exprStmt | ifStmt | forStmt | whileStmt
              | "break" ";" | "continue" ";" | "return" expr? ";"

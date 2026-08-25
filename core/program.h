@@ -23,9 +23,10 @@ typedef NativeStatus (*NativeFn)(VM& vm, Value* args, int nargs, Value& out);
 
 struct ParamInfo {
   Str name;
-  Type* type;
+  Type* type;      // 可変長のときは list<要素> が入る（本体からは list として見える）
   bool is_ref;
-  ParamInfo() : type(0), is_ref(false) {}
+  bool is_variadic;
+  ParamInfo() : type(0), is_ref(false), is_variadic(false) {}
 };
 
 struct ClassInfo;

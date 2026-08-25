@@ -34,7 +34,7 @@ class Parser {
   // 宣言
   void parse_import();
   FuncDecl* parse_func(bool is_public, bool is_virtual, bool is_override, bool in_class);
-  void parse_signature(FuncDecl* f);
+  void parse_signature(FuncDecl* f, bool allow_variadic);
   ClassDecl* parse_class(bool is_public);
   GlobalDecl* parse_global(bool is_public, bool is_const);
   void parse_generic_params(Vec<GenericParam>* out);

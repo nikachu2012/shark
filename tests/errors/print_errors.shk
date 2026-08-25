@@ -10,9 +10,10 @@ class Priv {
 func nothing() -> void { }
 
 func main() -> int {
-  print(nothing());     // 値がない
-  print(Priv(1));       // to_string() が見えない
-  print();              // 引数が足りない
-  print(1, 2);          // 多すぎる
+  print(nothing());       // 値がない
+  print(Priv(1));         // to_string() が見えない
+  print(1, nothing());    // 2つ目に値がない
+  print(1, sepp: "-");    // 使えない名前
+  print(1, sep: 2);       // sep は string
   return 0;
 }

@@ -1,0 +1,71 @@
+error[E0158]: 可変長引数（...）は、最後の引数に1つだけ書けます
+  --> vararg_errors.shk:3:22
+  3 | func bad(xs: int..., y: int) -> void { }          // 最後の1つだけ
+    |                      -
+  直し方: ... の引数をいちばん後ろへ移します
+
+error[E0158]: 可変長引数（...）に ref は付けられません
+  --> vararg_errors.shk:4:22
+  4 | func bad2(ref xs: int...) -> void { }             // ref は付けられない
+    |                      ---
+  直し方: ref を外します。まとめて受け取る list は呼んだ側とは別の値です
+
+error[E0158]: その場に書く関数に可変長引数（...）は書けません
+  --> vararg_errors.shk:9:19
+  9 |   _ = func(xs: int...) -> void { };               // その場に書く関数には書けない
+    |                   ---
+  直し方: 要るときは、名前を付けた関数を一番外側に書きます
+
+error[E0159]: 名前を付けた引数の後ろに、名前のない引数は書けません
+  --> vararg_errors.shk:10:17
+  10 |   box(width: 1, "a");                             // 名前の後ろに名前なし
+     |                 ---
+  直し方: この引数にも 名前: 値 と書くか、名前を付けた引数より前へ移します
+
+error[E0159]: 引数 name に2回渡しています
+  --> vararg_errors.shk:11:18
+  11 |   box(name: "a", name: "b");                      // 同じ名前を2回
+     |                  ----
+  直し方: 同じ名前は1回だけ書けます
+
+error[E0160]: sum() は可変長引数（...）を持つので、そのままでは値にできません
+  --> vararg_errors.shk:8:7
+  8 |   _ = sum;                                        // 可変長は値にできない
+    |       ---
+  直し方: list を受け取る関数を書いて、それを渡します
+
+error[E0138]: box(width: int, string) に当てはまる関数がありません
+  --> vararg_errors.shk:10:3
+  10 |   box(width: 1, "a");                             // 名前の後ろに名前なし
+     |   ---
+  直し方: あるのは次のものです
+      box(string, int)
+
+error[E0138]: box(name: string, name: string) に当てはまる関数がありません
+  --> vararg_errors.shk:11:3
+  11 |   box(name: "a", name: "b");                      // 同じ名前を2回
+     |   ---
+  直し方: あるのは次のものです
+      box(string, int)
+
+error[E0138]: box(string, w: int) に当てはまる関数がありません
+  --> vararg_errors.shk:12:3
+  12 |   box("a", w: 1);                                 // 無い名前
+     |   ---
+  直し方: あるのは次のものです
+      box(string, int)
+
+error[E0159]: print で名前を付けて渡せるのは sep: と end: だけです
+  --> vararg_errors.shk:13:12
+  13 |   print(x: 1);                                    // print で使える名前は sep: と end: だけ
+     |            -
+  直し方: 値の区切りは sep: "-"、終わりの文字は end: "" のように書きます
+
+error[E0138]: sum(xs: list<int>) に当てはまる関数がありません
+  --> vararg_errors.shk:14:7
+  14 |   _ = sum(xs: [1]);                               // 可変長の引数に名前は付けられない
+     |       ---
+  直し方: あるのは次のものです
+      sum(int...)
+
+11 件の誤りがあります

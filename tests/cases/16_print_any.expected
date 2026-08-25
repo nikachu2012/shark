@@ -18,3 +18,12 @@ b"\x41\x42"
 true
 [Fish(name: "いわし", size: 10)]
 たい(50cm) / Rock(w: 9, tag: "石")
+答え: 42 true
+1 こい(60cm) [2, 3]
+
+a 1!
+1-2-3
+あい
+x|y|
+a・b!
+ふな(15cm) と Rock(w: 1, tag: "石")

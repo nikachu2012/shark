@@ -100,9 +100,11 @@ class Checker {
   bool resolve_convert(Node* call, const Str& name, Vec<Node*>& args);
   // クラスに引数なしの to_string() があるか（誤りは出さない）
   bool has_to_string(Type* recv);
-  // print(v) の v を v.to_string() に置き換える。置き換えたら true
-  bool wrap_to_string(Node* call, Type* recv);
+  // print(v) の v（at 番目の引数）を v.to_string() に置き換える。置き換えたら true
+  bool wrap_to_string(Node* call, Type* recv, int at = 0);
   bool resolve_ctor(Node* call, ClassInfo* c, Vec<Node*>& args, const Vec<Type*>& targs);
+  // 名前を付けた引数（キーワード引数）を受け取れない呼び出し。付いていれば誤りを出して true
+  bool reject_named_args(Node* e, const char* what_ja, const char* what_en);
 
   // --- 変数 ---
   Local* find_local(const Str& name);

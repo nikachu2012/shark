@@ -367,7 +367,7 @@ bool bytecode_write(Program& prog, const Registry& reg, const BytecodeHeader& h,
     for (int k = 0; k < f->params.size(); k++) {
       w.sid(f->params[k].name);
       w.sv(tix.find(f->params[k].type));
-      w.u8(f->params[k].is_ref ? 1 : 0);
+      w.u8((f->params[k].is_ref ? 1 : 0) | (f->params[k].is_variadic ? 2 : 0));
     }
     w.sv(tix.find(f->ret));
     int flags = 0;
@@ -668,7 +668,9 @@ bool bytecode_read(const Str& in, Program* prog, TypeTable& types, const Registr
       p.name = r.sid();
       int ti = r.idx();
       p.type = ti >= 0 && ti < tys.size() ? tys[ti] : 0;
-      p.is_ref = r.u8() != 0;
+      int pb = r.u8();
+      p.is_ref = (pb & 1) != 0;
+      p.is_variadic = (pb & 2) != 0;
       f->params.push(p);
     }
     int iret = r.idx();

@@ -475,6 +475,8 @@ void Checker::collect_class_bodies(Unit* u) {
         pi.name = md->params[p].name;
         pi.type = resolve_type(md->params[p].type, u, &tmp, c);
         pi.is_ref = md->params[p].is_ref;
+        pi.is_variadic = md->params[p].is_variadic;
+        if (pi.is_variadic) pi.type = t_.list_of(pi.type);   // 本体からは list として見える
         f->params.push(pi);
       }
       f->ret = md->ret ? resolve_type(md->ret, u, &tmp, c) : t_.t_void();
@@ -556,6 +558,7 @@ void Checker::layout_class(ClassInfo* c) {
 static bool params_match(ClassInfo* impl, FuncInfo* parent, FuncInfo* child) {
   if (parent->params.size() != child->params.size()) return false;
   for (int i = 0; i < parent->params.size(); i++) {
+    if (parent->params[i].is_variadic != child->params[i].is_variadic) return false;
     Type* pt = parent->params[i].type;
     Type* ct = child->params[i].type;
     if (pt && pt->kind == T_Generic && pt->name == "This") {
@@ -632,6 +635,8 @@ void Checker::collect_funcs(Unit* u) {
       pi.name = fd->params[p].name;
       pi.type = resolve_type(fd->params[p].type, u, &tmp, 0);
       pi.is_ref = fd->params[p].is_ref;
+      pi.is_variadic = fd->params[p].is_variadic;
+      if (pi.is_variadic) pi.type = t_.list_of(pi.type);   // 本体からは list として見える
       f->params.push(pi);
     }
     f->ret = fd->ret ? resolve_type(fd->ret, u, &tmp, 0) : t_.t_void();
@@ -1367,15 +1372,33 @@ Type* Checker::check_ident(Node* e) {
     return g->type ? g->type : t_.t_unknown();
   }
   // 関数を値として使う
+  FuncInfo* variadic_only = 0;
   for (int i = 0; i < prog_.funcs.size(); i++) {
     FuncInfo* f = prog_.funcs[i];
     if (f->owner || !(f->name == e->name)) continue;
     if (!(f->module == unit_->module)) continue;
+    if (f->params.size() > 0 && f->params.back().is_variadic) {
+      if (!variadic_only) variadic_only = f;   // 可変長でない同名のものがあれば、そちらを使う
+      continue;
+    }
     Vec<Type*> ps;
     for (int k = 0; k < f->params.size(); k++) ps.push(f->params[k].type);
     e->resolved = f->index;
     e->opcode = CK_Func;
     return t_.func_type(ps, f->ret);
+  }
+  if (variadic_only) {
+    Diagnostic& d = diag_.error("E0160",
+        diag_.L(e->name + "() は可変長引数（...）を持つので、そのままでは値にできません",
+                e->name + "() takes a variadic (...) parameter and cannot be used as a value"));
+    d.spans.push(Span(e->line, e->col, e->len));
+    d.help.push(diag_.L("list を受け取る関数を書いて、それを渡します",
+                        "wrap it in a function that takes a list and pass that"));
+    Vec<Type*> ps;
+    for (int k = 0; k < variadic_only->params.size(); k++) ps.push(variadic_only->params[k].type);
+    e->resolved = variadic_only->index;
+    e->opcode = CK_Func;
+    return t_.func_type(ps, variadic_only->ret);
   }
   // モジュール名
   bool found = false;
@@ -1864,14 +1887,32 @@ Type* Checker::check_field(Node* e) {
           return g->type ? g->type : t_.t_unknown();
         }
       }
+      FuncInfo* variadic_only = 0;
       for (int i = 0; i < prog_.funcs.size(); i++) {
         FuncInfo* f = prog_.funcs[i];
         if (f->owner || !(f->module == mod) || !(f->name == e->name)) continue;
+        if (f->params.size() > 0 && f->params.back().is_variadic) {
+          if (!variadic_only) variadic_only = f;
+          continue;
+        }
         Vec<Type*> ps;
         for (int k = 0; k < f->params.size(); k++) ps.push(f->params[k].type);
         e->resolved = f->index;
         e->opcode = CK_Func;
         return t_.func_type(ps, f->ret);
+      }
+      if (variadic_only) {
+        Diagnostic& d = diag_.error("E0160",
+            diag_.L(e->name + "() は可変長引数（...）を持つので、そのままでは値にできません",
+                    e->name + "() takes a variadic (...) parameter and cannot be used as a value"));
+        d.spans.push(Span(e->line, e->col, e->len));
+        d.help.push(diag_.L("list を受け取る関数を書いて、それを渡します",
+                            "wrap it in a function that takes a list and pass that"));
+        Vec<Type*> ps;
+        for (int k = 0; k < variadic_only->params.size(); k++) ps.push(variadic_only->params[k].type);
+        e->resolved = variadic_only->index;
+        e->opcode = CK_Func;
+        return t_.func_type(ps, variadic_only->ret);
       }
       Diagnostic& d = diag_.error("E0135", diag_.L(mod + " に " + e->name + " はありません",
                                                    mod + " has no member named " + e->name));
@@ -1986,6 +2027,52 @@ static bool unify(Type* pt, Type* at, const Vec<Str>& names, Vec<Type*>& out) {
   }
 }
 
+// 可変長引数の要素の型（list<T> の T）
+static Type* elem_of(Type* t) { return t && t->kind == T_List ? t->a : t; }
+
+// 候補の表示（可変長は int... のように出す）
+static void collect_sig_f(Str& out, const Str& name, FuncInfo* f) {
+  out += name;
+  out += "(";
+  for (int i = 0; i < f->params.size(); i++) {
+    if (i) out += ", ";
+    if (f->params[i].is_variadic) { out += type_name(elem_of(f->params[i].type)); out += "..."; }
+    else out += type_name(f->params[i].type);
+  }
+  out += ")";
+}
+
+// 引数を仮引数へ割り当てる。names[i] は付けた名前（"" は位置で渡したもの。names 自体が
+// 無ければ全部位置）。割り当てられたら order に「最終位置 -> args の番号」を入れて true。
+// 可変長のときは、固定分の後ろに、束ねる分（余った位置引数）が続く
+static bool map_call_args(const Vec<ParamInfo>* fps, int nparams, bool variadic, int nargs,
+                          const Vec<Str>* names, Vec<int>* order) {
+  int nfixed = variadic ? nparams - 1 : nparams;
+  int npos = nargs;
+  if (names) { npos = 0; while (npos < nargs && (*names)[npos].size() == 0) npos++; }
+  if (npos < nargs && !fps) return false;   // 引数の名前が分からない相手には、名前で渡せない
+  if (!variadic && nargs > nparams) return false;
+  if (!variadic && npos > nfixed) return false;
+  Vec<int> filled;
+  filled.resize(nfixed, -1);
+  Vec<int> extras;
+  for (int i = 0; i < npos && i < nfixed; i++) filled[i] = i;
+  for (int i = nfixed; i < npos; i++) extras.push(i);
+  for (int i = npos; i < nargs; i++) {
+    const Str& nm = (*names)[i];
+    int at = -1;
+    for (int k = 0; k < nfixed; k++)
+      if ((*fps)[k].name == nm) { at = k; break; }
+    if (at < 0 || filled[at] != -1) return false;
+    filled[at] = i;
+  }
+  for (int k = 0; k < nfixed; k++) if (filled[k] == -1) return false;
+  order->clear();
+  for (int k = 0; k < nfixed; k++) order->push(filled[k]);
+  for (int i = 0; i < extras.size(); i++) order->push(extras[i]);
+  return true;
+}
+
 bool Checker::resolve_overload(Node* call, const Vec<int>& cand_funcs, const Vec<int>& cand_natives,
                                Vec<Node*>& args, const Str& shown, const Vec<Str>* cls_gparams,
                                const Vec<Type*>* cls_targs) {
@@ -1996,6 +2083,9 @@ bool Checker::resolve_overload(Node* call, const Vec<int>& cand_funcs, const Vec
   bool ambiguous = false;
   Vec<Type*> best_targs;
   Type* best_ret = 0;
+  Vec<int> best_order;
+  bool best_variadic = false;
+  const Vec<Str>* anames = (call->argnames.size() == nargs && nargs > 0) ? &call->argnames : 0;
 
   for (int pass = 0; pass < 2; pass++) {
     int count = pass == 0 ? cand_funcs.size() : cand_natives.size();
@@ -2021,7 +2111,11 @@ bool Checker::resolve_overload(Node* call, const Vec<int>& cand_funcs, const Vec
         for (int i = 0; i < ne.params.size(); i++) ps.push(ne.params[i]);
         ret = ne.ret;
       }
-      if (ps.size() != nargs) continue;
+      bool variadic = (pass == 0 && fi->params.size() > 0 && fi->params.back().is_variadic);
+      Vec<int> order;
+      if (!map_call_args(pass == 0 ? &fi->params : 0, ps.size(), variadic, nargs, anames, &order))
+        continue;
+      int nfixed = variadic ? ps.size() - 1 : ps.size();
 
       Vec<Type*> targs;
       if (gnames) {
@@ -2030,8 +2124,10 @@ bool Checker::resolve_overload(Node* call, const Vec<int>& cand_funcs, const Vec
         for (int i = 0; i < call->targs.size() && i < targs.size(); i++)
           targs[i] = resolve_type(call->targs[i], unit_, fc_, fc_->cls);
         bool ok = true;
-        for (int i = 0; i < nargs; i++)
-          if (!unify(ps[i], args[i]->type, *gnames, targs)) { ok = false; break; }
+        for (int k = 0; k < order.size(); k++) {
+          Type* w = k < nfixed ? ps[k] : elem_of(ps[ps.size() - 1]);
+          if (!unify(w, args[order[k]]->type, *gnames, targs)) { ok = false; break; }
+        }
         if (!ok) continue;
         for (int i = 0; i < targs.size(); i++) if (!targs[i]) targs[i] = t_.t_unknown();
         Vec<Type*> ps2;
@@ -2040,23 +2136,27 @@ bool Checker::resolve_overload(Node* call, const Vec<int>& cand_funcs, const Vec
         ret = subst(ret, *gnames, targs);
       }
 
-      int score = 2;
+      int score = 3;
       bool ok = true;
-      for (int i = 0; i < nargs; i++) {
-        Type* at = args[i]->type;
-        if (type_same(ps[i], at)) continue;
-        if (type_assignable(ps[i], at)) { score = 1; continue; }
+      for (int k = 0; k < order.size(); k++) {
+        Type* w = k < nfixed ? ps[k] : elem_of(ps[ps.size() - 1]);
+        Type* at = args[order[k]]->type;
+        if (type_same(w, at)) continue;
+        if (type_assignable(w, at)) { score = 2; continue; }
         ok = false;
         break;
       }
       if (!ok) continue;
-      if (gnames) score -= 1;  // 普通の関数を優先する
+      if (gnames) score -= 1;    // 普通の関数を優先する
+      if (variadic) score -= 1;  // 個数がぴったりのものを優先する
       if (score > best_score) {
         best_score = score;
         best = idx;
         best_native = (pass == 1);
         best_targs = targs;
         best_ret = ret;
+        best_order = order;
+        best_variadic = variadic;
         ambiguous = false;
       } else if (score == best_score && best >= 0) {
         ambiguous = true;
@@ -2067,18 +2167,19 @@ bool Checker::resolve_overload(Node* call, const Vec<int>& cand_funcs, const Vec
   if (best < 0) {
     Str want;
     want += "(";
-    for (int i = 0; i < nargs; i++) { if (i) want += ", "; want += type_name(args[i]->type); }
+    for (int i = 0; i < nargs; i++) {
+      if (i) want += ", ";
+      if (anames && (*anames)[i].size()) { want += (*anames)[i]; want += ": "; }
+      want += type_name(args[i]->type);
+    }
     want += ")";
     Diagnostic& d = diag_.error("E0138", diag_.L(shown + want + " に当てはまる関数がありません",
                                                  Str("no function matches ") + shown + want));
     d.spans.push(Span(call->line, call->col, call->len));
     Str cands;
     for (int i = 0; i < cand_funcs.size(); i++) {
-      FuncInfo* f = prog_.funcs[cand_funcs[i]];
-      Vec<Type*> ps;
-      for (int k = 0; k < f->params.size(); k++) ps.push(f->params[k].type);
       if (cands.size()) cands += "\n  ";
-      collect_sig(cands, shown, ps);
+      collect_sig_f(cands, shown, prog_.funcs[cand_funcs[i]]);
     }
     for (int i = 0; i < cand_natives.size(); i++) {
       const NativeEntry& ne = reg_[cand_natives[i]];
@@ -2090,6 +2191,9 @@ bool Checker::resolve_overload(Node* call, const Vec<int>& cand_funcs, const Vec
       d.help.push(diag_.L(Str("あるのは次のものです\n  ") + cands, Str("candidates:\n  ") + cands));
     else
       d.help.push(diag_.L("名前の綴りを確かめます", "check the spelling"));
+    if (anames && cand_natives.size())
+      d.help.push(diag_.L("処理系が持つ関数には、名前を付けて渡せません（宣言の順に渡します）",
+                          "native functions do not take named arguments; pass them in order"));
     call->type = t_.t_unknown();
     return false;
   }
@@ -2121,8 +2225,26 @@ bool Checker::resolve_overload(Node* call, const Vec<int>& cand_funcs, const Vec
     call->opcode = CK_Native;
     call->resolved = best;
   }
+
+  // 呼び出しの並びを、仮引数の順に合わせる（名前を付けた引数と、可変長に束ねる分）。
+  // 以後、引数は仮引数の順に評価される
+  int nfixed = best_variadic ? ps.size() - 1 : ps.size();
+  bool same_order = true;
+  for (int k = 0; k < best_order.size(); k++)
+    if (best_order[k] != k) { same_order = false; break; }
+  if (!same_order) {
+    Vec<Node*> na;
+    for (int k = 0; k < best_order.size(); k++) na.push(args[best_order[k]]);
+    args = na;
+    call->list = na;
+  }
+  call->argnames.clear();
+  call->vararg_from = best_variadic ? nfixed : -1;
+
   for (int i = 0; i < nargs; i++) {
-    bool want_ref = fps ? (*fps)[i].is_ref : (i == 0 && reg_[best].ref0);
+    bool in_var = best_variadic && i >= nfixed;
+    Type* wt = in_var ? elem_of(ps[ps.size() - 1]) : ps[i];
+    bool want_ref = in_var ? false : (fps ? (*fps)[i].is_ref : (i == 0 && reg_[best].ref0));
     bool given_ref = args[i]->kind == E_Ref;
     if (want_ref && !given_ref) {
       Diagnostic& d = diag_.error("E0301", diag_.L("ここは ref を付けて渡します",
@@ -2164,7 +2286,7 @@ bool Checker::resolve_overload(Node* call, const Vec<int>& cand_funcs, const Vec
                             "declare that variable as a top-level var"));
       }
     }
-    need_assign(ps[i], args[i]->type, args[i], "引数", "argument");
+    need_assign(wt, args[i]->type, args[i], "引数", "argument");
   }
   call->type = best_ret ? best_ret : t_.t_void();
   return true;
@@ -2308,7 +2430,8 @@ bool Checker::resolve_class_method(Node* call, Type* recv, const Str& name, Vec<
         if (g->params.size() != f->params.size()) continue;
         bool same = true;
         for (int m = 0; m < f->params.size(); m++)
-          if (!type_same(g->params[m].type, f->params[m].type)) { same = false; break; }
+          if (!type_same(g->params[m].type, f->params[m].type) ||
+              g->params[m].is_variadic != f->params[m].is_variadic) { same = false; break; }
         if (same) { dup = true; break; }
       }
       if (!dup) cand.push(f->index);
@@ -2386,10 +2509,10 @@ bool Checker::has_to_string(Type* recv) {
 // print(v) の引数を v.to_string() の呼び出しに差し替える。
 // 呼び出しの節を新しく作って引数の場所に置くので、print 自体はそのまま残る。
 // T? のときは v?.to_string() にするので、値が無ければ none がそのまま出る
-bool Checker::wrap_to_string(Node* call, Type* recv) {
+bool Checker::wrap_to_string(Node* call, Type* recv, int at) {
   bool opt = is_optional(recv);
   Type* base = opt ? recv->a : recv;
-  Node* obj = call->list[0];
+  Node* obj = call->list[at];
   Node* fld = arena_.make<Node>();
   fld->kind = E_Field;
   fld->name = Str("to_string");
@@ -2409,7 +2532,7 @@ bool Checker::wrap_to_string(Node* call, Type* recv) {
                 : resolve_class_method(mc, base, Str("to_string"), no_args, false);
   if (!ok) return false;
   if (opt && mc->type) mc->type = t_.optional_of(mc->type);
-  call->list[0] = mc;
+  call->list[at] = mc;
   return true;
 }
 
@@ -2690,6 +2813,19 @@ bool Checker::resolve_builtin_method(Node* call, Type* recv, const Str& name, Ve
 }
 
 // ------------------------------------------------------------------ 呼び出し全体
+bool Checker::reject_named_args(Node* e, const char* what_ja, const char* what_en) {
+  bool any = false;
+  for (int i = 0; i < e->argnames.size(); i++)
+    if (e->argnames[i].size()) { any = true; break; }
+  if (!any) return false;
+  Diagnostic& d = diag_.error("E0159", diag_.L(Str(what_ja) + "には、名前を付けた引数（名前: 値）を渡せません",
+                                               Str("named arguments cannot be used with ") + what_en));
+  d.spans.push(Span(e->line, e->col, e->len));
+  d.help.push(diag_.L("名前を外して、宣言の順に渡します", "drop the names and pass the arguments in order"));
+  e->argnames.clear();
+  return true;
+}
+
 Type* Checker::check_call(Node* e) {
   Node* callee = e->a;
   Vec<Node*> args;
@@ -2701,10 +2837,12 @@ Type* Checker::check_call(Node* e) {
   if (callee->kind == E_Ident) {
     const Str& name = callee->name;
     if (name == "int" || name == "float" || name == "string" || name == "bool") {
+      reject_named_args(e, "型変換", "a type conversion");
       resolve_convert(e, name, args);
       return e->type;
     }
     if (name == "channel") {
+      reject_named_args(e, "channel", "channel");
       Type* vt = e->targs.size() ? resolve_type(e->targs[0], unit_, fc_, fc_->cls) : t_.t_unknown();
       if (!e->targs.size()) {
         Diagnostic& d = diag_.error("E0146", diag_.L("channel には型を書きます: channel<int>()",
@@ -2727,6 +2865,7 @@ Type* Checker::check_call(Node* e) {
       return t_.channel_of(vt);
     }
     if (name == "len") {
+      reject_named_args(e, "len", "len");
       if (n != 1) {
         err("E0140", diag_.L("len(...) には値を1つ渡します", "len(...) takes one value"), e);
         return t_.t_int();
@@ -2746,29 +2885,71 @@ Type* Checker::check_call(Node* e) {
       return t_.t_int();
     }
     if (name == "print" || name == "write") {
-      if (n != 1) {
-        err("E0140", diag_.L(name + "(...) には値を1つ渡します", name + "(...) takes one value"), e);
-        return t_.t_void();
+      // どんな型でも、いくつでも受け取る。名前を付けて渡せるのは
+      // sep:（値の区切り。既定は空白）と end:（終わりに足す文字。
+      // 既定は print が改行、write は空）だけ
+      Node* sep_arg = 0;
+      Node* end_arg = 0;
+      if (e->argnames.size() == e->list.size() && e->list.size() > 0) {
+        Vec<Node*> vals;
+        for (int i = 0; i < e->list.size(); i++) {
+          const Str& nm = e->argnames[i];
+          if (nm == "sep") { sep_arg = e->list[i]; continue; }
+          if (nm == "end") { end_arg = e->list[i]; continue; }
+          if (nm.size()) {
+            Diagnostic& d = diag_.error("E0159",
+                diag_.L(name + " で名前を付けて渡せるのは sep: と end: だけです",
+                        Str("only sep: and end: may be named in ") + name));
+            d.spans.push(Span(e->list[i]->line, e->list[i]->col, e->list[i]->len));
+            d.help.push(diag_.L("値の区切りは sep: \"-\"、終わりの文字は end: \"\" のように書きます",
+                                "write sep: \"-\" for the separator, end: \"\" for the ending"));
+            continue;   // この引数は捨てて先へ進む
+          }
+          vals.push(e->list[i]);
+        }
+        e->list = vals;
+        e->argnames.clear();
       }
-      // どんな型でも受け取る。クラスは to_string() があれば自動で呼び、
-      // 無ければ実行時に クラス名(メンバ: 値, ...) の形で出す
-      Type* at = args[0]->type;
-      if (at && at->kind == T_Void) {
-        Diagnostic& d = diag_.error("E0148", diag_.L(name + " に渡せる値がありません",
-                                                     name + " needs a value"));
-        d.spans.push(Span(args[0]->line, args[0]->col, args[0]->len));
-        d.help.push(diag_.L("この呼び出しは何も返しません。返す関数を書くか、値を渡します",
-                            "this call returns nothing; pass a value instead"));
-      } else if (at && has_to_string(at)) {
-        // to_string() が見えないなど、差し替えに失敗したときのために、
-        // なぜ to_string() の話になったのかを添える
-        int before = diag_.size();
-        wrap_to_string(e, at);
-        for (int i = before; i < diag_.size(); i++)
-          diag_.items()[i].help.push(
-              diag_.L(name + " はクラスを出すとき to_string() を呼びます",
-                      name + " calls to_string() to show a class"));
+      // 値の並び。クラスは to_string() があれば自動で呼び、無ければ実行時に
+      // クラス名(メンバ: 値, ...) の形で出す
+      for (int i = 0; i < e->list.size(); i++) {
+        Type* at = e->list[i]->type;
+        if (at && at->kind == T_Void) {
+          Diagnostic& d = diag_.error("E0148", diag_.L(name + " に渡せる値がありません",
+                                                       name + " needs a value"));
+          d.spans.push(Span(e->list[i]->line, e->list[i]->col, e->list[i]->len));
+          d.help.push(diag_.L("この呼び出しは何も返しません。返す関数を書くか、値を渡します",
+                              "this call returns nothing; pass a value instead"));
+        } else if (at && has_to_string(at)) {
+          // to_string() が見えないなど、差し替えに失敗したときのために、
+          // なぜ to_string() の話になったのかを添える
+          int before = diag_.size();
+          wrap_to_string(e, at, i);
+          for (int k = before; k < diag_.size(); k++)
+            diag_.items()[k].help.push(
+                diag_.L(name + " はクラスを出すとき to_string() を呼びます",
+                        name + " calls to_string() to show a class"));
+        }
       }
+      if (sep_arg) need_assign(t_.t_string(), sep_arg->type, sep_arg, "sep", "sep");
+      if (end_arg) need_assign(t_.t_string(), end_arg->type, end_arg, "end", "end");
+      // 命令には sep と end を必ず最後に並べて渡す（実装は後ろ2つを取り出す）
+      if (!sep_arg) {
+        sep_arg = arena_.make<Node>();
+        sep_arg->kind = E_Str;
+        sep_arg->name = Str(" ");
+        sep_arg->line = e->line; sep_arg->col = e->col; sep_arg->len = e->len;
+        sep_arg->type = t_.t_string();
+      }
+      if (!end_arg) {
+        end_arg = arena_.make<Node>();
+        end_arg->kind = E_Str;
+        end_arg->name = Str(name == "print" ? "\n" : "");
+        end_arg->line = e->line; end_arg->col = e->col; end_arg->len = e->len;
+        end_arg->type = t_.t_string();
+      }
+      e->list.push(sep_arg);
+      e->list.push(end_arg);
       e->opcode = CK_Native;
       e->resolved = reg_.find(name == "print" ? "print" : "write");
       return t_.t_void();
@@ -2781,10 +2962,18 @@ Type* Checker::check_call(Node* e) {
       if (targs.size() == 0 && c->gparams.size() > 0) {
         // 引数から型を決める（init の引数と突き合わせる）
         for (int i = 0; i < c->gparams.size(); i++) targs.push(0);
+        const Vec<Str>* anames = (e->argnames.size() == n && n > 0) ? &e->argnames : 0;
         for (int i = 0; i < c->methods.size(); i++) {
           FuncInfo* f = prog_.funcs[c->methods[i].func];
-          if (!f->is_init || f->params.size() != (int)n) continue;
-          for (int k = 0; k < n; k++) unify(f->params[k].type, args[k]->type, c->gparams, targs);
+          if (!f->is_init) continue;
+          bool variadic = f->params.size() > 0 && f->params.back().is_variadic;
+          Vec<int> order;
+          if (!map_call_args(&f->params, f->params.size(), variadic, n, anames, &order)) continue;
+          int nfixed = variadic ? f->params.size() - 1 : f->params.size();
+          for (int k = 0; k < order.size(); k++) {
+            Type* w = k < nfixed ? f->params[k].type : elem_of(f->params[f->params.size() - 1].type);
+            unify(w, args[order[k]]->type, c->gparams, targs);
+          }
           break;
         }
         for (int i = 0; i < targs.size(); i++) if (!targs[i]) targs[i] = t_.t_unknown();
@@ -2811,6 +3000,7 @@ Type* Checker::check_call(Node* e) {
     if (ft) {
       callee->type = ft;
       e->opcode = CK_Value;
+      reject_named_args(e, "関数の値の呼び出し", "a function value call");
       if (ft->params.size() != n) {
         Diagnostic& d = diag_.error("E0149", diag_.L(Str("引数の数が違います: ") + str_from_int(ft->params.size()) +
                                                          " 個必要です",
@@ -2934,6 +3124,7 @@ Type* Checker::check_call(Node* e) {
             callee->type = g->type;
             callee->opcode = CK_None;   // モジュールの定数でも関数でもない
             e->opcode = CK_Value;
+            reject_named_args(e, "関数の値の呼び出し", "a function value call");
             Type* ft = g->type;
             if (ft->params.size() != n) {
               Diagnostic& d = diag_.error("E0149", diag_.L(Str("引数の数が違います: ") +
@@ -3048,6 +3239,7 @@ Type* Checker::check_call(Node* e) {
         e->type = t_.t_unknown();
       }
     } else {
+      reject_named_args(e, "このメソッド", "this method");
       ok = resolve_builtin_method(e, rt, mname, args);
       if (!ok) {
         Diagnostic& d = diag_.error("E0137", diag_.L(type_name(rt) + " に " + mname + "() はありません",
@@ -3080,6 +3272,7 @@ Type* Checker::check_call(Node* e) {
   Type* ct = check_expr(callee);
   if (ct && ct->kind == T_Func) {
     e->opcode = CK_Value;
+    reject_named_args(e, "関数の値の呼び出し", "a function value call");
     if (ct->params.size() != n) {
       Diagnostic& d = diag_.error("E0149", diag_.L("引数の数が違います", "wrong number of arguments"));
       d.spans.push(Span(e->line, e->col, e->len));
@@ -3300,7 +3493,8 @@ bool Checker::check_all() {
       if (a->params.size() != b->params.size()) continue;
       bool same = true;
       for (int m = 0; m < a->params.size(); m++)
-        if (!type_same(a->params[m].type, b->params[m].type)) { same = false; break; }
+        if (!type_same(a->params[m].type, b->params[m].type) ||
+            a->params[m].is_variadic != b->params[m].is_variadic) { same = false; break; }
       if (!same) continue;
       Diagnostic& d = diag_.error("E0154", diag_.L(Str("同じ引数の ") + a->name + "() が2つあります",
                                                    Str("duplicate definition of ") + a->name + "()"));

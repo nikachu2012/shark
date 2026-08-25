@@ -1,0 +1,16 @@
+// 可変長引数とキーワード引数の誤り
+func sum(xs: int...) -> int { return xs.len(); }
+func bad(xs: int..., y: int) -> void { }          // 最後の1つだけ
+func bad2(ref xs: int...) -> void { }             // ref は付けられない
+func box(name: string, width: int) -> void { }
+
+func main() -> int {
+  _ = sum;                                        // 可変長は値にできない
+  _ = func(xs: int...) -> void { };               // その場に書く関数には書けない
+  box(width: 1, "a");                             // 名前の後ろに名前なし
+  box(name: "a", name: "b");                      // 同じ名前を2回
+  box("a", w: 1);                                 // 無い名前
+  print(x: 1);                                    // print で使える名前は sep: と end: だけ
+  _ = sum(xs: [1]);                               // 可変長の引数に名前は付けられない
+  return 0;
+}
