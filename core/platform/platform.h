@@ -68,6 +68,7 @@ enum ScreenEventKind {
   SEV_Key,     // キーが押された・離された（code に下の番号）
   SEV_Text,    // 文字が打たれた（text に UTF-8）
   SEV_Mouse,   // 押された・離された・動いた（code はボタン、-1 は移動）
+  SEV_Resize,  // 窓の大きさが変わった（x, y に新しい面の大きさ。画素）
 };
 
 // キーの番号。印字できる文字はその ASCII（英字は小文字）をそのまま使い、
@@ -86,7 +87,7 @@ struct ScreenEvent {
   int kind;      // ScreenEventKind
   int code;      // SEV_Key: ScreenKey / SEV_Mouse: 0=左 1=中 2=右、-1 は移動
   bool down;     // SEV_Key / SEV_Mouse: 押されたなら true
-  int x, y;      // SEV_Mouse: 面の中の位置（画素）
+  int x, y;      // SEV_Mouse: 面の中の位置（画素） / SEV_Resize: 新しい面の大きさ
   char text[8];  // SEV_Text: 打たれた文字（UTF-8。0 で終わる）
   ScreenEvent() : kind(SEV_None), code(0), down(false), x(0), y(0) { text[0] = 0; }
 };
@@ -131,6 +132,15 @@ struct PlatformScreen {
   // --- 切り貼りの置き場（クリップボード）。無ければ 0 -------------------
   bool (*clipboard_get)(Str* out);
   void (*clipboard_set)(const char* s);
+
+  // --- 窓の縁を引いている間の描き直し。無ければ 0 -----------------------
+  //
+  // 縁を引いている間、OS がプログラムを止めてしまう機種（macOS）で使う。
+  // コアが open のあとに fn を渡しておくと、移植層は止まっている間に
+  // 「この大きさで絵を出し直してくれ」と fn を呼べる。fn は面を作り直し、
+  // 覚えている部品を新しい大きさで置き直して present まで済ませたら true を返す。
+  // false なら移植層が自分の手当て（等倍のまま置き直すなど）に落ちる
+  void (*set_redraw)(bool (*fn)(int w, int h));
 };
 
 // --- 必須 ----------------------------------------------------------------

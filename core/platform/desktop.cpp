@@ -483,6 +483,9 @@ void s_present(const uint32_t* px, int w, int h) {
   if (g_active) g_active->present(px, w, h);
 }
 bool s_poll(ScreenEvent* out) { return g_active ? g_active->poll(out) : false; }
+void s_set_redraw(bool (*fn)(int, int)) {
+  if (g_active && g_active->set_redraw) g_active->set_redraw(fn);
+}
 
 // 画面の細かさ。**開く前にも呼べる**ので、まだ選んでいなければ出せそうな順に尋ねる。
 // 窓を使わないと決まっているとき（SHARK_UI）は 1。端末にも見えない面にも細かさは無い
@@ -511,6 +514,7 @@ struct ScreenInit {
     kScreen.text_replace = 0;
     kScreen.clipboard_get = s_clipboard_get;   // 画面が無くても使えることがある
     kScreen.clipboard_set = s_clipboard_set;
+    kScreen.set_redraw = s_set_redraw;
   }
 };
 ScreenInit g_screen_init;

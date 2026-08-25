@@ -47,6 +47,7 @@ static void reset_input() {
 static void ui_reset_widgets();   // 宣言的な層の覚えごとを消す（下で定義）
 
 static void input_stop();   // 下で定義
+static bool ui_live_redraw(int w, int h);   // 下で定義（窓の縁を引いている間の置き直し）
 
 static void drop_surface() {
   input_stop();
@@ -74,6 +75,30 @@ static bool need_open(VM& vm) {
   vm.panic(vm.L("先に ui.open(横, 縦) で面を用意します",
                 "call ui.open(width, height) first"));
   return false;
+}
+
+// 窓の大きさが変わった（SEV_Resize）。面を同じ大きさに作り直す。
+// 前の中身は左上に残し、広がったところは下地の色にする。切り抜きは面いっぱいに戻る
+static void resize_surface(int w, int h) {
+  if (!g_open || !g_px) return;
+  if (w < 1) w = 1;
+  if (h < 1) h = 1;
+  if (w > 16384) w = 16384;
+  if (h > 16384) h = 16384;
+  if (w == g_w && h == g_h) return;
+  size_t bytes = (size_t)w * (size_t)h * sizeof(uint32_t);
+  // 使ってよいメモリに入らないなら、面は今の大きさのまま（窓には引き伸ばして出る）
+  if (sk_mem_limit() != 0 && bytes > sk_mem_limit()) return;
+  uint32_t* np = (uint32_t*)sk_alloc(bytes);
+  for (int y = 0; y < h; y++)
+    for (int x = 0; x < w; x++)
+      np[(size_t)y * (size_t)w + (size_t)x] =
+          (x < g_w && y < g_h) ? g_px[(size_t)y * (size_t)g_w + (size_t)x] : g_bg;
+  sk_free(g_px);
+  g_px = np;
+  g_w = w;
+  g_h = h;
+  g_cx0 = 0; g_cy0 = 0; g_cx1 = g_w - 1; g_cy1 = g_h - 1;
 }
 
 // ------------------------------------------------------------------ 描く土台
@@ -128,6 +153,8 @@ static NativeStatus u_open(VM& vm, Value* a, int n, Value& out) {
   // 画面が無い機種、端末でないところ（出力を | や > で受けているとき）では
   // false が返る。そのときは見えない面に描くだけになる
   g_visible = s && s->open(title.c_str(), g_w, g_h);
+  // 窓の縁を引いている間もこちらで描き直せるように、口があれば渡しておく
+  if (g_visible && s->set_redraw) s->set_redraw(ui_live_redraw);
   out = mk_void();
   return N_Ok;
 }
@@ -791,6 +818,8 @@ static NativeStatus u_poll(VM& vm, Value* a, int n, Value& out) {
           if (e.down) { g_mb[e.code] = true; g_mpress[e.code] = true; }
           else { g_mb[e.code] = false; g_mrel[e.code] = true; }
         }
+      } else if (e.kind == SEV_Resize) {
+        resize_surface(e.x, e.y);   // 窓に合わせて、面を同じ大きさに作り直す
       }
     }
     // 離した合図が来ない機種（端末）では、押された刻みだけ押されているとみなす
@@ -1398,6 +1427,11 @@ static Str g_hit_text;
 static bool g_click_seen = false;   // この回にどこかが押されたか（焦点を外すのに使う）
 static Str g_focus_next;
 static bool g_edited = false;      // この回、ref で受けた部品が変数を書き換えたか
+// 最後に ui.show() に渡された部品。窓の縁を引いている間、これを新しい大きさで置き直す
+static Value g_last_view;
+static bool g_has_view = false;
+static int g_last_x = 0, g_last_y = 0;
+static bool g_replay = false;      // いま置き直しの最中か（入力の処理は飛ばす）
 // ui.show() を呼んだ処理系。ref で受けた入力欄の書き戻しに使う（下の write_var）
 static VM* g_vm = 0;
 
@@ -1417,6 +1451,10 @@ static void hit(const Value& v, int64_t val) {
 
 static void ui_reset_widgets() {
   clear_hit_action();
+  val_release(g_last_view);
+  g_last_view = mk_void();
+  g_has_view = false;
+  g_replay = false;
   g_hit_any = false;
   g_edited = false;
   g_vm = 0;
@@ -1893,9 +1931,9 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
     }
   }
 
-  // --- 文字を受け取る ---
+  // --- 文字を受け取る（置き直しの最中は、描くだけにする）---
   Str marked;
-  if (focused) {
+  if (focused && !g_replay) {
     bool was_composing = g_marked.size() > 0;
     Str conf;
     input_frame(tx, ty, line_h(1), text, &conf, &marked);
@@ -2209,6 +2247,12 @@ static NativeStatus show_at(VM& vm, Value* a, int x, int y, Value& out) {
   g_edited = false;
   g_vm = &vm;          // ref で受けた入力欄の書き戻しに使う
   clear_hit_action();
+  // 覚えておく。窓の縁を引いている間、この部品を新しい大きさで置き直す（ui_live_redraw）
+  val_release(g_last_view);
+  g_last_view = val_retain(*view);
+  g_has_view = true;
+  g_last_x = x;
+  g_last_y = y;
   g_click_seen = g_mpress[0];
   g_focus_next = g_focus;
   if (g_click_seen) g_focus_next.clear();   // どこも押されなければ焦点は外れる
@@ -2230,6 +2274,28 @@ static NativeStatus show_at(VM& vm, Value* a, int x, int y, Value& out) {
   out = mk_str(g_hit_id);
   return N_Ok;
 }
+// 窓の縁を引いている間、移植層から呼ばれる（platform.h の set_redraw）。
+// その間 OS はプログラムを止めているので、Shark の view() は呼び直せない。
+// でも引いている間は状態も変わらないから、**最後に見せた部品を置き直せば同じ絵**になる。
+// 文字の折り返しも取り分（fr）も、新しい大きさで掛かり直す
+static bool ui_live_redraw(int w, int h) {
+  if (!g_open || !g_has_view) return false;
+  resize_surface(w, h);
+  if (g_w != w || g_h != h) return false;   // 作り直せなかった（メモリの上限など）
+  for (int yy = 0; yy < g_h; yy++) span(0, yy, g_w, g_bg);   // ui.clear() と同じ
+  g_replay = true;
+  int x0 = g_last_x, y0 = g_last_y;
+  int avail = g_w - x0 * 2;
+  if (avail < 1) avail = g_w > x0 ? g_w - x0 : 1;
+  int avail_h = g_h - y0 * 2;
+  if (avail_h < 1) avail_h = g_h > y0 ? g_h - y0 : 1;
+  place(g_last_view, x0, y0, avail, avail_h, true);
+  g_replay = false;
+  const PlatformScreen* s = platform().screen;
+  if (g_visible && s) s->present(g_px, g_w, g_h);
+  return true;
+}
+
 static NativeStatus u_show(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return show_at(vm, a, 4, 4, out);

@@ -25,6 +25,7 @@ typedef void* Sel;   // SEL
 Obj (*getClass)(const char*) = 0;
 Sel (*selRegister)(const char*) = 0;
 void* msgSend = 0;   // objc_msgSend。形はそのつど見立てる
+void* msgSendStret = 0;   // objc_msgSend_stret（x86_64 で構造体を返す呼び出しに使う）
 
 struct Pt { double x, y; };
 struct Sz { double w, h; };
@@ -64,6 +65,16 @@ void (*cgImageRelease)(void*) = 0;
 // 画面のある席にいるか（ssh の先では 0 が返る）。無くてもよい
 void* (*cgSession)() = 0;
 void (*cfRelease)(void*) = 0;
+// 窓の縁を引いている間の出し直しに使うタイマー（CoreFoundation）。無くてもよい
+void* (*cfTimerCreate)(void*, double, double, unsigned long, long,
+                       void (*)(void*, void*), void*) = 0;
+void (*cfTimerInvalidate)(void*) = 0;
+void (*cfRunLoopAddTimer)(void*, void*, void*) = 0;
+void* (*cfRunLoopGetCurrent)() = 0;
+double (*cfAbsNow)() = 0;
+void* (*cfStrCreate)(void*, const char*, unsigned int) = 0;
+void* cfCommonModes = 0;    // kCFRunLoopCommonModes
+void* cfTrackingMode = 0;   // NSEventTrackingRunLoopMode（引いている間のモード）
 
 void free_copy(void* info, const void* data, size_t size) {
   (void)info; (void)size;
@@ -76,11 +87,18 @@ struct State {
   Obj app, win, layer;
   Obj distant_past, run_mode;
   int sw, sh;        // 面の大きさ（画素）
+  int rw, rh;        // 窓から最後に知らせた面の大きさ（SEV_Resize を重ねて出さないため）
   int scale;         // 面の1画素を、画面の何画素にするか
   int dpi;           // 画面の細かさ（HiDPI なら 2）
   unsigned long mods;  // 前回の修飾キー
+  uint32_t* last;    // 最後に出した絵。縁を引いている間、引き伸ばさずに出し直すのに使う
+  int lw, lh;        // その大きさ
+  int pw, ph;        // いま層（CALayer）に載っている絵の大きさ
+  void* timer;       // 引いている間も動く刻み（CFRunLoopTimer）
+  bool (*redraw)(int, int);   // コアに描き直しを頼む口（set_redraw で渡される）
   State() : open(false), app(0), win(0), layer(0), distant_past(0), run_mode(0),
-            sw(0), sh(0), scale(1), dpi(1), mods(0) {}
+            sw(0), sh(0), rw(0), rh(0), scale(1), dpi(1), mods(0),
+            last(0), lw(0), lh(0), pw(0), ph(0), timer(0), redraw(0) {}
 };
 State g;
 
@@ -112,6 +130,7 @@ bool load() {
   getClass = (Obj(*)(const char*))dlsym(objc, "objc_getClass");
   selRegister = (Sel(*)(const char*))dlsym(objc, "sel_registerName");
   msgSend = dlsym(objc, "objc_msgSend");
+  msgSendStret = dlsym(objc, "objc_msgSend_stret");   // arm64 には無い。無くてもよい
   cgColorSpaceRGB = (void* (*)())dlsym(cg, "CGColorSpaceCreateDeviceRGB");
   cgColorSpaceRelease = (void (*)(void*))dlsym(cg, "CGColorSpaceRelease");
   cgProviderWithData = (void* (*)(void*, const void*, size_t,
@@ -124,7 +143,22 @@ bool load() {
   cgSession = (void* (*)())dlsym(cg, "CGSessionCopyCurrentDictionary");
   void* cf = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
                     RTLD_LAZY | RTLD_LOCAL);
-  if (cf) cfRelease = (void (*)(void*))dlsym(cf, "CFRelease");
+  if (cf) {
+    cfRelease = (void (*)(void*))dlsym(cf, "CFRelease");
+    cfTimerCreate = (void* (*)(void*, double, double, unsigned long, long,
+                               void (*)(void*, void*), void*))dlsym(cf, "CFRunLoopTimerCreate");
+    cfTimerInvalidate = (void (*)(void*))dlsym(cf, "CFRunLoopTimerInvalidate");
+    cfRunLoopAddTimer = (void (*)(void*, void*, void*))dlsym(cf, "CFRunLoopAddTimer");
+    cfRunLoopGetCurrent = (void* (*)())dlsym(cf, "CFRunLoopGetCurrent");
+    cfAbsNow = (double (*)())dlsym(cf, "CFAbsoluteTimeGetCurrent");
+    cfStrCreate = (void* (*)(void*, const char*, unsigned int))
+        dlsym(cf, "CFStringCreateWithCString");
+    void** modes = (void**)dlsym(cf, "kCFRunLoopCommonModes");
+    if (modes) cfCommonModes = *modes;
+    // 引いている間は、走り方（モード）が変わる。そのモードにも掛かるようにしておく
+    if (cfStrCreate)
+      cfTrackingMode = cfStrCreate(0, "NSEventTrackingRunLoopMode", 0x08000100 /* UTF-8 */);
+  }
   if (!getClass || !selRegister || !msgSend || !cgColorSpaceRGB || !cgProviderWithData ||
       !cgImageCreate || !cgImageRelease || !cgProviderRelease || !cgColorSpaceRelease)
     return false;
@@ -150,6 +184,8 @@ int pick_scale(int w, int h) {
   return s;
 }
 
+void resize_tick(void*, void*);   // 下で定義。窓の縁を引いている間の出し直し
+
 bool open(const char* title, int w, int h) {
   if (!load()) return false;
   if (g.open) return false;
@@ -173,8 +209,9 @@ bool open(const char* title, int w, int h) {
   // 面の1画素が画面の1画素にそのまま乗る（HiDPI ならその細かさで出る）
   r.size.w = (double)(w * g.scale) / (double)g.dpi;
   r.size.h = (double)(h * g.scale) / (double)g.dpi;
-  // 大きさは変えられない窓にする（面と画面の対応を1つに保つため）
-  unsigned long style = 1 | 2 | 4;   // titled | closable | miniaturizable
+  // 縁を引いて大きさを変えられる窓。変わったら SEV_Resize で知らせ、
+  // コアが面を同じ大きさに作り直す（core/lib/ui.cpp）
+  unsigned long style = 1 | 2 | 4 | 8;   // titled | closable | miniaturizable | resizable
   Obj win = send(C("NSWindow"), "alloc");
   win = ((Obj(*)(Obj, Sel, Rect, unsigned long, unsigned long, signed char))msgSend)(
       win, S("initWithContentRect:styleMask:backing:defer:"), r, style, 2, 0);
@@ -204,8 +241,22 @@ bool open(const char* title, int w, int h) {
   g.distant_past = send(C("NSDate"), "distantPast");
   g.run_mode = nsstr("kCFRunLoopDefaultMode");
   g.sw = w; g.sh = h;
+  g.rw = w; g.rh = h;
+  g.lw = g.lh = 0;
+  g.pw = g.ph = 0;
   g.mods = 0;
   qh = qn = 0;
+  // 窓の縁を引いている間、AppKit は sendEvent: の中の追跡ループから戻らず、
+  // Shark の側は描き直せない。そこで細かい刻みを掛けておき、引いている間は
+  // 最後の絵を**引き伸ばさずに**置き直す（下の resize_tick）。
+  // ふつうの時は大きさが合っているので、何もしないで返る
+  if (cfTimerCreate && cfRunLoopAddTimer && cfRunLoopGetCurrent && cfAbsNow) {
+    g.timer = cfTimerCreate(0, cfAbsNow() + 0.03, 0.03, 0, 0, resize_tick, 0);
+    if (g.timer) {
+      if (cfCommonModes) cfRunLoopAddTimer(cfRunLoopGetCurrent(), g.timer, cfCommonModes);
+      if (cfTrackingMode) cfRunLoopAddTimer(cfRunLoopGetCurrent(), g.timer, cfTrackingMode);
+    }
+  }
   g.open = true;
   return true;
 }
@@ -216,21 +267,26 @@ void close() {
   if (!g.open) return;
   text_input(false, 0, 0, 0, 0);
   g.open = false;
+  if (g.timer) {
+    if (cfTimerInvalidate) cfTimerInvalidate(g.timer);
+    if (cfRelease) cfRelease(g.timer);
+    g.timer = 0;
+  }
+  g.redraw = 0;
+  free(g.last);
+  g.last = 0;
+  g.lw = g.lh = 0;
+  g.pw = g.ph = 0;
   sendv1(g.win, "orderOut:", 0);
   sendv(g.win, "close");
   g.win = 0;
   g.layer = 0;
 }
 
-void present(const uint32_t* px, int w, int h) {
-  if (!g.open || !g.layer) return;
-  g.sw = w; g.sh = h;
-  size_t bytes = (size_t)w * (size_t)h * 4;
-  void* copy = malloc(bytes);   // 層が後で読むので、そのときの姿を写して渡す
-  if (!copy) return;
-  sk_memcpy(copy, px, bytes);
+// 画素の並びを層（CALayer）に貼る。copy は malloc で作ったもので、層が使い終わると解放される
+void put_on_layer(void* copy, int w, int h) {
   void* cs = cgColorSpaceRGB();
-  void* dp = cgProviderWithData(0, copy, bytes, free_copy);
+  void* dp = cgProviderWithData(0, copy, (size_t)w * (size_t)h * 4, free_copy);
   // 0x00RRGGBB の並びを、そのまま「先頭を捨てる ARGB（下位から並ぶ）」として読ませる
   const uint32_t kSkipFirst = 6, kLittle = 2u << 12;
   void* img = cgImageCreate((size_t)w, (size_t)h, 8, 32, (size_t)w * 4, cs,
@@ -241,6 +297,25 @@ void present(const uint32_t* px, int w, int h) {
   }
   cgProviderRelease(dp);
   cgColorSpaceRelease(cs);
+}
+
+void present(const uint32_t* px, int w, int h) {
+  if (!g.open || !g.layer) return;
+  g.sw = w; g.sh = h;
+  size_t bytes = (size_t)w * (size_t)h * 4;
+  // 出した絵を覚えておく（窓の縁を引いている間、引き伸ばさずに出し直すため）
+  if (!g.last || g.lw != w || g.lh != h) {
+    free(g.last);
+    g.last = (uint32_t*)malloc(bytes);
+    g.lw = g.lh = 0;
+  }
+  if (g.last) { sk_memcpy(g.last, px, bytes); g.lw = w; g.lh = h; }
+  void* copy = malloc(bytes);   // 層が後で読むので、そのときの姿を写して渡す
+  if (!copy) return;
+  sk_memcpy(copy, px, bytes);
+  put_on_layer(copy, w, h);
+  g.pw = w;
+  g.ph = h;
 }
 
 // 文字から、こちらのキーの番号にする
@@ -314,6 +389,58 @@ void flags_ev(unsigned long now) {
   g.mods = now;
 }
 
+// 窓の中身（contentView）の大きさ（点）。構造体を返すので、x86_64 は別の入り口を使う
+Sz view_size(Obj view) {
+  Sz z; z.w = 0; z.h = 0;
+  if (!view) return z;
+#if defined(__x86_64__)
+  if (!msgSendStret) return z;
+  Rect r = ((Rect(*)(Obj, Sel))msgSendStret)(view, S("frame"));
+#else
+  Rect r = ((Rect(*)(Obj, Sel))msgSend)(view, S("frame"));
+#endif
+  return r.size;
+}
+
+// 窓の縁を引いている間に呼ばれる刻み（open で掛けたタイマー）。
+// 引いている間は sendEvent: から戻れず、Shark の側は描き直せない。層の伸び縮み
+// （contentsGravity）に任せると絵が引き伸ばされるので、ここで**等倍のまま**出し直す。
+// 最後の絵を左上に置き、余白は右下の色で埋める。本当の描き直しは、引き終わって
+// ui.poll() に戻ったときに SEV_Resize で起きる
+void resize_tick(void*, void*) {
+  if (!g.open || !g.layer || !g.win) return;
+  Sz sz = view_size(send(g.win, "contentView"));
+  int nw = (int)(sz.w * (double)g.dpi / (double)g.scale + 0.5);
+  int nh = (int)(sz.h * (double)g.dpi / (double)g.scale + 0.5);
+  if (nw <= 0 || nh <= 0) return;
+  if (nw != g.rw || nh != g.rh) {   // 新しい大きさを知らせる（pump と同じ形）
+    g.rw = nw; g.rh = nh;
+    // まだ受け取られていない前の知らせがあれば、差し替える（引いている間にたまらないように）
+    if (qn > 0 && q[(qh + qn - 1) % 128].kind == SEV_Resize) qn--;
+    ScreenEvent e; e.kind = SEV_Resize; e.x = nw; e.y = nh; push(e);
+  }
+  if (nw == g.pw && nh == g.ph) return;   // もう合っている（ふつうの時はここで返る）
+  // コアが部品を覚えていれば、新しい大きさで**組み直して**もらう（毎度その解像度で描き直す）
+  if (g.redraw && g.redraw(nw, nh)) return;   // present まで済み、g.pw も新しくなっている
+  // 覚えていない（自分で描くだけの）ときは、最後の絵を等倍のまま置き直す
+  if (!g.last || g.lw < 1 || g.lh < 1) return;
+  uint32_t* buf = (uint32_t*)malloc((size_t)nw * (size_t)nh * 4);
+  if (!buf) return;
+  uint32_t fill = g.last[(size_t)(g.lh - 1) * (size_t)g.lw + (size_t)(g.lw - 1)];
+  for (int y = 0; y < nh; y++) {
+    uint32_t* dst = buf + (size_t)y * (size_t)nw;
+    int cw = 0;
+    if (y < g.lh) {
+      cw = g.lw < nw ? g.lw : nw;
+      sk_memcpy(dst, g.last + (size_t)y * (size_t)g.lw, (size_t)cw * 4);
+    }
+    for (int x = cw; x < nw; x++) dst[x] = fill;
+  }
+  put_on_layer(buf, nw, nh);
+  g.pw = nw;
+  g.ph = nh;
+}
+
 void pump() {
   Obj pool = send(send(C("NSAutoreleasePool"), "alloc"), "init");
   for (int guard = 0; guard < 256; guard++) {
@@ -380,6 +507,16 @@ void pump() {
       default: break;
     }
     sendv1(g.app, "sendEvent:", ev);   // 窓の移動や閉じるボタンは OS に任せる
+  }
+  // 窓の縁を引かれて大きさが変わっていたら、新しい面の大きさを知らせる
+  if (g.win) {
+    Sz sz = view_size(send(g.win, "contentView"));
+    int nw = (int)(sz.w * (double)g.dpi / (double)g.scale + 0.5);
+    int nh = (int)(sz.h * (double)g.dpi / (double)g.scale + 0.5);
+    if (nw > 0 && nh > 0 && (nw != g.rw || nh != g.rh)) {
+      g.rw = nw; g.rh = nh;
+      ScreenEvent e; e.kind = SEV_Resize; e.x = nw; e.y = nh; push(e);
+    }
   }
   // 閉じるボタンで消えたら、閉じてくれと言われたことにする
   if (g.win && !sendbool(g.win, "isVisible")) {
@@ -552,6 +689,8 @@ bool text_state(Str* confirmed, Str* marked) {
   return true;
 }
 
+void set_redraw(bool (*fn)(int, int)) { g.redraw = fn; }
+
 bool poll(ScreenEvent* out) {
   if (!g.open) return false;
   if (qn == 0) pump();
@@ -569,7 +708,8 @@ const PlatformScreen kMacScreen = {mac::screen_scale,  mac::open,           mac:
                                   mac::present,       mac::poll,           true,
                                   mac::text_input,    mac::text_state,
                                   mac::text_selection, mac::text_select,
-                                  mac::text_replace,  mac::clipboard_get,  mac::clipboard_set};
+                                  mac::text_replace,  mac::clipboard_get,  mac::clipboard_set,
+                                  mac::set_redraw};
 
 const PlatformScreen* mac_screen() { return mac::load() ? &kMacScreen : 0; }
 

@@ -112,10 +112,11 @@ struct State {
   XImage* img;
   uint32_t* buf;      // 画面に出す大きさの画素（scale 倍したもの）
   int sw, sh;         // 面の大きさ
+  int rw, rh;         // 窓から最後に知らせた面の大きさ（SEV_Resize を重ねて出さないため）
   int scale;
   XID wm_delete;
-  State() : open(false), dpy(0), win(0), gc(0), img(0), buf(0), sw(0), sh(0), scale(1),
-            wm_delete(0) {}
+  State() : open(false), dpy(0), win(0), gc(0), img(0), buf(0), sw(0), sh(0), rw(0), rh(0),
+            scale(1), wm_delete(0) {}
 };
 State g;
 
@@ -236,6 +237,7 @@ bool open(const char* title, int w, int h) {
   }
   Flush(g.dpy);
   g.sw = w; g.sh = h;
+  g.rw = w; g.rh = h;
   qh = qn = 0;
   g.open = true;
   return true;
@@ -258,9 +260,29 @@ void close() {
   if (g.dpy) { CloseDisplay(g.dpy); g.dpy = 0; }
 }
 
+// 面の大きさが変わった（窓に合わせて作り直された）。出す先の画素の入れ物も作り直す
+bool rebuild(int w, int h) {
+  unsigned int ww = (unsigned int)(w * g.scale), wh = (unsigned int)(h * g.scale);
+  uint32_t* nb = (uint32_t*)malloc((size_t)ww * (size_t)wh * 4);
+  if (!nb) return false;
+  for (size_t i = 0; i < (size_t)ww * (size_t)wh; i++) nb[i] = 0;
+  int scr = DefaultScreen(g.dpy);
+  XImage* ni = CreateImage(g.dpy, DefaultVisual(g.dpy, scr),
+                           (unsigned int)DefaultDepth(g.dpy, scr), 2 /* ZPixmap */, 0,
+                           (char*)nb, ww, wh, 32, (int)(ww * 4));
+  if (!ni) { free(nb); return false; }
+  if (g.img) XFree_(g.img);   // 中身（g.buf）はこちらで解放する
+  if (g.buf) free(g.buf);
+  g.img = ni;
+  g.buf = nb;
+  g.sw = w;
+  g.sh = h;
+  return true;
+}
+
 void present(const uint32_t* px, int w, int h) {
   if (!g.open) return;
-  if (w != g.sw || h != g.sh) return;   // 面の大きさが変わったら、開き直してもらう
+  if ((w != g.sw || h != g.sh) && !rebuild(w, h)) return;
   int s = g.scale;
   int ww = w * s;
   for (int y = 0; y < h; y++) {
@@ -364,6 +386,15 @@ void pump() {
       case Expose:
         blit();
         break;
+      case ConfigureNotify: {   // 窓の大きさが変わった（動いただけのときは何もしない）
+        int nw = ev.xconfigure.width / g.scale;
+        int nh = ev.xconfigure.height / g.scale;
+        if (nw > 0 && nh > 0 && (nw != g.rw || nh != g.rh)) {
+          g.rw = nw; g.rh = nh;
+          ScreenEvent e; e.kind = SEV_Resize; e.x = nw; e.y = nh; push(e);
+        }
+        break;
+      }
       case ClientMessage:
         if (g.wm_delete && (XID)ev.xclient.data.l[0] == g.wm_delete) {
           ScreenEvent e; e.kind = SEV_Close; push(e);
@@ -390,7 +421,7 @@ bool poll(ScreenEvent* out) {
 // 変換つきの文字入力（XIM）はまだ持たない。打たれた文字がそのまま入る
 const PlatformScreen kX11Screen = {x11::screen_scale, x11::open, x11::close,
                                   x11::present,      x11::poll, true,
-                                  0, 0, 0, 0, 0, 0, 0};
+                                  0, 0, 0, 0, 0, 0, 0, 0};
 
 const PlatformScreen* x11_screen() { return x11::load() ? &kX11Screen : 0; }
 

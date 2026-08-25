@@ -398,7 +398,7 @@ int t_scale() { return 1; }
 // 変換は端末のソフトがやってくれて、確定した文字だけが届く。
 // こちらで受け皿を持つ必要がない（→ text_input は 0）
 const PlatformScreen kTermScreen = {t_scale, t_open, t_close, t_present, t_poll, false,
-                                   0, 0, 0, 0, 0, 0, 0};
+                                   0, 0, 0, 0, 0, 0, 0, 0};
 
 const PlatformScreen* term_screen() { return &kTermScreen; }
 
