@@ -1863,6 +1863,10 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
     while (g_scroll < caret &&
            text_px_width(sub_chars(text, g_scroll, caret - g_scroll), 1) + 2 > room)
       g_scroll++;
+    // 末尾を消すなどして右に空きができたら、左に隠した分を戻して詰める
+    while (g_scroll > 0 &&
+           text_px_width(sub_chars(text, g_scroll - 1, n - (g_scroll - 1)), 1) + 2 <= room)
+      g_scroll--;
   }
   int scroll = focused ? g_scroll : 0;
 
