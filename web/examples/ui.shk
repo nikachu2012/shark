@@ -1,0 +1,65 @@
+// ui.shk — ブラウザで std.ui を動かす例
+//
+// 実行を押すと「画面」のタブが出る。押す・引く・打つ が、そのまま面に届く。
+// 板の境目を引くと、面もその大きさに作り直される。
+//
+// くり返しも描き直しも ui.run() が引き受ける。書くのは「いまどうあるべきか」（view）と、
+// 押されたときの動きだけ（spec/library/ui.md、examples/counter.shk）。
+// 入力欄（ui.field）は、ブラウザのかな漢字変換がそのまま使える。
+//
+// 字はブラウザでは内蔵の 5×7（ASCII）だけなので、ここでは英字で書いている
+// （日本語は □ になる。読めるフォントがブラウザには無い）。
+import std.ui;
+
+// 状態はふつうの変数。処理系は覚えない
+var count = 1;
+var size = 20;
+var name = "shark";
+
+// 数のぶんだけ魚を並べる
+func fish(n: int) -> string {
+  var s = "";
+  var i = 0;
+  while i < n {
+    s += "><> ";
+    i += 1;
+  }
+  return s;
+}
+
+// いまどうあるべきか。押されたときの動きは、その場に書く
+func view() -> Widget {
+  var n = count;
+  if n < 0 { n = 0; }
+  if n > 12 { n = 12; }
+  return ui.col([
+    ui.center([ui.label("Shark on the web").color(ui.rgb(120, 200, 255))]),
+    ui.divider(),
+    ui.label(fish(n)),
+    ui.label(f"count = {count}"),
+    ui.row([
+      ui.button("+1", func() -> void { count += 1; }),
+      ui.button("-1", func() -> void { count -= 1; }),
+      ui.button("reset", func() -> void { count = 0; }),
+    ]),
+    ui.space(4),
+    ui.row([
+      ui.label("size"),
+      ui.slider(func() -> void { size = ui.value(); }, size, 6, 40),
+      ui.label(f"{size}"),
+    ]),
+    ui.space(4),
+    ui.label("name (click it, then type)"),
+    ui.field(ref name),                  // 打たれるたびに name が書き換わる
+    ui.label(f"hello, {name}!"),
+    ui.space(4),
+    ui.button("quit", func() -> void { ui.quit(); }).align("right"),
+  ]);
+}
+
+func main() -> int {
+  ui.theme(ui.rgb(18, 18, 26), ui.rgb(232, 232, 236), ui.rgb(76, 155, 232));
+  ui.run("shark", 360, 340, view);
+  print(f"count = {count}, name = {name}");
+  return 0;
+}

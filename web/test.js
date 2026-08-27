@@ -30,6 +30,125 @@ function check(name, ok, detail) {
   }
 }
 
+
+// 要るところだけの偽 DOM。画面（core/platform/screen_canvas.inc）が触るものだけを持つ。
+// これで、canvas に出す道と出来事の訳し方を、ブラウザを開かずに確かめられる
+function fakeDom() {
+  const saved = {};
+  const ctx = {
+    last: null,
+    createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
+    putImageData: (img) => { ctx.last = img; },
+  };
+  const MOUNT_W = 300;
+  const MOUNT_H = 200;
+
+  function px(v) { return v ? parseFloat(String(v)) || 0 : 0; }
+
+  function el(tag) {
+    const e = {
+      tagName: tag.toUpperCase(),
+      style: {},
+      children: [],
+      parentNode: null,
+      offsetLeft: 0,
+      offsetTop: 0,
+      _on: {},
+      addEventListener(k, fn) { (e._on[k] = e._on[k] || []).push(fn); },
+      removeEventListener(k, fn) {
+        const a = e._on[k] || [];
+        const i = a.indexOf(fn);
+        if (i >= 0) a.splice(i, 1);
+      },
+      dispatchEvent(ev) {
+        ev.target = ev.target || e;
+        (e._on[ev.type] || []).slice().forEach((fn) => fn(ev));
+        if (ev.bubbles && e.parentNode) e.parentNode.dispatchEvent(ev);
+        return true;
+      },
+      appendChild(c) { c.parentNode = e; e.children.push(c); return c; },
+      removeChild(c) {
+        const i = e.children.indexOf(c);
+        if (i >= 0) e.children.splice(i, 1);
+        c.parentNode = null;
+      },
+      contains(c) { for (; c; c = c.parentNode) if (c === e) return true; return false; },
+      setAttribute() {},
+      focus() { doc.activeElement = e; },
+      querySelector() { return null; },
+      getBoundingClientRect() {
+        if (e.tagName === 'CANVAS') return { left: 0, top: 0, width: px(e.style.width), height: px(e.style.height) };
+        return { left: 0, top: 0, width: MOUNT_W, height: MOUNT_H };
+      },
+    };
+    Object.defineProperty(e, 'textContent', { get: () => '', set: () => { e.children = []; } });
+    if (tag === 'canvas') { e.width = 0; e.height = 0; e.getContext = () => ctx; }
+    if (tag === 'textarea') { e.value = ''; e.selectionStart = 0; e.selectionEnd = 0; }
+    return e;
+  }
+
+  const body = el('body');
+  const doc = {
+    body,
+    activeElement: body,
+    createElement: el,
+    getElementById: () => null,
+    querySelector: () => null,
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  const opens = [];
+  let closes = 0;
+  const win = {
+    devicePixelRatio: 2,
+    getComputedStyle: () => ({ position: 'static' }),
+    addEventListener() {},
+    removeEventListener() {},
+    dispatchEvent(ev) {
+      if (ev.type === 'shark:screen-open') opens.push(ev.detail);
+      if (ev.type === 'shark:screen-close') closes++;
+      return true;
+    },
+  };
+  class Evt {
+    constructor(type, init) { this.type = type; Object.assign(this, init || {}); }
+  }
+
+  for (const [k, v] of Object.entries({ document: doc, window: win, CustomEvent: Evt,
+                                        PointerEvent: Evt, KeyboardEvent: Evt })) {
+    saved[k] = globalThis[k];
+    globalThis[k] = v;
+  }
+
+  const api = {
+    ctx,
+    opens,
+    get closes() { return closes; },
+    get canvas() { return opens.length ? opens[opens.length - 1].canvas : null; },
+    textarea() {
+      const m = opens.length ? opens[opens.length - 1].mount : null;
+      return m ? m.children.filter((c) => c.tagName === 'TEXTAREA')[0] || null : null;
+    },
+    key(target, type, key) {
+      target.dispatchEvent(new Evt(type, { key, bubbles: true, ctrlKey: false, metaKey: false, altKey: false,
+                                           preventDefault() {} }));
+    },
+    // 面の画素で押す（画面の点に直してから渡す）
+    tap(sx, sy) {
+      const c = api.canvas;
+      const r = c.getBoundingClientRect();
+      const k = r.width / c.width;
+      const at = { clientX: r.left + sx * k + k / 2, clientY: r.top + sy * k + k / 2,
+                   button: 0, pointerId: 1, bubbles: true, preventDefault() {} };
+      c.dispatchEvent(new Evt('pointerdown', at));
+      c.dispatchEvent(new Evt('pointerup', at));
+    },
+    close() { opens[opens.length - 1].requestClose(); },
+    restore() { for (const [k, v] of Object.entries(saved)) globalThis[k] = v; },
+  };
+  return api;
+}
+
 createShark().then((M) => {
   const api = {
     boot: M.cwrap('shk_boot', null, []),
@@ -200,6 +319,105 @@ createShark().then((M) => {
   check('全部のテストが通る', api.testPassed() === api.testTotal(),
         JSON.stringify(results.filter((r) => !r.ok)));
 
+
+  // --- 画面（std.ui）---------------------------------------------------
+  // まずは画面の無いところ。node には DOM が無いので、コアは見えない面に描く
+  const blind = run('import std.ui;\n' +
+                    'func main() -> int {\n' +
+                    '  ui.open("t", 20, 10);\n' +
+                    '  ui.clear(ui.rgb(240, 80, 60));\n' +
+                    '  ui.present();\n' +
+                    '  print(f"{ui.visible()} {ui.width()}x{ui.height()} {ui.get(5, 5)}");\n' +
+                    '  ui.close();\n' +
+                    '  return 0;\n' +
+                    '}\n');
+  check('画面が無ければ、見えない面に描く',
+        blind.status === 1 && blind.out === 'false 20x10 15749180\n', blind.out);
+
+  // ここから先は、要るところだけの偽 DOM を置いて、canvas に出す道を確かめる
+  // （本物のブラウザで動かすところは web/README.md の「画面」）
+  const dom = fakeDom();
+  const uiSrc =
+      'import std.ui;\n' +
+      'var name = "";\n' +
+      'var editing = false;\n' +
+      'func main() -> int {\n' +
+      '  ui.open("まど", 100, 80);\n' +
+      '  print(f"open {ui.visible()} {ui.width()}x{ui.height()} scale {ui.scale()}");\n' +
+      '  var n = 0;\n' +
+      '  while ui.poll() {\n' +
+      '    n += 1;\n' +
+      '    if ui.typed() != "" { print(f"typed {ui.typed()}"); }\n' +
+      '    if ui.pressed("left") { print("left"); }\n' +
+      '    if ui.clicked(0) { print(f"click {ui.mouse_x()},{ui.mouse_y()}"); editing = true; }\n' +
+      '    ui.clear(ui.rgb(240, 80, 60));\n' +
+      '    if editing {\n' +
+      '      name = ui.input(4, 20, 10, name);\n' +
+      '      if name != "" { print(f"name {name}"); }\n' +
+      '    }\n' +
+      '    ui.present();\n' +
+      '    sleep(0.01);\n' +
+      '  }\n' +
+      '  print(f"quit {n > 0}");\n' +
+      '  ui.close();\n' +
+      '  return 0;\n' +
+      '}\n';
+  api.config(64, 0, 0);
+  api.load('ui.shk', uiSrc);
+  api.startRun();
+
+  // 何回か刻んで、そのつど出たものを返す
+  function turn(times) {
+    let out = '';
+    let status = 0;
+    for (let i = 0; i < (times || 8); i++) {
+      status = api.pump(200000);
+      out += take();
+      if (status !== 0) break;
+      nap(12);
+    }
+    return { out, status };
+  }
+
+  const opened = turn(6);
+  check('canvas を開いて、開いたことを窓に知らせる',
+        opened.out.indexOf('open true 100x80 scale 2') >= 0 && dom.opens.length === 1 &&
+        dom.opens[0].width === 100 && dom.opens[0].canvas.width === 100,
+        opened.out + ' / ' + dom.opens.length);
+
+  // 面の色が、そのまま canvas の画素になっているか（並びは R G B A）
+  const img = dom.ctx.last;
+  check('面が canvas にそのまま出る',
+        !!img && img.width === 100 && img.height === 80 &&
+        img.data[0] === 240 && img.data[1] === 80 && img.data[2] === 60 && img.data[3] === 255,
+        img ? [img.width, img.height, img.data[0], img.data[1], img.data[2], img.data[3]].join() : 'なし');
+
+  dom.key(dom.canvas, 'keydown', 'a');
+  dom.key(dom.canvas, 'keyup', 'a');
+  dom.key(dom.canvas, 'keydown', 'ArrowLeft');
+  dom.key(dom.canvas, 'keyup', 'ArrowLeft');
+  const keyed = turn(4);
+  check('打たれた文字と、特別なキーが届く',
+        keyed.out.indexOf('typed a') >= 0 && keyed.out.indexOf('left') >= 0, keyed.out);
+
+  dom.tap(30, 24);   // 面の画素で押す
+  const tapped = turn(4);
+  check('押した場所が、面の画素で届く', tapped.out.indexOf('click 30,24') >= 0, tapped.out);
+
+  // 文字入力（IME）。ブラウザでは見えない textarea に任せる
+  check('入力欄の間は、変換の受け皿ができる', !!dom.textarea(), '受け皿なし');
+  const ta = dom.textarea();
+  if (ta) ta.value = 'さめ';
+  const named = turn(4);
+  check('受け皿に入った文字が、そのまま渡る', named.out.indexOf('name さめ') >= 0, named.out);
+
+  dom.close();   // 窓の × にあたるもの（requestClose）
+  const quit = turn(30);
+  check('閉じてくれと伝えると ui.poll() が false になる',
+        quit.status === 1 && quit.out.indexOf('quit true') >= 0 && dom.closes === 1,
+        quit.status + ' ' + quit.out);
+  dom.restore();
+
   // --- 補完のもと（api.js）が、この処理系の中身と合っているか ---
   var api2 = loadApi();
   check('api.js ができている',
@@ -216,8 +434,8 @@ createShark().then((M) => {
   check('組み込みのオーバーロードも拾えている',
         (find(api2.builtins, 'len').overloads || []).length >= 3,
         JSON.stringify(find(api2.builtins, 'len')));
-  check('print はどんな型でも受け取る',
-        find(api2.builtins, 'print').sig === 'print(v: Any) -> void',
+  check('print はどんな型でも、いくつでも受け取る',
+        find(api2.builtins, 'print').sig === 'print(values: Any...) -> void',
         JSON.stringify(find(api2.builtins, 'print').sig));
 
   // --- 補完（lang.js）が、継承元の関数の雛形を出すか ---

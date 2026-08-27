@@ -34,6 +34,7 @@ git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
 | ファイル | 何をするか |
 |---|---|
 | [`../core/platform/web.cpp`](../core/platform/web.cpp) | 移植層。ブラウザ向けに、メモリ・時間・入出力・ファイルを埋めたもの |
+| [`../core/platform/screen_canvas.inc`](../core/platform/screen_canvas.inc) | 移植層の画面。`std.ui` の面を canvas に出し、DOM の出来事を渡す（下） |
 | [`shark_web.cpp`](shark_web.cpp) | ホスト。`Engine` を呼び、出力と診断を JavaScript に渡す |
 | [`app.js`](app.js) | 画面。書くところの用意、実行の刻み、ターミナル（下）と診断の表示 |
 | [`lang.js`](lang.js) | Monaco に Shark を教える。色分けと入力補完（下） |
@@ -240,6 +241,47 @@ createShark().then((M) => {
 出力を「番地と長さ」で受け取るのは、UTF-8 の途中で切れても崩れないようにするため。
 `shk_out_*` を呼んだ直後にその場で写して使う（メモリが伸びると番地が変わる）。
 
+## 画面（std.ui）
+
+`ui.open()` を呼ぶと canvas が1枚できる。作るのは移植層
+（[`../core/platform/screen_canvas.inc`](../core/platform/screen_canvas.inc)）で、
+コアは今までどおり面（画素の並び）に描くだけ。**描くところは何も変わらない**
+（[../spec/library/ui.md](../spec/library/ui.md)）。
+
+出す先はこの順に探す。ホストは置き場を用意するだけでよい。
+
+| 順 | 出す先 |
+|---|---|
+| 1 | `Module.sharkMount`（要素そのものか、`querySelector` に渡す文字列） |
+| 2 | `#shark-screen` という要素（プレイグラウンドはこれ。`web/index.html`） |
+| 3 | どちらも無ければ、画面いっぱいに重ねた入れ物を自分で作る |
+
+置き場の中身は開くたびに空にするので、**そこには他のものを置かない**。
+開け閉めは `window` の出来事で知らせる。
+
+```js
+window.addEventListener('shark:screen-open', function (e) {
+  e.detail.canvas;          // できた canvas
+  e.detail.width;           // 面の大きさ（画素）
+  e.detail.requestClose();  // 窓の × にあたる。ui.poll() が false を返す
+});
+window.addEventListener('shark:screen-close', function (e) { /* … */ });
+```
+
+| もの | ブラウザでは |
+|---|---|
+| 面の大きさ | `ui.open(横, 縦)` のまま。面の1画素は画面の1画素。小さい面（640×480 未満）だけ整数倍に引き伸ばし、置き場に入りきらないときは縦横の比を保って縮める |
+| 細かい画面（HiDPI） | `ui.scale()` は `devicePixelRatio`（開く前でも呼べる） |
+| 大きさを変える | 置き場の大きさが変わると `SEV_Resize`。窓の縁を引いたのと同じで、面が作り直される（`ui.open(…, false)` なら変わらない） |
+| キー | `keydown` / `keyup`。矢印・空白・Tab などはブラウザの既定の動きを止める。焦点が外れたら、押しっぱなしのキーは離したことにする |
+| マウス | `pointer*` で受けるので、指でも同じように届く。右で押すのは `ui.menu` のもの（ブラウザのメニューは出さない） |
+| 文字入力 | `ui.field` の間だけ、見えない `textarea` に任せる。**かな漢字変換はブラウザのものがそのまま使える**（変換中は `ui.marked()`） |
+| 字 | 内蔵の 5×7（ASCII）だけ。日本語は □ になる（`ui.font()` は false） |
+| 閉じる | 窓の × が無いので、`requestClose()`（プレイグラウンドの「閉じる」）が `SEV_Close` を送る |
+
+`SHARK_UI=off` を渡しておくと画面を開かず、見えない面に描く（`ui.get()` と `ui.to_png()` で取れる）。
+node で動かしたときも同じで、`document` が無ければ `ui.visible()` は false になる。
+
 ## ブラウザでできないこと
 
 | できないこと | どうなるか |
@@ -248,8 +290,8 @@ createShark().then((M) => {
 | 外のプログラムを呼ぶ | `os.run()` は失敗を返す（[../spec/library/os.md](../spec/library/os.md) のとおり `Result` で受け取れる） |
 | その場で待つ | 移植層の `sleep` は何もしない。`sleep()` はタスクを譲るだけで、実時間は描画の刻みで進む |
 | `std.net` `std.http` | もともとこの実装に入っていない（[../docs/implementation.md](../docs/implementation.md)） |
-| `std.ui` の画面 | 入ってはいるが、移植層（`core/platform/web.cpp`）に画面がまだ無い。描くことも部品を並べることもでき、結果は `ui.get()` と `ui.to_png()` で取れる（[../spec/library/ui.md](../spec/library/ui.md)） |
-| `std.ui` のフォント | FreeType を入れていないので、字は内蔵の 5×7（ASCII）だけ。`ui.font()` は false を返す |
+| `std.ui` のフォント | FreeType を入れていないので、字は内蔵の 5×7（ASCII）だけ。`ui.font()` は false を返し、日本語は □ になる（下の「画面」） |
+| 切り貼りの置き場を読む | ブラウザからは勝手に読めない。`ui.clipboard()` が返すのは、貼り付け（Ctrl+V）で届いたものと、自分で `ui.set_clipboard()` に入れたもの |
 
 `os.platform()` は `"wasm"` を返す。
 
@@ -257,10 +299,10 @@ createShark().then((M) => {
 
 | もの | そのまま | gzip |
 |---|---|---|
-| `shark.wasm`（処理系） | 741 KB | 233 KB |
-| `shark.js`（つなぎ） | 72 KB | 19 KB |
+| `shark.wasm`（処理系） | 934 KB | 289 KB |
+| `shark.js`（つなぎ） | 80 KB | 23 KB |
 | `vendor/vs`（Monaco Editor） | 4.2 MB | 1.2 MB |
-| 画面まわり（`app.js` `lang.js` `api.js` ほか） | 110 KB | 28 KB |
+| 画面まわり（`app.js` `lang.js` `api.js` ほか） | 236 KB | 60 KB |
 
 Monaco は配られているもののうち、**書くところと入力候補まわりだけ**を残している
 （他言語の色分けや TypeScript の言語サービスは外す。24 MB → 4.2 MB）。

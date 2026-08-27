@@ -62,6 +62,7 @@
     <div class="tabs" role="tablist">
       <button class="tab active" data-tab="term" role="tab">ターミナル</button>
       <button class="tab" data-tab="diag" role="tab">診断<span class="badge" id="diag-count"></span></button>
+      <button class="tab hidden" data-tab="screen" id="tab-screen" role="tab">画面</button>
       <div class="tab-space"></div>
       <button id="btn-clear" class="ghost" title="流れを消す（Ctrl + L）">消す</button>
     </div>
@@ -77,6 +78,18 @@
 
       <div id="diag" class="panel diag hidden" role="tabpanel">
         <p class="empty">まだ何も読み込んでいません。</p>
+      </div>
+
+      <!-- std.ui の面。canvas は移植層（core/platform/screen_canvas.inc）が
+           #shark-screen の中に作る。ここには他のものを置かない（開くたびに空にされる） -->
+      <div id="screen" class="panel screen hidden" role="tabpanel" aria-label="画面">
+        <div class="screen-head">
+          <span id="screen-title" class="screen-name"></span>
+          <span id="screen-size" class="dim"></span>
+          <span class="grow"></span>
+          <button id="screen-close" class="ghost" title="閉じてくれと伝える（ui.poll() が false を返す）">閉じる</button>
+        </div>
+        <div id="shark-screen" class="screen-box"></div>
       </div>
     </div>
   </section>
@@ -130,6 +143,17 @@
           <code>import</code> がまだ無ければ一緒に書き足します</li>
       <li>変数の後ろの <code>.</code> では、見当をつけた型のメソッドが出ます</li>
       <li>赤い波線は<b>本物の型検査</b>の結果です（打つ手を止めると走ります）</li>
+    </ul>
+
+    <h3>画面（std.ui）</h3>
+    <p><code>ui.open()</code> を呼ぶと<b>画面</b>のタブが出て、そこに面が出ます。
+       キーもマウス（指も）もそのまま届きます。</p>
+    <ul>
+      <li>面の大きさは <code>ui.open(横, 縦)</code> のまま。板の境目を引くと、面もその大きさに作り直されます
+          （<code>ui.open(..., false)</code> なら変わりません）</li>
+      <li><code>ui.field</code> の日本語は、ブラウザのかな漢字変換がそのまま使えます</li>
+      <li><b>閉じる</b>を押すと <code>ui.poll()</code> が <code>false</code> を返します（窓の × と同じ）</li>
+      <li>字は内蔵の 5×7（ASCII）だけです。<code>ui.font()</code> は <code>false</code> を返します</li>
     </ul>
 
     <h3>ブラウザでできないこと</h3>

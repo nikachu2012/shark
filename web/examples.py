@@ -16,6 +16,7 @@ ITEMS = [
     ("examples/tasks.shk", "並行処理"),
     ("examples/config.shk", "失敗するかもしれない処理"),
     ("tests/unit_test.shk", "テストを書く"),
+    ("web/examples/ui.shk", "画面に出す（std.ui）"),
     ("web/examples/forever.shk", "止まらない繰り返し"),
 ]
 

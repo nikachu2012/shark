@@ -406,6 +406,12 @@
       return;
     }
 
+    if (which !== 'check') {   // 前に出した絵は、走らせ直すときに片づける
+      $('shark-screen').textContent = '';
+      $('tab-screen').classList.add('hidden');
+      uiScreen = null;
+    }
+
     mode = which;
     aborting = false;
     waiting = false;
@@ -458,6 +464,7 @@
     var status = api.pump(budget);
     var spent = performance.now() - t0;
     drain();
+    if (uiScreen) screenSize();
 
     var wait = api.waitingInput() === 1;   // input() が打たれるのを待っている
     if (wait !== waiting) {
@@ -649,7 +656,7 @@
 
   // ================================================================ 画面の部品
   function showTab(name) {
-    ['term', 'diag'].forEach(function (t) {
+    ['term', 'diag', 'screen'].forEach(function (t) {
       $(t).classList.toggle('hidden', t !== name);
     });
     Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
@@ -662,6 +669,39 @@
       showTab(b.dataset.tab);
       if (b.dataset.tab === 'term') focusTerm();
     });
+  });
+
+  // ================================================================ 画面（std.ui）
+  // canvas を作るのは移植層（core/platform/screen_canvas.inc）で、ここがするのは
+  // 場所（#shark-screen）を用意することと、開いたら見せることだけ。
+  // 端末で窓が開くのと同じで、開いたらそちらに移る
+  var uiScreen = null;      // いま開いている面（移植層が渡してくる）
+  var uiSize = '';
+
+  window.addEventListener('shark:screen-open', function (e) {
+    uiScreen = e.detail;
+    uiSize = '';
+    $('tab-screen').classList.remove('hidden');
+    $('screen-title').textContent = uiScreen.title || 'Shark';
+    $('screen-close').disabled = false;
+    screenSize();
+    showTab('screen');
+  });
+  window.addEventListener('shark:screen-close', function () {
+    uiScreen = null;
+    $('screen-close').disabled = true;
+  });
+  // 面の大きさは、板の境目を引くと変わる（窓の縁を引くのと同じ）
+  function screenSize() {
+    if (!uiScreen) return;
+    var s = uiScreen.width + ' × ' + uiScreen.height;
+    if (s === uiSize) return;
+    uiSize = s;
+    $('screen-size').textContent = s;
+  }
+  // 窓の × にあたるもの。ui.poll() が false を返し、プログラムは終い方を選べる
+  $('screen-close').addEventListener('click', function () {
+    if (uiScreen) uiScreen.requestClose();
   });
 
   $('btn-run').addEventListener('click', function () { start('run', { echo: true }); });

@@ -9,6 +9,8 @@
 //
 // ファイルは、そのタブの中だけにある仮想のもの（Emscripten の MEMFS）。
 // 外の世界のファイルは触れないし、閉じれば消える。
+//
+// 画面（std.ui）は canvas に出す。中身は screen_canvas.inc。
 #include "web.h"
 
 namespace shark {
@@ -191,12 +193,15 @@ bool w_secure(unsigned char* buf, int n) {
 }
 const PlatformRandom kRandom = {0, w_secure};
 
+// --- 画面 ---
+#include "screen_canvas.inc"
+
 const Platform kWeb = {
     w_alloc, w_realloc, w_free, w_fatal,
     w_now, w_mono, w_sleep, w_local_offset,
     w_write_out, w_write_err, w_read_line, w_exit,
     &kFile, &kOS, &kRandom,
-    0};   // 画面はまだ持たない（std.ui は見えない面に描く → spec/library/ui.md）
+    &kCanvasScreen};   // std.ui の面は canvas に出す（spec/library/ui.md）
 
 }  // namespace
 
