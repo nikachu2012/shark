@@ -44,6 +44,7 @@ OS に頼る部分だけを**移植層**という薄い境界に閉じ込める�
 | スレッド | 生成、待ち合わせ、排他 |
 | 画面 | 面を出す、入力の出来事を渡す。`std.ui` が使う。窓でも端末でもよい → [../library/ui.md](../library/ui.md) |
 | 文字入力 | 日本語などの変換（IME）、選んでいるところ、切り貼りの置き場。`std.ui` が使う → [../library/ui.md](../library/ui.md) |
+| 字 | 機種が字を描いてくれるところ（ブラウザなど）で、1文字ぶんの字形を濃さで返す。`std.ui` が使う。無ければ内蔵の 5×7（ASCII）か FreeType になる → [../library/ui.md](../library/ui.md) |
 | 動的コード | 実行時コンパイル用の実行可能メモリ |
 | 乱数のもと | 真の乱数（機器の雑音）と、OS の暗号用乱数。`std.crypto` が使う → [../library/crypto.md](../library/crypto.md) |
 

@@ -35,10 +35,39 @@ function check(name, ok, detail) {
 // これで、canvas に出す道と出来事の訳し方を、ブラウザを開かずに確かめられる
 function fakeDom() {
   const saved = {};
+  // canvas の 2D。面を出すところと、字を描くところ（font_canvas.inc）が使う。
+  // 字は「1文字ぶんの箱」を塗るだけの、いちばん簡単な偽物にしてある
   const ctx = {
     last: null,
+    font: '10px sans-serif',
+    fillStyle: '#000',
+    textBaseline: 'alphabetic',
+    ink: null,
     createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
     putImageData: (img) => { ctx.last = img; },
+    _px: () => parseFloat(ctx.font) || 10,
+    // ヒラギノがあることにする（無い名前は幅が変わらない ＝ 無い、と見なされる）
+    _wide: () => (ctx.font.indexOf('Hiragino') >= 0 ? 0.62 : 0.6),
+    measureText(t) {
+      const px = ctx._px();
+      const n = Array.from(String(t)).length;
+      return {
+        width: n * px * ctx._wide(),
+        actualBoundingBoxLeft: 0,
+        actualBoundingBoxRight: n * px * ctx._wide(),
+        actualBoundingBoxAscent: Math.round(px * 0.8),
+        actualBoundingBoxDescent: Math.round(px * 0.2),
+        fontBoundingBoxAscent: Math.round(px * 0.85),
+        fontBoundingBoxDescent: Math.round(px * 0.25),
+      };
+    },
+    clearRect() { ctx.ink = null; },
+    fillText(t, x, y) { ctx.ink = { t: String(t), x, y }; },
+    getImageData(x, y, w, h) {
+      const d = new Uint8ClampedArray(w * h * 4);
+      if (ctx.ink) for (let i = 0; i < w * h; i++) d[i * 4 + 3] = 255;   // 箱いっぱいに塗る
+      return { width: w, height: h, data: d };
+    },
   };
   const MOUNT_W = 300;
   const MOUNT_H = 200;
@@ -416,6 +445,43 @@ createShark().then((M) => {
   check('閉じてくれと伝えると ui.poll() が false になる',
         quit.status === 1 && quit.out.indexOf('quit true') >= 0 && dom.closes === 1,
         quit.status + ' ' + quit.out);
+
+  // --- 字（ブラウザに描いてもらう）---------------------------------------
+  // 本物の canvas でどう出るかは web/README.md の「画面」。ここで見るのは、
+  // 移植層の字（core/platform/font_canvas.inc）が std.ui につながっているか
+  const font = run('import std.ui;\n' +
+                   'func main() -> int {\n' +
+                   '  ui.open("字", 80, 40);\n' +
+                   '  var t = "あいう";\n' +
+                   '  var w0 = ui.text_width(t);\n' +
+                   '  print(f"builtin {ui.font_name()} {w0}");\n' +
+                   '  print(f"open {ui.font(16)} {ui.font_name()}");\n' +
+                   '  var w1 = ui.text_width(t);\n' +
+                   '  print(f"wide {w1 > w0}");\n' +
+                   '  ui.clear(ui.rgb(0, 0, 0));\n' +
+                   '  ui.text(2, 2, "あ", ui.rgb(255, 255, 255));\n' +
+                   '  var ink = false;\n' +
+                   '  for var y in range(40) {\n' +
+                   '    for var x in range(80) {\n' +
+                   '      if ui.get(x, y) != 0 { ink = true; }\n' +
+                   '    }\n' +
+                   '  }\n' +
+                   '  print(f"ink {ink}");\n' +
+                   '  var miss = ui.font("ないフォント名", 16);\n' +
+                   '  print(f"missing {miss}");\n' +
+                   '  ui.font_builtin();\n' +
+                   '  var w2 = ui.text_width(t);\n' +
+                   '  print(f"back {ui.font_name()} {w2 == w0}");\n' +
+                   '  ui.close();\n' +
+                   '  return 0;\n' +
+                   '}\n');
+  const fl = font.out.split('\n');
+  check('ui.font() でブラウザの字を使う', fl[1] === 'open true Hiragino Sans', font.out);
+  check('その字の幅で数える', fl[0].indexOf('builtin  ') === 0 && fl[2] === 'wide true', font.out);
+  check('面に字が描かれる', fl[3] === 'ink true', font.out);
+  check('無い名前のフォントは false', fl[4] === 'missing false', font.out);
+  check('ui.font_builtin() で内蔵に戻る', fl[5] === 'back  true', font.out);
+
   dom.restore();
 
   // --- 補完のもと（api.js）が、この処理系の中身と合っているか ---

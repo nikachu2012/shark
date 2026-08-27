@@ -47,6 +47,7 @@ static void reset_input() {
 static void ui_reset_widgets();   // 宣言的な層の覚えごとを消す（下で定義）
 
 static void input_stop();   // 下で定義
+static void font_close();   // 下で定義（字の出どころを内蔵に戻す）
 static bool ui_live_redraw(int w, int h);   // 下で定義（窓の縁を引いている間の置き直し）
 
 static void drop_surface() {
@@ -65,9 +66,7 @@ static void drop_surface() {
 // 画面を開いたまま終わっても、端末が元に戻るようにしておく
 void ui_shutdown() {
   drop_surface();
-#if defined(SHARK_FREETYPE)
-  ft::unload();   // 読んだフォントと、字形の覚え書きも返す
-#endif
+  font_close();   // 読んだフォントと、字形の覚え書きも返す
 }
 
 static bool need_open(VM& vm) {
@@ -407,38 +406,103 @@ static void draw_glyph(int cp, int x, int y, int scale, uint32_t c) {
 }
 
 // --- 字の出どころ ---------------------------------------------------------
-// 内蔵の 5×7 か、FreeType で読んだフォントか（ui.font() で選ぶ）。
-// 何もしなければ内蔵のまま。内蔵は ASCII しか持たないが、**どの機種でも同じに出る**
-// （spec/library/ui.md）
+// 3つある。何もしなければ内蔵のままで、内蔵は ASCII しか持たないかわりに
+// **どの機種でも同じに出る**（spec/library/ui.md）。
+//
+//   1. 内蔵の 5×7（font5x7.inc）           いつでもある
+//   2. FreeType で読んだフォント            SHARK_FREETYPE を付けて作ったとき
+//   3. 移植層が描いてくれる字               platform().font があるとき（ブラウザなど）
+//
+// 選ぶのは ui.font()。ここから下は、どれを使っているかを知らずに済むように、
+// この5つの関数だけを通す。2 と 3 は同じ形（濃さの並び）で字形を返す
+struct FontGlyph {
+  const unsigned char* bits;   // w×h の濃さ（0 なら空）。次に取るまでの間だけ有効
+  int w, h, left, top, adv;
+};
+
+static bool g_pfont = false;   // 移植層の字を使っているか
+static int  g_pfont_px = 12;   // そのときの大きさ
+
+static bool font_active() {
+#if defined(SHARK_FREETYPE)
+  if (ft::active()) return true;
+#endif
+  return g_pfont;
+}
+// いまの字の大きさ（行送りではなく、頼んだ大きさ）
+static int font_size() {
+#if defined(SHARK_FREETYPE)
+  if (ft::active()) return ft::size();
+#endif
+  return g_pfont_px;
+}
+static bool font_glyph(int cp, int px, FontGlyph* out) {
+#if defined(SHARK_FREETYPE)
+  if (ft::active()) {
+    const ft::Glyph* g = ft::glyph(cp, px);
+    if (!g) return false;
+    out->bits = g->bits;
+    out->w = g->w; out->h = g->h;
+    out->left = g->left; out->top = g->top;
+    out->adv = g->adv;
+    return true;
+  }
+#endif
+  if (!g_pfont || !platform().font) return false;
+  PlatformGlyph g;
+  g.bits = 0; g.w = 0; g.h = 0; g.left = 0; g.top = 0; g.adv = 0;
+  if (!platform().font->glyph(cp, px, &g)) return false;
+  out->bits = g.bits;
+  out->w = g.w; out->h = g.h;
+  out->left = g.left; out->top = g.top;
+  out->adv = g.adv;
+  return true;
+}
+static int font_line_height(int px) {
+#if defined(SHARK_FREETYPE)
+  if (ft::active()) return ft::line_height(px);
+#endif
+  if (g_pfont && platform().font) return platform().font->line_height(px);
+  return px;
+}
+static int font_ascender(int px) {
+#if defined(SHARK_FREETYPE)
+  if (ft::active()) return ft::ascender(px);
+#endif
+  if (g_pfont && platform().font) return platform().font->ascender(px);
+  return px;
+}
+// 内蔵に戻す
+static void font_close() {
+#if defined(SHARK_FREETYPE)
+  ft::unload();
+#endif
+  if (g_pfont && platform().font) platform().font->close();
+  g_pfont = false;
+}
+
 // 1行の高さ（字の上端から下端まで）。部品の高さもこれで決まる
 static int line_h(int scale) {
-#if defined(SHARK_FREETYPE)
-  if (ft::active()) return ft::line_height(ft::size() * scale);
-#endif
+  if (font_active()) return font_line_height(font_size() * scale);
   return kCellH * scale;
 }
 // 改行したときに下げる幅。字の高さそのままだと詰まって見えるので少し空ける。
 // 内蔵の 5×7 は枠（6×8）に空きを含んでいるので、そのまま
 static int line_pitch(int scale) {
-#if defined(SHARK_FREETYPE)
-  if (ft::active()) return line_h(scale) * 5 / 4;
-#endif
+  if (font_active()) return line_h(scale) * 5 / 4;
   return line_h(scale);
 }
 // その文字のぶん、次の字までどれだけ進むか
 static int advance_of(int cp, int scale) {
-#if defined(SHARK_FREETYPE)
-  if (ft::active()) {
-    const ft::Glyph* g = ft::glyph(cp, ft::size() * scale);
-    return g ? g->adv : 0;
+  if (font_active()) {
+    FontGlyph g;
+    return font_glyph(cp, font_size() * scale, &g) ? g.adv : 0;
   }
-#endif
   (void)cp;
   return kCellW * scale;
 }
 
-#if defined(SHARK_FREETYPE)
-// 濃さ a（0〜255）で、下地と混ぜて1点打つ。FreeType の字は縁がなめらかなので混ぜる
+// 濃さ a（0〜255）で、下地と混ぜて1点打つ。内蔵の 5×7 以外は縁がなめらかなので混ぜる
 static void blend_at(int x, int y, uint32_t c, int a) {
   if (a <= 0) return;
   if (x < g_cx0 || x > g_cx1 || y < g_cy0 || y > g_cy1) return;
@@ -451,23 +515,20 @@ static void blend_at(int x, int y, uint32_t c, int a) {
   }
   *p = r;
 }
-#endif
 
 // 1文字描く。(x, y) はその文字の枠の左上
 static void draw_cp(int x, int y, int cp, int scale, uint32_t c) {
-#if defined(SHARK_FREETYPE)
-  if (ft::active()) {
-    int px = ft::size() * scale;
-    const ft::Glyph* g = ft::glyph(cp, px);
-    if (!g) return;
-    int base = y + ft::ascender(px);   // 基準線。字形はここから上下に置かれる
-    for (int gy = 0; gy < g->h; gy++)
-      for (int gx = 0; gx < g->w; gx++)
-        blend_at(x + g->left + gx, base - g->top + gy, c,
-                 g->bits ? g->bits[gy * g->w + gx] : 0);
+  if (font_active()) {
+    int px = font_size() * scale;
+    FontGlyph g;
+    if (!font_glyph(cp, px, &g)) return;
+    int base = y + font_ascender(px);   // 基準線。字形はここから上下に置かれる
+    for (int gy = 0; gy < g.h; gy++)
+      for (int gx = 0; gx < g.w; gx++)
+        blend_at(x + g.left + gx, base - g.top + gy, c,
+                 g.bits ? g.bits[gy * g.w + gx] : 0);
     return;
   }
-#endif
   draw_glyph(cp, x, y, scale, c);
 }
 
@@ -1021,7 +1082,9 @@ static NativeStatus u_to_png(VM& vm, Value* a, int n, Value& out) {
 
 #if defined(SHARK_FREETYPE)
 
-// 機種にありそうなフォント。上から順に見て、最初に開けたものを使う
+// 機種にありそうなフォント。上から順に見て、最初に開けたものを使う。
+// どれも「その機種に**はじめから入っている**日本語の出るゴシック」を選んである
+// （足したいときは、太さがふつう（Regular / W4）のものを上に置く）
 static const char* const kFontPaths[] = {
 #if defined(__APPLE__)
     // W4 が本文の太さ（Regular くらい）。W3 は細く見えるので後ろに置く
@@ -1031,18 +1094,23 @@ static const char* const kFontPaths[] = {
     "/System/Library/Fonts/AppleSDGothicNeo.ttc",
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
 #elif defined(_WIN32)
-    "C:\\Windows\\Fonts\\meiryo.ttc",
+    "C:\\Windows\\Fonts\\YuGothR.ttc",     // 游ゴシック（Windows 10 以降）
     "C:\\Windows\\Fonts\\YuGothM.ttc",
-    "C:\\Windows\\Fonts\\msgothic.ttc",
+    "C:\\Windows\\Fonts\\meiryo.ttc",      // メイリオ（Vista 以降）
+    "C:\\Windows\\Fonts\\msgothic.ttc",    // MS ゴシック（ずっとある）
+    "C:\\Windows\\Fonts\\segoeui.ttf",     // 日本語が要らないとき
     "C:\\Windows\\Fonts\\arial.ttf",
 #else
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",       // Debian / Ubuntu
     "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
-    "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+    "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",     // Fedora
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",            // Arch
+    "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",          // Debian の別名
     "/usr/share/fonts/truetype/vlgothic/VL-Gothic-Regular.ttf",
     "/usr/share/fonts/ipa-gothic/ipag.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/ipafont-gothic/ipag.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",              // 日本語は無い
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",
 #endif
     0};
 
@@ -1109,6 +1177,19 @@ static bool load_font_auto(int px) { (void)px; return false; }
 
 #endif
 
+// 移植層が字を描いてくれるなら、それを使う（ブラウザなど）。
+// name が 0 なら、その機種でふつうに使えるものに任せる
+static bool load_font_platform(const char* name, int px) {
+  const PlatformFont* f = platform().font;
+  if (!f) return false;
+  if (px < 4) px = 4;
+  if (px > 200) px = 200;
+  if (!f->open(name, px)) return false;
+  g_pfont = true;
+  g_pfont_px = px;
+  return true;
+}
+
 // ui.font(大きさ) — 機種のフォントを使う
 static NativeStatus u_font_size(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)n;
@@ -1116,13 +1197,18 @@ static NativeStatus u_font_size(VM& vm, Value* a, int n, Value& out) {
 #if defined(SHARK_FREETYPE)
   if (ft::active() && ft::resize(px)) { out = mk_bool(true); return N_Ok; }
 #endif
-  out = mk_bool(load_font_auto(px));
+  if (load_font_auto(px)) { out = mk_bool(true); return N_Ok; }
+  out = mk_bool(load_font_platform(0, px));
   return N_Ok;
 }
-// ui.font(場所, 大きさ)
+// ui.font(場所, 大きさ)。移植層が字を持っている機種（ブラウザ）では、
+// ファイルの場所ではなく**フォントの名前**として渡す
 static NativeStatus u_font_path(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)n;
-  out = mk_bool(load_font_path(as_str(*A(a, 0))->s.c_str(), (int)A(a, 1)->i));
+  const Str& s = as_str(*A(a, 0))->s;
+  int px = (int)A(a, 1)->i;
+  if (load_font_path(s.c_str(), px)) { out = mk_bool(true); return N_Ok; }
+  out = mk_bool(load_font_platform(s.c_str(), px));
   return N_Ok;
 }
 // ui.font(中身, 大きさ) — 自分で読んだものを渡す
@@ -1139,9 +1225,7 @@ static NativeStatus u_font_bytes(VM& vm, Value* a, int n, Value& out) {
 }
 static NativeStatus u_font_builtin(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)a; (void)n;
-#if defined(SHARK_FREETYPE)
-  ft::unload();
-#endif
+  font_close();
   out = mk_void();
   return N_Ok;
 }
@@ -1150,6 +1234,7 @@ static NativeStatus u_font_name(VM& vm, Value* a, int n, Value& out) {
 #if defined(SHARK_FREETYPE)
   if (ft::active()) { out = mk_str(ft::name()); return N_Ok; }
 #endif
+  if (g_pfont && platform().font) { out = mk_str(Str(platform().font->name())); return N_Ok; }
   out = mk_str(Str());
   return N_Ok;
 }
@@ -1381,9 +1466,7 @@ static uint32_t w_fg(const Value& v) {
 // 内蔵の 5×7（高さ 8）のときに、下の数がそれぞれ 4・6・5・3・96・120 になる
 static int ui_unit() {
   int h = kCellH;   // 内蔵の 5×7 のとき
-#if defined(SHARK_FREETYPE)
-  if (ft::active()) h = ft::size();   // フォントの大きさ（行送りではなく字の大きさ）
-#endif
+  if (font_active()) h = font_size();   // フォントの大きさ（行送りではなく字の大きさ）
   return h < 6 ? 6 : h;
 }
 static int gap_y() { return ui_unit() / 2; }          // 縦に並べたときの間

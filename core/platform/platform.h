@@ -52,6 +52,32 @@ struct PlatformRandom {
   bool (*secure_bytes)(unsigned char* buf, int n);
 };
 
+// --- 任意機能：字 ---------------------------------------------------------
+//
+// std.ui が使う。**機種が字を描いてくれるところ**（ブラウザなど）のための口で、
+// 無い機種では 0 でよい。その場合 std.ui は内蔵の 5×7（ASCII）だけになる。
+// FreeType を組み込んであるときは、そちらが先に使われる（spec/library/ui.md）。
+//
+// 字形は「濃さ」（0〜255）の並びで返す。置き場所の数え方は FreeType と同じで、
+// left は基準線の起点から右へ、top はその起点から上へ数える。
+struct PlatformGlyph {
+  const unsigned char* bits;  // w×h の濃さ。移植層の持ちもの（次に glyph を呼ぶまで有効）
+  int w, h;
+  int left, top;
+  int adv;                    // 次の字までの幅
+};
+
+struct PlatformFont {
+  // 使えるようにする。name が 0 なら、その機種でふつうに使えるものを選ぶ。
+  // px は字の大きさ（画素）。使えなければ false
+  bool (*open)(const char* name, int px);
+  void (*close)();
+  const char* (*name)();          // いま使っているものの名前（無ければ ""）
+  bool (*glyph)(int cp, int px, PlatformGlyph* out);
+  int (*line_height)(int px);     // 1行の高さ（字の上端から下端まで）
+  int (*ascender)(int px);        // 基準線から字の上端まで
+};
+
 // --- 任意機能：画面 -------------------------------------------------------
 //
 // std.ui が使う（spec/library/ui.md）。無い機種では 0 でよく、その場合 std.ui は
@@ -170,6 +196,7 @@ struct Platform {
   const PlatformOS*     os;      // 無ければ 0
   const PlatformRandom* random;  // 無ければ 0
   const PlatformScreen* screen;  // 無ければ 0
+  const PlatformFont*   font;    // 無ければ 0（内蔵の 5×7 か FreeType になる）
 };
 
 // いま使っている移植層。差し替えるときは platform_set() を呼ぶ

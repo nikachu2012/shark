@@ -33,8 +33,10 @@ const Platform kConsole = {
     0,  // os なし
     0,  // 乱数のもとなし（機種の乱数器を持っているなら PlatformRandom を埋める。
         //   埋めるまで std.crypto の乱数は実行時エラーになる。ハッシュは使える）
-    0   // 画面なし（機種の描画先を持っているなら PlatformScreen を埋める。
+    0,  // 画面なし（機種の描画先を持っているなら PlatformScreen を埋める。
         //   埋めるまで std.ui は見えない面に描くだけになる → spec/library/ui.md）
+    0   // 字なし（機種が字を描いてくれるなら PlatformFont を埋める。
+        //   埋めるまで std.ui の字は内蔵の 5×7（ASCII）だけになる）
 };
 
 }  // namespace

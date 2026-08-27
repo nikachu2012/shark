@@ -140,7 +140,9 @@
           （<code>ui.open(..., false)</code> なら変わりません）</li>
       <li>× を押すと <code>ui.poll()</code> が <code>false</code> を返します（机の上の窓と同じ）</li>
       <li><code>ui.field</code> の日本語は、ブラウザのかな漢字変換がそのまま使えます</li>
-      <li>字は内蔵の 5×7（ASCII）だけです。<code>ui.font()</code> は <code>false</code> を返します</li>
+      <li>字は<b>ブラウザに描いてもらいます</b>。<code>ui.font(12 * ui.scale())</code>（<code>ui.run</code> は自分で呼びます）で
+          日本語もそのまま出ます。どの機種にもあるフォントを選んであり、
+          いま使っているものは <code>ui.font_name()</code> で分かります</li>
     </ul>
 
     <h3>ブラウザでできないこと</h3>

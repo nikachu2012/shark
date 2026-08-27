@@ -529,7 +529,8 @@ const Platform kDesktop = {
     d_alloc, d_realloc, d_free, d_fatal,
     d_now, d_mono, d_sleep, d_local_offset,
     d_write_out, d_write_err, d_read_line, d_exit,
-    &kFile, &kOS, &kRandom, desktop_screen()};
+    &kFile, &kOS, &kRandom, desktop_screen(),
+    0};   // 字は FreeType が読む（core/lib/font_ft.inc）ので、移植層は持たない
 
 }  // namespace
 

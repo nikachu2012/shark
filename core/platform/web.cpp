@@ -11,6 +11,7 @@
 // 外の世界のファイルは触れないし、閉じれば消える。
 //
 // 画面（std.ui）は canvas に出す。中身は screen_canvas.inc。
+// 字もブラウザに描いてもらう（font_canvas.inc）。
 #include "web.h"
 
 namespace shark {
@@ -193,15 +194,17 @@ bool w_secure(unsigned char* buf, int n) {
 }
 const PlatformRandom kRandom = {0, w_secure};
 
-// --- 画面 ---
+// --- 画面と字 ---
 #include "screen_canvas.inc"
+#include "font_canvas.inc"
 
 const Platform kWeb = {
     w_alloc, w_realloc, w_free, w_fatal,
     w_now, w_mono, w_sleep, w_local_offset,
     w_write_out, w_write_err, w_read_line, w_exit,
     &kFile, &kOS, &kRandom,
-    &kCanvasScreen};   // std.ui の面は canvas に出す（spec/library/ui.md）
+    &kCanvasScreen,    // std.ui の面は canvas に出す（spec/library/ui.md）
+    &kCanvasFont};     // 字もブラウザに描いてもらう
 
 }  // namespace
 

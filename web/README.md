@@ -35,6 +35,7 @@ git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
 |---|---|
 | [`../core/platform/web.cpp`](../core/platform/web.cpp) | 移植層。ブラウザ向けに、メモリ・時間・入出力・ファイルを埋めたもの |
 | [`../core/platform/screen_canvas.inc`](../core/platform/screen_canvas.inc) | 移植層の画面。窓をこしらえ、`std.ui` の面を canvas に出し、DOM の出来事を渡す（下） |
+| [`../core/platform/font_canvas.inc`](../core/platform/font_canvas.inc) | 移植層の字。ブラウザに1文字ずつ描いてもらう（下） |
 | [`shark_web.cpp`](shark_web.cpp) | ホスト。`Engine` を呼び、出力と診断を JavaScript に渡す |
 | [`app.js`](app.js) | 画面。書くところの用意、実行の刻み、ターミナル（下）と診断の表示 |
 | [`lang.js`](lang.js) | Monaco に Shark を教える。色分けと入力補完（下） |
@@ -277,11 +278,44 @@ window.addEventListener('shark:screen-close', function (e) { /* … */ });
 | キー | `keydown` / `keyup`。矢印・空白・Tab などはブラウザの既定の動きを止める。焦点が外れたら、押しっぱなしのキーは離したことにする |
 | マウス | `pointer*` で受けるので、指でも同じように届く。右で押すのは `ui.menu` のもの（ブラウザのメニューは出さない） |
 | 文字入力 | `ui.field` の間だけ、見えない `textarea` に任せる。**かな漢字変換はブラウザのものがそのまま使える**（変換中は `ui.marked()`） |
-| 字 | 内蔵の 5×7（ASCII）だけ。日本語は □ になる（`ui.font()` は false） |
+| 字 | **ブラウザに描いてもらう**（下）。`ui.font()` で日本語もそのまま出る |
 | 閉じる | 窓の × で `SEV_Close`。埋め込んだときはホストが `requestClose()` を呼ぶ |
 
 `SHARK_UI=off` を渡しておくと画面を開かず、見えない面に描く（`ui.get()` と `ui.to_png()` で取れる）。
 node で動かしたときも同じで、`document` が無ければ `ui.visible()` は false になる。
+
+## 字（std.ui）
+
+ブラウザの中からはフォントのファイルを読めないので、FreeType は使えない。
+かわりに**ブラウザに1文字ずつ描いてもらい、その濃さを写し取る**
+（[`../core/platform/font_canvas.inc`](../core/platform/font_canvas.inc)）。
+返す形は FreeType と同じなので、コアから見れば機種のフォントが読めたのと変わらない。
+
+```shark
+var k = ui.scale();
+_ = ui.font(12 * k);        // ここでブラウザの字に切り替わる（ui.run は自分で呼ぶ）
+ui.text(4, 4, "こんにちは", ui.rgb(255, 255, 255));
+print(ui.font_name());      // 例: Hiragino Sans
+```
+
+使う字は、Windows・macOS・Linux のどれにも**はじめから入っている**ものを選んである。
+canvas は字ごとに、持っているものへ落ちていく。
+
+| 機種 | 選んだもの |
+|---|---|
+| macOS / iOS | Hiragino Sans、Hiragino Kaku Gothic ProN |
+| Windows | Yu Gothic UI、Yu Gothic、Meiryo、MS Gothic |
+| Linux / Android / ChromeOS | Noto Sans CJK JP、Noto Sans JP、IPAexGothic、IPAGothic、VL Gothic、Droid Sans Japanese |
+| 最後の受け皿 | system-ui、sans-serif |
+
+- `ui.font_name()` は、**実際にその機械にあったもの**の名前を返す。
+  ブラウザは `document.fonts.check()` に何でも true と答えるので、
+  幅を比べて（`monospace` と並べて測って）確かめている
+- `ui.font(名前, 大きさ)` は、ブラウザではファイルの場所ではなく**フォントの名前**として渡る
+  （`ui.font("Meiryo", 16)`。その機械に無ければ false）
+- 一度描いた字形は覚えておく（文字と大きさが鍵）。日本語をたくさん出しても、
+  描き直すのは初回だけ
+- 絵文字は色が付かない（濃さだけを写し取るので、影のように出る）
 
 ## ブラウザでできないこと
 
@@ -291,7 +325,7 @@ node で動かしたときも同じで、`document` が無ければ `ui.visible(
 | 外のプログラムを呼ぶ | `os.run()` は失敗を返す（[../spec/library/os.md](../spec/library/os.md) のとおり `Result` で受け取れる） |
 | その場で待つ | 移植層の `sleep` は何もしない。`sleep()` はタスクを譲るだけで、実時間は描画の刻みで進む |
 | `std.net` `std.http` | もともとこの実装に入っていない（[../docs/implementation.md](../docs/implementation.md)） |
-| `std.ui` のフォント | FreeType を入れていないので、字は内蔵の 5×7（ASCII）だけ。`ui.font()` は false を返し、日本語は □ になる（上の「画面」） |
+| フォントのファイルを読む | ブラウザの中からは読めない。`ui.font(中身, 大きさ)` は false を返す（上の「字」のとおり、描くのはブラウザに頼む） |
 | 切り貼りの置き場を読む | ブラウザからは勝手に読めない。`ui.clipboard()` が返すのは、貼り付け（Ctrl+V）で届いたものと、自分で `ui.set_clipboard()` に入れたもの |
 
 `os.platform()` は `"wasm"` を返す。

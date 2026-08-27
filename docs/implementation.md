@@ -127,7 +127,7 @@ frontend/
 | `std.json` | あり | |
 | `std.os` | あり | `os.run` は移植層が持つときだけ |
 | `std.crypto` | あり | ハッシュ（SHA-256/512、SHA-1、MD5、HMAC）は自前。乱数のもとは移植層から取り、真の乱数か安全な乱数かを `crypto.source()` が返す |
-| `std.ui` | あり | 描くところは全部自前（点・線・円・5×7 の字形）。宣言的な層（`Widget` を `ui.col` / `ui.row` / `ui.grid` で組む）も同じ層の上に載せてある。画面は移植層の `PlatformScreen` で、`shark` コマンドは窓か端末に出す（下）。日本語は FreeType があれば出せる（任意。下） |
+| `std.ui` | あり | 描くところは全部自前（点・線・円・5×7 の字形）。宣言的な層（`Widget` を `ui.col` / `ui.row` / `ui.grid` で組む）も同じ層の上に載せてある。画面は移植層の `PlatformScreen` で、`shark` コマンドは窓か端末に、ブラウザは窓と canvas に出す（下）。日本語は FreeType か移植層の `PlatformFont` があれば出せる（下） |
 | `std.test` | あり | 1件ずつ順に走らせる |
 
 ### 実装での細かい決めごと
@@ -251,7 +251,8 @@ for (;;) {
 2. メモリ・時間・標準入出力・終了を埋める
 3. 使えるならファイル（`PlatformFile`）と OS（`PlatformOS`）も埋める。要らなければ `0` のまま
 4. 画面に出すなら `PlatformScreen` を埋める。埋めなくても `std.ui` は動く（見えない面に描く）
-5. ホストの最初に `platform_set(platform_自分の機種());` を呼ぶ
+5. 機種が字を描いてくれるなら `PlatformFont` も埋める。埋めなければ内蔵の 5×7（ASCII）だけ
+6. ホストの最初に `platform_set(platform_自分の機種());` を呼ぶ
 
 必須の4つだけでも、`time` `math` `task` と言語のすべてが動く。
 `file` や `os` を持たない移植層では、対応するモジュールは登録されず、
@@ -407,8 +408,10 @@ row の中の部品に書いた `float.infinity()` で、row ごと外の余り�
 
 #### 字を描く
 
-字の出どころは2つ。既定は内蔵の 5×7（`core/lib/font5x7.inc`）で、
-`ui.font()` を呼んだときだけ FreeType に切り替わる（`core/lib/font_ft.inc`）。
+字の出どころは3つ。既定は内蔵の 5×7（`core/lib/font5x7.inc`）で、
+`ui.font()` を呼んだときだけ、FreeType（`core/lib/font_ft.inc`）か、
+移植層が描いてくれる字（`PlatformFont`。ブラウザは `core/platform/font_canvas.inc`）に
+切り替わる。試す順は FreeType → 移植層で、どちらも無ければ `ui.font()` は false。
 
 - **FreeType はこの処理系で唯一の外部ライブラリ**で、任意。
   `make` が `pkg-config` で見つけたときだけ `-DSHARK_FREETYPE` を付ける。
@@ -420,6 +423,9 @@ row の中の部品に書いた `float.infinity()` で、row ごと外の余り�
   これを高さにすると**字の下に 11 画素のあきが残る**ので使わない
   （改行のときだけ 1.25 倍にして下げる）
 - 覚え書きは (文字, 大きさ) を鍵にした開番地法の表。いっぱいになったら丸ごと捨てる
+- **移植層の字**（`PlatformFont`）は、FreeType と同じ形（濃さの並びと置き場所）を返す口。
+  ブラウザはフォントのファイルを読めないので、canvas に1文字ずつ描かせて濃さを写し取る。
+  コアは `core/lib/ui.cpp` の `font_*()` を通すだけで、どちらを使っているかを知らない
 - **フォントの中身と覚え書きは `malloc` に置く。**日本語のフォントは数 MB あり、
   プログラムのメモリ（`--memory`）に数えると上限に当たってしまうため。
   処理系を捨てるときに `ui_shutdown()` が返す
