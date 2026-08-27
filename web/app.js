@@ -406,12 +406,6 @@
       return;
     }
 
-    if (which !== 'check') {   // 前に出した絵は、走らせ直すときに片づける
-      $('shark-screen').textContent = '';
-      $('tab-screen').classList.add('hidden');
-      uiScreen = null;
-    }
-
     mode = which;
     aborting = false;
     waiting = false;
@@ -656,7 +650,7 @@
 
   // ================================================================ 画面の部品
   function showTab(name) {
-    ['term', 'diag', 'screen'].forEach(function (t) {
+    ['term', 'diag'].forEach(function (t) {
       $(t).classList.toggle('hidden', t !== name);
     });
     Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
@@ -672,37 +666,28 @@
   });
 
   // ================================================================ 画面（std.ui）
-  // canvas を作るのは移植層（core/platform/screen_canvas.inc）で、ここがするのは
-  // 場所（#shark-screen）を用意することと、開いたら見せることだけ。
-  // 端末で窓が開くのと同じで、開いたらそちらに移る
+  // 窓をこしらえるのは移植層（core/platform/screen_canvas.inc）で、ここは
+  // 開いた・閉じたを受けて、下の帯に大きさを出すだけ
   var uiScreen = null;      // いま開いている面（移植層が渡してくる）
   var uiSize = '';
 
   window.addEventListener('shark:screen-open', function (e) {
     uiScreen = e.detail;
     uiSize = '';
-    $('tab-screen').classList.remove('hidden');
-    $('screen-title').textContent = uiScreen.title || 'Shark';
-    $('screen-close').disabled = false;
     screenSize();
-    showTab('screen');
   });
   window.addEventListener('shark:screen-close', function () {
     uiScreen = null;
-    $('screen-close').disabled = true;
+    uiSize = '';
+    $('st-screen').textContent = '';
   });
-  // 面の大きさは、板の境目を引くと変わる（窓の縁を引くのと同じ）
   function screenSize() {
     if (!uiScreen) return;
-    var s = uiScreen.width + ' × ' + uiScreen.height;
+    var s = '画面 ' + uiScreen.width + ' × ' + uiScreen.height;
     if (s === uiSize) return;
     uiSize = s;
-    $('screen-size').textContent = s;
+    $('st-screen').textContent = s;
   }
-  // 窓の × にあたるもの。ui.poll() が false を返し、プログラムは終い方を選べる
-  $('screen-close').addEventListener('click', function () {
-    if (uiScreen) uiScreen.requestClose();
-  });
 
   $('btn-run').addEventListener('click', function () { start('run', { echo: true }); });
   $('btn-check').addEventListener('click', function () { start('check', { echo: true }); });

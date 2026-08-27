@@ -6,9 +6,10 @@
 //   3. 開ける・閉じる           open / close
 // を埋める。描くのはコアの側なので、ここが持つのは画素を運ぶ道と、出来事の訳し方だけ。
 //
-//   ・出す先は Module.sharkMount → #shark-screen → 画面いっぱいに重ねた入れ物、の順で探す。
-//     ホストは場所を用意するだけでよく、開いた・閉じたは window の
-//     shark:screen-open / shark:screen-close で知らせる
+//   ・ホストが場所を決めていなければ、**窓をこしらえる**。名札の帯・× ・持ち手が付いていて、
+//     引けば動かせるし、隅を引けば大きさも変えられる（机の上の窓と同じ）。
+//     出す先を決めたいときは Module.sharkMount か #shark-screen を置く（その中に面だけ出る）。
+//     開いた・閉じたは window の shark:screen-open / shark:screen-close で知らせる
 //   ・変換つきの文字入力（かな漢字）は、見えない textarea をブラウザに任せて、
 //     確定した文字と変換中の文字だけを受け取る（spec/library/ui.md）
 //   ・出来事は JavaScript 側の列にたまり、poll() が1つずつ取る。待たない
@@ -48,6 +49,116 @@ EM_JS(void, cv_clip_init, (), {
   }, true);
 });
 
+
+// 窓をこしらえる。机の上の窓と同じに、名札の帯・×・持ち手を付ける。
+// ここが作るのは**窓枠だけ**で、中身（面）は canvas が受け持つ
+EM_JS(void, cv_window_init, (), {
+  // 窓を作る手だてを覚えさせるだけ。DOM を触るのは、実際に呼ばれたとき
+  if (Module.__shark_make_window) return;
+  Module.__shark_make_window = function (title, cw, ch) {
+    var BAR = 30;                       // 名札の帯の高さ（CSS の点）
+    var win = ({ el: null, box: null, onClose: null, onResize: null });
+
+    var el = document.createElement('div');
+    el.style.cssText = 'position:fixed;z-index:2147483000;display:flex;flex-direction:column;' +
+        'border-radius:10px;overflow:hidden;background:#15151c;color:#e7e7ec;' +
+        'box-shadow:0 18px 50px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.14);' +
+        'font:13px system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif';
+
+    var bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;align-items:center;gap:8px;flex:none;height:' + BAR + 'px;' +
+        'padding:0 6px 0 12px;background:#24242e;cursor:move;user-select:none;' +
+        'border-bottom:1px solid rgba(255,255,255,.08)';
+    var label = document.createElement('span');
+    label.textContent = title;
+    label.style.cssText = 'flex:1;min-width:0;overflow:hidden;white-space:nowrap;' +
+        'text-overflow:ellipsis;font-weight:600';
+    var shut = document.createElement('button');
+    shut.textContent = '×';
+    shut.title = '閉じる';
+    shut.setAttribute('aria-label', '閉じる');
+    shut.style.cssText = 'flex:none;width:22px;height:22px;padding:0;border:0;border-radius:11px;' +
+        'background:transparent;color:inherit;font-size:15px;line-height:1;cursor:pointer';
+    shut.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+    shut.addEventListener('click', function () { if (win.onClose) win.onClose(); });
+    bar.appendChild(label);
+    bar.appendChild(shut);
+
+    var box = document.createElement('div');
+    box.style.cssText = 'flex:1;min-height:0;display:flex;align-items:center;' +
+        'justify-content:center;overflow:hidden;position:relative;background:#000';
+
+    // 隅の持ち手。大きさを変えられない窓では出さない。
+    // 面の入れ物（box）ではなく窓に付ける ― box の中身は開くたびに空にされるので
+    var grip = document.createElement('div');
+    grip.style.cssText = 'position:absolute;right:0;bottom:0;width:16px;height:16px;z-index:4;' +
+        'cursor:nwse-resize;background:linear-gradient(135deg,transparent 52%,' +
+        'rgba(255,255,255,.3) 52%,rgba(255,255,255,.3) 60%,transparent 60%,transparent 72%,' +
+        'rgba(255,255,255,.3) 72%,rgba(255,255,255,.3) 80%,transparent 80%)';
+
+    el.appendChild(bar);
+    el.appendChild(box);
+    el.appendChild(grip);
+
+    // 出す大きさ。画面からはみ出さないところまで
+    var vw = window.innerWidth || 1024;
+    var vh = window.innerHeight || 768;
+    var ww = Math.max(120, Math.min(cw, vw - 40));
+    var wh = Math.max(80, Math.min(ch, vh - 40 - BAR));
+    el.style.width = ww + 'px';
+    el.style.height = (wh + BAR) + 'px';
+    el.style.left = Math.max(10, Math.round((vw - ww) / 2)) + 'px';
+    el.style.top = Math.max(10, Math.round((vh - wh - BAR) / 2)) + 'px';
+    document.body.appendChild(el);
+
+    // 帯を引くと動く
+    var move = null;
+    bar.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      move = ({ x: e.clientX - el.offsetLeft, y: e.clientY - el.offsetTop });
+      if (bar.setPointerCapture) { try { bar.setPointerCapture(e.pointerId); } catch (err) {} }
+      e.preventDefault();
+    });
+    bar.addEventListener('pointermove', function (e) {
+      if (!move) return;
+      var vw2 = window.innerWidth || 1024;
+      var vh2 = window.innerHeight || 768;
+      var nx = Math.min(vw2 - 80, Math.max(80 - el.offsetWidth, e.clientX - move.x));
+      var ny = Math.min(vh2 - BAR, Math.max(0, e.clientY - move.y));
+      el.style.left = nx + 'px';
+      el.style.top = ny + 'px';
+    });
+    bar.addEventListener('pointerup', function () { move = null; });
+    bar.addEventListener('pointercancel', function () { move = null; });
+
+    // 隅を引くと大きさが変わる。面はこのあと SEV_Resize で追いつく
+    var size = null;
+    grip.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      size = ({ x: e.clientX, y: e.clientY, w: el.offsetWidth, h: el.offsetHeight });
+      if (grip.setPointerCapture) { try { grip.setPointerCapture(e.pointerId); } catch (err) {} }
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    grip.addEventListener('pointermove', function (e) {
+      if (!size) return;
+      el.style.width = Math.max(120, size.w + (e.clientX - size.x)) + 'px';
+      el.style.height = Math.max(80 + BAR, size.h + (e.clientY - size.y)) + 'px';
+      if (win.onResize) win.onResize();
+      e.stopPropagation();
+    });
+    grip.addEventListener('pointerup', function () { size = null; });
+    grip.addEventListener('pointercancel', function () { size = null; });
+
+    win.el = el;
+    win.box = box;
+    win.setTitle = function (s) { label.textContent = s; };
+    win.setResizable = function (on) { grip.style.display = on ? 'block' : 'none'; };
+    win.dispose = function () { move = null; size = null; };
+    return win;
+  };
+});
+
 EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
   if (typeof document === 'undefined' || !document.body) return 0;   // node には画面が無い
   var EV = Module.__shark_ev;
@@ -55,17 +166,14 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
   var name = UTF8ToString(title);
 
   // --- 出す先を決める ---
+  // ホストが場所を決めていればそこへ（面だけ出す）。決めていなければ窓をこしらえる
   var mount = Module.sharkMount;
   if (typeof mount === 'string') mount = document.querySelector(mount);
   if (!mount) mount = document.getElementById('shark-screen');
-  var made = false;
-  if (!mount) {   // ホストが場所を決めていなければ、画面いっぱいに重ねる
-    mount = document.createElement('div');
-    mount.id = 'shark-screen';
-    mount.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:9999;' +
-        'display:flex;align-items:center;justify-content:center;overflow:hidden;background:#000';
-    document.body.appendChild(mount);
-    made = true;
+  var win = null;
+  if (!mount) {
+    win = Module.__shark_make_window(name, w * zoom / dpi, h * zoom / dpi);
+    mount = win.box;
   }
   // 変換の受け皿を面の上に置くので、位置の基準になってもらう
   if (window.getComputedStyle(mount).position === 'static') mount.style.position = 'relative';
@@ -84,7 +192,7 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
   // --- 持ち物 ---
   var S = ({});
   S.mount = mount;
-  S.made = made;
+  S.win = win;      // こしらえた窓（ホストが場所を決めていれば null）
   S.canvas = c;
   S.ctx = c.getContext('2d');
   S.img = null;      // 面を流し込む入れ物（present で作る）
@@ -261,8 +369,12 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
   }
 
   // --- ホストへの知らせ ---
-  // 閉じてくれと頼む口も渡す（ブラウザには窓の × が無いので、ホストが出す）
+  // 閉じてくれと頼む口。窓の × と、ホストが出すボタンの両方から呼ばれる
   S.requestClose = function () { push(ev(EV.close)); };
+  if (win) {
+    win.onClose = S.requestClose;
+    win.onResize = onBox;          // 隅を引いている間も、面を追いつかせる
+  }
   Module.sharkScreen = ({ canvas: c, mount: mount, title: name, width: w, height: h,
                           requestClose: S.requestClose });
   if (typeof CustomEvent === 'function')
@@ -280,7 +392,10 @@ EM_JS(void, cv_close, (), {
     S.listeners[i][0].removeEventListener(S.listeners[i][1], S.listeners[i][2]);
   if (S.ro) S.ro.disconnect();
   if (S.ta && S.ta.parentNode) S.ta.parentNode.removeChild(S.ta);
-  if (S.made && S.mount.parentNode) S.mount.parentNode.removeChild(S.mount);
+  if (S.win) {
+    S.win.dispose();
+    if (S.win.el.parentNode) S.win.el.parentNode.removeChild(S.win.el);
+  }
   Module.__shark_screen = null;
   Module.sharkScreen = null;
   if (typeof CustomEvent === 'function')
@@ -474,7 +589,9 @@ EM_JS(void, cv_clip_set, (const char* s), {
 
 EM_JS(void, cv_set_resizable, (int on), {
   var S = Module.__shark_screen;
-  if (S) S.resizable = !!on;
+  if (!S) return;
+  S.resizable = !!on;
+  if (S.win) S.win.setResizable(!!on);   // 隅の持ち手を出す・引っ込める
 });
 
 // ------------------------------------------------------------ 移植層の口
@@ -539,6 +656,7 @@ void init_js() {
     cv_key(nm, SKEY_F1 + i);
   }
   cv_clip_init();
+  cv_window_init();
 }
 
 bool open(const char* title, int w, int h) {
