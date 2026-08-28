@@ -109,6 +109,20 @@ enum ScreenKey {
   SKEY_Max
 };
 
+// マウスの形。set_cursor に渡す。持っていない形は、近いものに寄せてよい
+enum ScreenCursor {
+  SCUR_Arrow = 0,   // ふつう
+  SCUR_Hand,        // 押せるところ（ボタンの上など）
+  SCUR_Text,        // 文字を打つところ
+  SCUR_Cross,       // 照準
+  SCUR_Wait,        // 待たせているところ
+  SCUR_ResizeX,     // 横に伸ばす
+  SCUR_ResizeY,     // 縦に伸ばす
+  SCUR_Move,        // つかんで動かす
+  SCUR_None,        // 消す（自分で描くとき）
+  SCUR_Max
+};
+
 struct ScreenEvent {
   int kind;      // ScreenEventKind
   int code;      // SEV_Key: ScreenKey / SEV_Mouse: 0=左 1=中 2=右、-1 は移動
@@ -167,6 +181,12 @@ struct PlatformScreen {
   // 覚えている部品を新しい大きさで置き直して present まで済ませたら true を返す。
   // false なら移植層が自分の手当て（等倍のまま置き直すなど）に落ちる
   void (*set_redraw)(bool (*fn)(int w, int h));
+
+  // --- マウスの形。無ければ 0 -------------------------------------------
+  //
+  // std.ui が、押せるところに合わせたときなどに呼ぶ（ui.cursor()）。
+  // 変わったときにだけ呼ばれる。kind は ScreenCursor
+  void (*set_cursor)(int kind);
 
   // --- 大きさを変えられない窓。無ければ 0 -------------------------------
   //

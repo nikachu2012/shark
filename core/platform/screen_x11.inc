@@ -22,6 +22,9 @@ typedef void Visual;
 typedef void* GC;
 typedef void XImage;
 
+// 色ひとつぶん（XCreatePixmapCursor に渡す。中身は使わないので 0 でよい）
+struct XColor { unsigned long pixel; unsigned short red, green, blue; char flags, pad; };
+
 // XEvent は共用体。使うものだけ書き写す（Bool は int、XID は unsigned long）
 struct AnyEvent { int type; unsigned long serial; int send_event; Display* display; XID window; };
 struct KeyEvent {
@@ -114,6 +117,13 @@ int (*LookupString)(KeyEvent*, char*, int, XID*, void*) = 0;
 int (*XFree_)(void*) = 0;
 int (*SetDetectableAutoRepeat)(Display*, int, int*) = 0;   // 無くてもよい
 void* (*SetErrorHandler)(void*) = 0;                       // 無くてもよい
+// マウスの形。どれも無くてもよい（取れなければ、形は変えないだけ）
+XID (*CreateFontCursor)(Display*, unsigned int) = 0;
+int (*DefineCursor)(Display*, XID, XID) = 0;
+int (*FreeCursor)(Display*, XID) = 0;
+XID (*CreateBitmapFromData)(Display*, XID, const char*, unsigned int, unsigned int) = 0;
+XID (*CreatePixmapCursor)(Display*, XID, XID, XColor*, XColor*, unsigned int, unsigned int) = 0;
+int (*FreePixmap)(Display*, XID) = 0;
 
 // X の返す誤りで**プログラムごと終わらせない**。Xlib の既定は exit するので、
 // 何もしない受け手に差し替えておく（画面が出ないだけで、続きは動く）
@@ -189,6 +199,12 @@ bool load() {
   grab(&SetDetectableAutoRepeat, "XkbSetDetectableAutoRepeat");   // 無くてもよい
   grab(&SetWMNormalHints, "XSetWMNormalHints");                    // 無くてもよい
   grab(&SetErrorHandler, "XSetErrorHandler");
+  grab(&CreateFontCursor, "XCreateFontCursor");     // ここから下は無くてもよい
+  grab(&DefineCursor, "XDefineCursor");
+  grab(&FreeCursor, "XFreeCursor");
+  grab(&CreateBitmapFromData, "XCreateBitmapFromData");
+  grab(&CreatePixmapCursor, "XCreatePixmapCursor");
+  grab(&FreePixmap, "XFreePixmap");
   if (!ok) return false;
   if (SetErrorHandler) SetErrorHandler((void*)quiet_error);
   tried = 1;
@@ -266,8 +282,11 @@ void blit() {
   Flush(g.dpy);
 }
 
+void free_cursors();   // 下で定義（マウスの形）
+
 void close() {
   if (!g.open) return;
+  free_cursors();
   g.open = false;
   if (g.img) { XFree_(g.img); g.img = 0; }   // 中身（g.buf）はこちらで解放する
   if (g.buf) { free(g.buf); g.buf = 0; }
@@ -438,6 +457,59 @@ void set_resizable(bool on) {
   Flush(g.dpy);
 }
 
+// --- マウスの形 -----------------------------------------------------------
+// X の字形フォント（cursorfont）の番号。X11 は昔からこの番号で形を持っている
+unsigned int cursor_shape(int kind) {
+  switch (kind) {
+    case SCUR_Hand: return 60;      // XC_hand2
+    case SCUR_Text: return 152;     // XC_xterm
+    case SCUR_Cross: return 34;     // XC_crosshair
+    case SCUR_Wait: return 150;     // XC_watch
+    case SCUR_ResizeX: return 108;  // XC_sb_h_double_arrow
+    case SCUR_ResizeY: return 116;  // XC_sb_v_double_arrow
+    case SCUR_Move: return 52;      // XC_fleur
+    default: return 68;             // XC_left_ptr
+  }
+}
+
+XID cur_ids[SCUR_Max] = {0};   // 作った形は覚えておく（閉じるときにまとめて返す）
+int cur_now = -1;
+
+// 何も描いていない形（1×1 の空の絵）。自分でマウスを描くときに使う
+XID blank_cursor() {
+  if (!CreateBitmapFromData || !CreatePixmapCursor) return 0;
+  static const char zero[1] = {0};
+  XID pix = CreateBitmapFromData(g.dpy, g.win, zero, 1, 1);
+  if (!pix) return 0;
+  XColor c;
+  c.pixel = 0; c.red = 0; c.green = 0; c.blue = 0; c.flags = 0; c.pad = 0;
+  XID cur = CreatePixmapCursor(g.dpy, pix, pix, &c, &c, 0, 0);
+  if (FreePixmap) FreePixmap(g.dpy, pix);
+  return cur;
+}
+
+void set_cursor(int kind) {
+  if (!g.open || !DefineCursor) return;
+  if (kind < 0 || kind >= SCUR_Max) kind = SCUR_Arrow;
+  if (kind == cur_now) return;
+  if (!cur_ids[kind]) {
+    cur_ids[kind] = (kind == SCUR_None) ? blank_cursor()
+                                        : (CreateFontCursor ? CreateFontCursor(g.dpy, cursor_shape(kind)) : 0);
+  }
+  if (!cur_ids[kind] && kind != SCUR_Arrow) return;   // 作れない形は、そのまま
+  DefineCursor(g.dpy, g.win, cur_ids[kind]);          // 0 なら窓の既定に戻る
+  if (Flush) Flush(g.dpy);
+  cur_now = kind;
+}
+
+void free_cursors() {
+  for (int i = 0; i < SCUR_Max; i++) {
+    if (cur_ids[i] && FreeCursor) FreeCursor(g.dpy, cur_ids[i]);
+    cur_ids[i] = 0;
+  }
+  cur_now = -1;
+}
+
 bool poll(ScreenEvent* out) {
   if (!g.open) return false;
   if (qn == 0) pump();
@@ -454,7 +526,9 @@ bool poll(ScreenEvent* out) {
 // 変換つきの文字入力（XIM）はまだ持たない。打たれた文字がそのまま入る
 const PlatformScreen kX11Screen = {x11::screen_scale, x11::open, x11::close,
                                   x11::present,      x11::poll, true,
-                                  0, 0, 0, 0, 0, 0, 0, 0, x11::set_resizable};
+                                  0, 0, 0, 0, 0, 0, 0,   // 文字入力と切り貼りはまだ持たない
+                                  0,                     // set_redraw（X11 は止まらないので要らない）
+                                  x11::set_cursor,   x11::set_resizable};
 
 const PlatformScreen* x11_screen() { return x11::load() ? &kX11Screen : 0; }
 

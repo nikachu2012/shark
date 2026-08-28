@@ -489,6 +489,9 @@ void s_set_redraw(bool (*fn)(int, int)) {
 void s_set_resizable(bool on) {
   if (g_active && g_active->set_resizable) g_active->set_resizable(on);
 }
+void s_set_cursor(int kind) {
+  if (g_active && g_active->set_cursor) g_active->set_cursor(kind);
+}
 
 // 画面の細かさ。**開く前にも呼べる**ので、まだ選んでいなければ出せそうな順に尋ねる。
 // 窓を使わないと決まっているとき（SHARK_UI）は 1。端末にも見えない面にも細かさは無い
@@ -518,6 +521,7 @@ struct ScreenInit {
     kScreen.clipboard_get = s_clipboard_get;   // 画面が無くても使えることがある
     kScreen.clipboard_set = s_clipboard_set;
     kScreen.set_redraw = s_set_redraw;
+    kScreen.set_cursor = s_set_cursor;
     kScreen.set_resizable = s_set_resizable;
   }
 };

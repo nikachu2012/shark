@@ -162,6 +162,17 @@ function fakeDom() {
       target.dispatchEvent(new Evt(type, { key, bubbles: true, ctrlKey: false, metaKey: false, altKey: false,
                                            preventDefault() {} }));
     },
+    // 面の画素の上に、押さずに動かす
+    hover(sx, sy) {
+      const c = api.canvas;
+      const r = c.getBoundingClientRect();
+      const k = r.width / c.width;
+      c.dispatchEvent(new Evt('pointermove', { clientX: r.left + sx * k + k / 2,
+                                               clientY: r.top + sy * k + k / 2,
+                                               button: 0, pointerId: 1, bubbles: true,
+                                               preventDefault() {} }));
+    },
+    cursor() { return api.canvas ? api.canvas.style.cursor : ''; },
     // 面の画素で押す（画面の点に直してから渡す）
     tap(sx, sy) {
       const c = api.canvas;
@@ -380,6 +391,7 @@ createShark().then((M) => {
       '    if ui.pressed("left") { print("left"); }\n' +
       '    if ui.clicked(0) { print(f"click {ui.mouse_x()},{ui.mouse_y()}"); editing = true; }\n' +
       '    ui.clear(ui.rgb(240, 80, 60));\n' +
+      '    _ = ui.show(ui.button("b", "b"), 40, 40);\n' +   // 形のテストで合わせる先
       '    if editing {\n' +
       '      name = ui.input(4, 20, 10, name);\n' +
       '      if name != "" { print(f"name {name}"); }\n' +
@@ -439,6 +451,16 @@ createShark().then((M) => {
   if (ta) ta.value = 'さめ';
   const named = turn(4);
   check('受け皿に入った文字が、そのまま渡る', named.out.indexOf('name さめ') >= 0, named.out);
+
+  // --- マウスの形 --------------------------------------------------------
+  // 押せるところに合わせたら手に、入力欄なら文字の形に変わる
+  dom.hover(4, 4);           // 何も無いところ
+  const c0 = turn(3);
+  const cur0 = dom.cursor();
+  dom.hover(46, 46);         // ボタンの上（上のプログラムが ui.show で置いている）
+  const c1 = turn(3);
+  check('押せるところに合わせると手になる', dom.cursor() === 'pointer',
+        JSON.stringify([cur0, dom.cursor()]) + c0.out + c1.out);
 
   dom.close();   // 窓の × にあたるもの（requestClose）
   const quit = turn(30);

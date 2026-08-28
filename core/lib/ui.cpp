@@ -36,6 +36,10 @@ static bool g_key[SKEY_Max], g_press[SKEY_Max], g_rel[SKEY_Max], g_hit[SKEY_Max]
 static Str g_typed;
 static int g_mx = 0, g_my = 0;
 static bool g_mb[3], g_mpress[3], g_mrel[3];
+// マウスの形。毎回 ui.poll() で「ふつう」に戻り、その回に頼まれた形が
+// ui.present() で機種に伝わる（頼まれるのは ui.cursor() と、宣言的な層の部品）
+static int g_cursor_want = SCUR_Arrow;
+static int g_cursor_set = SCUR_Arrow;
 
 static void reset_input() {
   for (int i = 0; i < SKEY_Max; i++) { g_key[i] = false; g_press[i] = false; g_rel[i] = false; g_hit[i] = false; }
@@ -52,6 +56,11 @@ static bool ui_live_redraw(int w, int h);   // 下で定義（窓の縁を引い
 
 static void drop_surface() {
   input_stop();
+  // 形を変えたまま終わらない（窓が閉じても、あとに残る機種がある）
+  if (g_visible && platform().screen && platform().screen->set_cursor && g_cursor_set != SCUR_Arrow)
+    platform().screen->set_cursor(SCUR_Arrow);
+  g_cursor_want = SCUR_Arrow;
+  g_cursor_set = SCUR_Arrow;
   if (g_visible && platform().screen) platform().screen->close();
   g_visible = false;
   if (g_px) { sk_free(g_px); g_px = 0; }
@@ -188,9 +197,19 @@ static NativeStatus u_scale(VM& vm, Value* a, int n, Value& out) {
 static NativeStatus u_visible(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)a; (void)n; out = mk_bool(g_visible); return N_Ok;
 }
+// この回に頼まれたマウスの形を、変わったときだけ機種に伝える
+static void cursor_flush() {
+  const PlatformScreen* s = platform().screen;
+  if (!g_visible || !s || !s->set_cursor) return;
+  if (g_cursor_want == g_cursor_set) return;
+  g_cursor_set = g_cursor_want;
+  s->set_cursor(g_cursor_set);
+}
+
 static NativeStatus u_present(VM& vm, Value* a, int n, Value& out) {
   (void)a; (void)n;
   if (!need_open(vm)) return N_Panic;
+  cursor_flush();
   if (g_visible && platform().screen) platform().screen->present(g_px, g_w, g_h);
   out = mk_void();
   return N_Ok;
@@ -864,6 +883,7 @@ static NativeStatus u_poll(VM& vm, Value* a, int n, Value& out) {
   (void)a; (void)n;
   if (!need_open(vm)) return N_Panic;
   // 前の刻みの「今このとき」を消す
+  g_cursor_want = SCUR_Arrow;   // 形を頼むのは、この回に描く人
   for (int i = 0; i < SKEY_Max; i++) { g_press[i] = false; g_rel[i] = false; g_hit[i] = false; }
   for (int i = 0; i < 3; i++) { g_mpress[i] = false; g_mrel[i] = false; }
   g_typed.clear();
@@ -903,6 +923,28 @@ static NativeStatus u_poll(VM& vm, Value* a, int n, Value& out) {
   out = mk_bool(!g_quit);
   return N_Ok;
 }
+// マウスの形を頼む。**その回かぎり**で、次の ui.poll() で「ふつう」に戻る
+static NativeStatus u_cursor(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  const Str& name = as_str(*A(a, 0))->s;
+  static const struct { const char* name; int kind; } kNames[] = {
+      {"arrow", SCUR_Arrow}, {"hand", SCUR_Hand}, {"text", SCUR_Text}, {"cross", SCUR_Cross},
+      {"wait", SCUR_Wait}, {"resize_x", SCUR_ResizeX}, {"resize_y", SCUR_ResizeY},
+      {"move", SCUR_Move}, {"none", SCUR_None}};
+  for (int i = 0; i < (int)(sizeof kNames / sizeof kNames[0]); i++) {
+    if (name == kNames[i].name) {
+      g_cursor_want = kNames[i].kind;
+      out = mk_void();
+      return N_Ok;
+    }
+  }
+  vm.panic(vm.L(Str("知らないマウスの形です: ") + name +
+                    "（arrow hand text cross wait resize_x resize_y move none）",
+                Str("unknown cursor: ") + name +
+                    " (arrow hand text cross wait resize_x resize_y move none)"));
+  return N_Panic;
+}
+
 static NativeStatus u_quit(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)a; (void)n;
   g_quit = true;
@@ -1823,6 +1865,7 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
 
 static void place_button(const Value& v, int x, int y, const Box& b) {
   bool over = inside(x, y, b.w, b.h);
+  if (over) g_cursor_want = SCUR_Hand;   // 押せるところ
   int64_t bg = w_field(v, WF_Bg);
   uint32_t face = bg >= 0 ? (uint32_t)bg : blend(g_bg, g_accent, over ? 0.55 : 0.3);
   if (bg >= 0 && over) face = blend(face, g_fg, 0.2);
@@ -1840,6 +1883,7 @@ static void place_button(const Value& v, int x, int y, const Box& b) {
 static void place_checkbox(const Value& v, int x, int y, const Box& b) {
   bool on = w_a(v) != 0;
   bool over = inside(x, y, b.w, b.h);
+  if (over) g_cursor_want = SCUR_Hand;
   uint32_t edge = blend(g_bg, g_accent, over ? 1.0 : 0.7);
   int bw = box_w();
   for (int i = 0; i < bw; i++) span(x, y + i, bw, blend(g_bg, g_accent, over ? 0.35 : 0.2));
@@ -1868,6 +1912,7 @@ static void place_slider(const Value& v, int x, int y, const Box& b) {
   int usable = tw - knob;
   int kx = x + (int)((val - lo) * usable / (hi - lo));
   for (int i = 0; i < b.h; i++) span(kx, y + i, knob, g_accent);
+  if (inside(x - 3, y - 3, tw + 6, b.h + 6)) g_cursor_want = SCUR_Hand;
   // 押されている間は、そのつど今の位置から値を出す
   if (g_mb[0] && inside(x - 3, y - 3, tw + 6, b.h + 6)) {
     int rel = g_mx - x - knob / 2;
@@ -1930,6 +1975,7 @@ static void menu_draw() {
   span(x, y, w, edge);
   span(x, y + h - 1, w, edge);
   for (int i = 0; i < h; i++) { put(x, y + i, edge); put(x + w - 1, y + i, edge); }
+  if (inside(x, y, w, h)) g_cursor_want = SCUR_Hand;
   for (int i = 0; i < g_menu_items.size(); i++) {
     int iy = y + i * ih;
     if (inside(x, iy, w, ih))
@@ -1976,6 +2022,7 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
   Str text = w_text(v);
   Str id = w_id(v);
   bool over = inside(x, y, b.w, b.h);
+  if (over) g_cursor_want = SCUR_Text;   // 文字を打つところ
   bool focused = g_focus.size() > 0 && g_focus == id;
   int tx = x + field_pad_x(), ty = y + (b.h - line_h(1)) / 2;
   if (ty < y) ty = y;
@@ -2543,6 +2590,7 @@ void register_ui(Registry& r) {
 
   r.add("ui.poll", u_poll, tb);
   r.add("ui.quit", u_quit, tv);
+  r.add("ui.cursor", u_cursor, tv, ts);
   r.add("ui.key", u_key, tb, ts);
   r.add("ui.pressed", u_pressed, tb, ts);
   r.add("ui.released", u_released, tb, ts);

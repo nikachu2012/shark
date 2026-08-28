@@ -587,6 +587,12 @@ EM_JS(void, cv_clip_set, (const char* s), {
   }
 });
 
+// マウスの形。CSS の名前に直して canvas に付ける
+EM_JS(void, cv_set_cursor, (const char* css), {
+  var S = Module.__shark_screen;
+  if (S && S.canvas) S.canvas.style.cursor = UTF8ToString(css);
+});
+
 EM_JS(void, cv_set_resizable, (int on), {
   var S = Module.__shark_screen;
   if (!S) return;
@@ -763,6 +769,24 @@ void set_resizable(bool on) {
   cv_set_resizable(on ? 1 : 0);
 }
 
+// CSS の名前（developer.mozilla.org の cursor）に直して渡す
+void set_cursor(int kind) {
+  if (!g.open) return;
+  const char* css = "default";
+  switch (kind) {
+    case SCUR_Hand: css = "pointer"; break;
+    case SCUR_Text: css = "text"; break;
+    case SCUR_Cross: css = "crosshair"; break;
+    case SCUR_Wait: css = "wait"; break;
+    case SCUR_ResizeX: css = "ew-resize"; break;
+    case SCUR_ResizeY: css = "ns-resize"; break;
+    case SCUR_Move: css = "grab"; break;
+    case SCUR_None: css = "none"; break;
+    default: break;
+  }
+  cv_set_cursor(css);
+}
+
 }  // namespace canvas
 
 // canvas は「離した」も出せる。変換つきの文字入力は、見えない textarea に任せる。
@@ -772,4 +796,6 @@ const PlatformScreen kCanvasScreen = {
     canvas::present,        canvas::poll,           true,
     canvas::text_input,     canvas::text_state,     canvas::text_selection,
     canvas::text_select,    canvas::text_replace,   canvas::clipboard_get,
-    canvas::clipboard_set,  0,                      canvas::set_resizable};
+    canvas::clipboard_set,
+    0,                      // 窓の縁を引いている間の描き直しは要らない（ブラウザは止まらない）
+    canvas::set_cursor,     canvas::set_resizable};

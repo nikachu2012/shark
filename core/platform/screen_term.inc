@@ -397,8 +397,9 @@ int t_scale() { return 1; }
 // 端末は「離した」を教えてくれないので has_key_up は false
 // 変換は端末のソフトがやってくれて、確定した文字だけが届く。
 // こちらで受け皿を持つ必要がない（→ text_input は 0）
+// 端末にマウスの形は無い（set_cursor も 0）
 const PlatformScreen kTermScreen = {t_scale, t_open, t_close, t_present, t_poll, false,
-                                   0, 0, 0, 0, 0, 0, 0, 0, 0};
+                                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 const PlatformScreen* term_screen() { return &kTermScreen; }
 

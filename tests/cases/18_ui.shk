@@ -322,6 +322,17 @@ func main() -> int {
   _ = ui.show(ui.col([ui.label("eeee ffff"), ui.label("gg").background(green)]), 0, 0);
   print(f"{ui.get(0, 20) != 0} {hits(0, 0, 30, 16) > 0}");   // 折れたぶん、次は下へ
 
+  // --- マウスの形 ---
+  // 画面の無いところでは何も起きないが、名前は確かめられる（知らない名前は panic）
+  ui.open(20, 10);
+  ui.cursor("hand");
+  ui.cursor("text");
+  ui.cursor("none");
+  ui.cursor("arrow");
+  _ = ui.poll();
+  ui.present();
+  print("cursor ok");
+
   // --- PNG ---
   ui.open(4, 4);
   ui.clear(red);

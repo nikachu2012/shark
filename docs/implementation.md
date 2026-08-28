@@ -406,6 +406,19 @@ row の中の部品に書いた `float.infinity()` で、row ごと外の余り�
 テストと `make docs-check` は `SHARK_UI=off` で走らせている。
 窓が開くと結果が機種によって変わるため。
 
+#### マウスの形
+
+`ui.cursor()` は**その回かぎり**の頼みごとにしてある。`ui.poll()` で `arrow` に戻し、
+`ui.present()` のときに、変わっていれば移植層へ渡す（`PlatformScreen.set_cursor`）。
+
+- 状態として持たないので、部品を消したのに形が残る、ということが起きない。
+  宣言的な層はボタン・つまみ・メニュー・入力欄の上で毎回頼み直す
+- macOS は窓の上でマウスが動くたびに矢印へ戻すので、**覚えておいて掛け直す**
+  （`mouse_ev` から `apply_cursor`）。持っていない呼び名を送ると落ちるので、
+  `respondsToSelector:` で先に尋ねる
+- X11 は `XCreateFontCursor` の番号。`none` だけは 1×1 の空の絵から作る
+- ブラウザは CSS の `cursor`。端末は形を持たない（`set_cursor` が 0）
+
 #### 字を描く
 
 字の出どころは3つ。既定は内蔵の 5×7（`core/lib/font5x7.inc`）で、

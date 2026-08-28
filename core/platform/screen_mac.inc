@@ -263,9 +263,12 @@ bool open(const char* title, int w, int h) {
 
 void text_input(bool on, const char* initial, int x, int y, int h);   // 下で定義
 
+void set_cursor(int kind);   // 下で定義
+
 void close() {
   if (!g.open) return;
   text_input(false, 0, 0, 0, 0);
+  set_cursor(SCUR_Arrow);   // 隠したままにしない
   g.open = false;
   if (g.timer) {
     if (cfTimerInvalidate) cfTimerInvalidate(g.timer);
@@ -358,7 +361,10 @@ int first_cp(const char* s) {
   return cp;
 }
 
+void apply_cursor();   // 下で定義
+
 void mouse_ev(Obj ev, int code, bool down) {
+  apply_cursor();   // 窓の上で動くと AppKit が矢印に戻すので、そのつど掛け直す
   Pt p = ((Pt(*)(Obj, Sel))msgSend)(ev, S("locationInWindow"));
   ScreenEvent e;
   e.kind = SEV_Mouse;
@@ -689,6 +695,55 @@ bool text_state(Str* confirmed, Str* marked) {
   return true;
 }
 
+// --- マウスの形 -----------------------------------------------------------
+// AppKit は窓の上で動くたびに矢印へ戻すので、**覚えておいて掛け直す**
+// （mouse_ev から apply_cursor を呼ぶ）。none は隠す・出すの数を合わせる
+int g_cursor = SCUR_Arrow;
+bool g_cursor_hidden = false;
+
+// AppKit が持っている形。待ちの形（砂時計）は公けには無いので、矢印のままにする
+// （待たせている間の輪は OS が勝手に出す）
+const char* cursor_sel(int kind) {
+  switch (kind) {
+    case SCUR_Hand: return "pointingHandCursor";
+    case SCUR_Text: return "IBeamCursor";
+    case SCUR_Cross: return "crosshairCursor";
+    case SCUR_ResizeX: return "resizeLeftRightCursor";
+    case SCUR_ResizeY: return "resizeUpDownCursor";
+    case SCUR_Move: return "openHandCursor";
+    default: return "arrowCursor";
+  }
+}
+
+// 持っていない呼び名を送ると落ちるので、先に尋ねる（機種ごとに増減する）
+bool responds(Obj o, const char* sel) {
+  return ((signed char (*)(Obj, Sel, Sel))msgSend)(o, S("respondsToSelector:"), S(sel)) != 0;
+}
+
+void apply_cursor() {
+  if (!load()) return;
+  Obj cls = C("NSCursor");
+  if (!cls) return;
+  if (g_cursor == SCUR_None) {
+    if (!g_cursor_hidden && responds(cls, "hide")) { sendv(cls, "hide"); g_cursor_hidden = true; }
+    return;
+  }
+  if (g_cursor_hidden) {
+    if (responds(cls, "unhide")) sendv(cls, "unhide");
+    g_cursor_hidden = false;
+  }
+  const char* sel = cursor_sel(g_cursor);
+  if (!responds(cls, sel)) sel = "arrowCursor";
+  if (!responds(cls, sel)) return;
+  Obj cur = send(cls, sel);
+  if (cur && responds(cur, "set")) sendv(cur, "set");
+}
+
+void set_cursor(int kind) {
+  g_cursor = kind;
+  apply_cursor();
+}
+
 void set_redraw(bool (*fn)(int, int)) { g.redraw = fn; }
 
 // 縁を引いて大きさを変えられるかを切り替える（8 = NSWindowStyleMaskResizable）
@@ -717,7 +772,7 @@ const PlatformScreen kMacScreen = {mac::screen_scale,  mac::open,           mac:
                                   mac::text_input,    mac::text_state,
                                   mac::text_selection, mac::text_select,
                                   mac::text_replace,  mac::clipboard_get,  mac::clipboard_set,
-                                  mac::set_redraw,    mac::set_resizable};
+                                  mac::set_redraw,    mac::set_cursor,     mac::set_resizable};
 
 const PlatformScreen* mac_screen() { return mac::load() ? &kMacScreen : 0; }
 
