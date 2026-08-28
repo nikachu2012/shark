@@ -50,37 +50,69 @@ EM_JS(void, cv_clip_init, (), {
 });
 
 
-// 窓をこしらえる。机の上の窓と同じに、名札の帯・×・持ち手を付ける。
+// 窓をこしらえる。見た目は Dear ImGui に寄せてある ― 角は立てたまま、細い縁、
+// 帯は濃い青（焦点が外れると黒に近くなる）、右下に三角の持ち手。
 // ここが作るのは**窓枠だけ**で、中身（面）は canvas が受け持つ
 EM_JS(void, cv_window_init, (), {
   // 窓を作る手だてを覚えさせるだけ。DOM を触るのは、実際に呼ばれたとき
   if (Module.__shark_make_window) return;
   Module.__shark_make_window = function (title, cw, ch) {
-    var BAR = 30;                       // 名札の帯の高さ（CSS の点）
+    // Dear ImGui の暗い配色（imgui.cpp の StyleColorsDark から）
+    var C = ({
+      bg: '#0f0f0f',                       // WindowBg
+      border: 'rgba(110,110,128,0.50)',    // Border
+      title: '#0a0a0a',                    // TitleBg（焦点が無いとき）
+      titleOn: '#294a7a',                  // TitleBgActive
+      text: '#ffffff',
+      dim: 'rgba(255,255,255,0.60)',
+      grip: 'rgba(66,150,250,0.35)',       // ResizeGrip
+      gripOn: 'rgba(66,150,250,0.90)',     // ResizeGripHovered
+      hot: 'rgba(66,150,250,1.00)'         // ButtonHovered
+    });
+    var BAR = 22;                          // 名札の帯の高さ（CSS の点）
     var win = ({ el: null, box: null, onClose: null, onResize: null });
 
     var el = document.createElement('div');
     el.style.cssText = 'position:fixed;z-index:2147483000;display:flex;flex-direction:column;' +
-        'border-radius:10px;overflow:hidden;background:#15151c;color:#e7e7ec;' +
-        'box-shadow:0 18px 50px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.14);' +
-        'font:13px system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif';
+        'border:1px solid ' + C.border + ';background:' + C.bg + ';color:' + C.text + ';' +
+        'box-shadow:0 10px 40px rgba(0,0,0,.5);' +
+        'font:12px/1.5 system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif';
 
     var bar = document.createElement('div');
-    bar.style.cssText = 'display:flex;align-items:center;gap:8px;flex:none;height:' + BAR + 'px;' +
-        'padding:0 6px 0 12px;background:#24242e;cursor:move;user-select:none;' +
-        'border-bottom:1px solid rgba(255,255,255,.08)';
+    bar.style.cssText = 'display:flex;align-items:center;gap:6px;flex:none;height:' + BAR + 'px;' +
+        'padding:0 4px 0 6px;background:' + C.titleOn + ';cursor:move;user-select:none';
+
+    // たたむ印。ImGui と同じで、押すと中身が隠れて帯だけになる
+    var arrow = document.createElement('span');
+    arrow.textContent = '▼';
+    arrow.style.cssText = 'flex:none;width:13px;text-align:center;font-size:9px;cursor:pointer;' +
+        'color:' + C.dim;
+    arrow.title = 'たたむ';
+
     var label = document.createElement('span');
     label.textContent = title;
     label.style.cssText = 'flex:1;min-width:0;overflow:hidden;white-space:nowrap;' +
-        'text-overflow:ellipsis;font-weight:600';
-    var shut = document.createElement('button');
-    shut.textContent = '×';
+        'text-overflow:ellipsis';
+
+    var shut = document.createElement('span');
+    shut.textContent = '✕';
     shut.title = '閉じる';
+    shut.setAttribute('role', 'button');
     shut.setAttribute('aria-label', '閉じる');
-    shut.style.cssText = 'flex:none;width:22px;height:22px;padding:0;border:0;border-radius:11px;' +
-        'background:transparent;color:inherit;font-size:15px;line-height:1;cursor:pointer';
+    shut.style.cssText = 'flex:none;width:15px;height:15px;line-height:15px;text-align:center;' +
+        'font-size:10px;border-radius:2px;cursor:pointer;color:' + C.dim;
     shut.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+    shut.addEventListener('pointerenter', function () {
+      shut.style.background = C.hot;
+      shut.style.color = '#fff';
+    });
+    shut.addEventListener('pointerleave', function () {
+      shut.style.background = 'transparent';
+      shut.style.color = C.dim;
+    });
     shut.addEventListener('click', function () { if (win.onClose) win.onClose(); });
+
+    bar.appendChild(arrow);
     bar.appendChild(label);
     bar.appendChild(shut);
 
@@ -88,13 +120,17 @@ EM_JS(void, cv_window_init, (), {
     box.style.cssText = 'flex:1;min-height:0;display:flex;align-items:center;' +
         'justify-content:center;overflow:hidden;position:relative;background:#000';
 
-    // 隅の持ち手。大きさを変えられない窓では出さない。
-    // 面の入れ物（box）ではなく窓に付ける ― box の中身は開くたびに空にされるので
+    // 右下の持ち手。ImGui と同じ三角。面の入れ物ではなく窓に付ける
+    // （box の中身は開くたびに空にされるので）
     var grip = document.createElement('div');
-    grip.style.cssText = 'position:absolute;right:0;bottom:0;width:16px;height:16px;z-index:4;' +
-        'cursor:nwse-resize;background:linear-gradient(135deg,transparent 52%,' +
-        'rgba(255,255,255,.3) 52%,rgba(255,255,255,.3) 60%,transparent 60%,transparent 72%,' +
-        'rgba(255,255,255,.3) 72%,rgba(255,255,255,.3) 80%,transparent 80%)';
+    grip.style.cssText = 'position:absolute;right:0;bottom:0;width:14px;height:14px;z-index:4;' +
+        'cursor:nwse-resize;background:linear-gradient(315deg,' + C.grip + ' 42%,transparent 42%)';
+    grip.addEventListener('pointerenter', function () {
+      grip.style.background = 'linear-gradient(315deg,' + C.gripOn + ' 42%,transparent 42%)';
+    });
+    grip.addEventListener('pointerleave', function () {
+      if (!size) grip.style.background = 'linear-gradient(315deg,' + C.grip + ' 42%,transparent 42%)';
+    });
 
     el.appendChild(bar);
     el.appendChild(box);
@@ -110,6 +146,40 @@ EM_JS(void, cv_window_init, (), {
     el.style.left = Math.max(10, Math.round((vw - ww) / 2)) + 'px';
     el.style.top = Math.max(10, Math.round((vh - wh - BAR) / 2)) + 'px';
     document.body.appendChild(el);
+
+    // いま触っている窓かどうかで帯の色が変わる（ImGui の TitleBgActive）。
+    // 焦点の出来事だけでは足りない（窓に焦点の来ない出し先もある）ので、
+    // 押されたところも見る
+    function focused(on) { bar.style.background = on ? C.titleOn : C.title; }
+    el.addEventListener('focusin', function () { focused(true); });
+    el.addEventListener('focusout', function (e) {
+      if (!e.relatedTarget || !el.contains(e.relatedTarget)) focused(false);
+    });
+    el.addEventListener('pointerdown', function () { focused(true); }, true);
+    var away = function (e) { if (!el.contains(e.target)) focused(false); };
+    document.addEventListener('pointerdown', away, true);
+
+    // たたむ・ひらく
+    var folded = false;
+    var openH = wh + BAR;
+    function fold(on) {
+      folded = on;
+      arrow.textContent = on ? '▶' : '▼';
+      arrow.title = on ? 'ひらく' : 'たたむ';
+      if (on) {
+        openH = el.offsetHeight;
+        box.style.display = 'none';
+        grip.style.display = 'none';
+        el.style.height = BAR + 'px';
+      } else {
+        box.style.display = 'flex';
+        grip.style.display = win.resizable === false ? 'none' : 'block';
+        el.style.height = openH + 'px';
+      }
+    }
+    arrow.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+    arrow.addEventListener('click', function () { fold(!folded); });
+    bar.addEventListener('dblclick', function () { fold(!folded); });
 
     // 帯を引くと動く
     var move = null;
@@ -143,7 +213,7 @@ EM_JS(void, cv_window_init, (), {
     grip.addEventListener('pointermove', function (e) {
       if (!size) return;
       el.style.width = Math.max(120, size.w + (e.clientX - size.x)) + 'px';
-      el.style.height = Math.max(80 + BAR, size.h + (e.clientY - size.y)) + 'px';
+      el.style.height = Math.max(60 + BAR, size.h + (e.clientY - size.y)) + 'px';
       if (win.onResize) win.onResize();
       e.stopPropagation();
     });
@@ -152,9 +222,17 @@ EM_JS(void, cv_window_init, (), {
 
     win.el = el;
     win.box = box;
+    win.resizable = true;
     win.setTitle = function (s) { label.textContent = s; };
-    win.setResizable = function (on) { grip.style.display = on ? 'block' : 'none'; };
-    win.dispose = function () { move = null; size = null; };
+    win.setResizable = function (on) {
+      win.resizable = on;
+      grip.style.display = (on && !folded) ? 'block' : 'none';
+    };
+    win.dispose = function () {
+      move = null;
+      size = null;
+      document.removeEventListener('pointerdown', away, true);
+    };
     return win;
   };
 });
