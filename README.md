@@ -70,6 +70,7 @@ make web-test       # 作ったものを node で確かめる
 ```
 ./shark run examples/paint.shk      # 下の層。マウスで描く
 ./shark run examples/counter.shk    # 上の層。部品を組んで返す
+./shark run examples/breakout.shk   # ブロック崩し。絵（Canvas）と透明を使う
 ```
 
 **下の層**は、画素の並び1枚（面）と、押された・動いたという出来事だけ。

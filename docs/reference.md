@@ -1084,7 +1084,9 @@ ui.text(8, 8, "こんにちは", ui.rgb(255, 255, 255));
   `ui.pressed()` で向きを覚えておくと、どの機種でも同じに動きます
 
 動く例が [examples/paint.shk](../examples/paint.shk)（下の層）と
-[examples/counter.shk](../examples/counter.shk)（上の層）にあります。
+[examples/counter.shk](../examples/counter.shk)（上の層）、
+[examples/breakout.shk](../examples/breakout.shk)（絵と透明を使ったブロック崩し）
+にあります。
 
 → [spec/library/ui.md](../spec/library/ui.md)
 

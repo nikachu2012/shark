@@ -1,0 +1,290 @@
+// breakout.shk — ブロック崩し（std.ui の絵と透明を使う見本）
+//
+//   ./shark run examples/breakout.shk
+//
+// ← → か a d で台を動かす。space で打ち出す。r でやり直し。esc か q でおしまい。
+// 窓を持てないところでは端末に出る。画面がまったく無いところ
+// （SHARK_UI=off など）では、決まった場面を描いて breakout.png に保存する。
+//
+// 見本にしているところ:
+//   ・ブロックの絵は ui.canvas() で**1つずつ先に描いておき**、あとは貼るだけ
+//     （毎こま描き直さない。ゲーム機のスプライトと同じ考え）
+//   ・玉の尾と、当たったときの光は ui.rgba() の**半透明**で重ねる
+//   ・絵は代入するとコピーになるので、色ちがいは「作って塗り替える」で足りる
+import std.ui;
+import std.math;
+import std.file;
+
+var K: int = 1;          // 画面の細かさ（HiDPI なら 2）
+var W: int = 320;        // 面の横（画素）
+var H: int = 240;        // 面の縦
+
+var COLS: int = 10;
+var ROWS: int = 5;
+var BW: int = 28;        // ブロック1つの横
+var BH: int = 12;        // 同じく縦
+var TOP: int = 26;       // ブロックの並びの上端
+
+// --- 持ちもの --------------------------------------------------------------
+var bricks: list<int> = [];        // 0 なら壊れている。1〜 は色の番号
+var brick_art: list<Canvas> = [];  // 色ごとに1枚。ここに先に描いておく
+var flash_art: Canvas = ui.canvas(1, 1);   // 当たったときの光（半透明）
+
+var px: float = 0.0;     // 台の左端
+var pw: float = 52.0;    // 台の横
+var bx: float = 0.0;     // 玉
+var by: float = 0.0;
+var vx: float = 0.0;
+var vy: float = 0.0;
+var stuck: bool = true;  // 台にくっついているか
+var score: int = 0;
+var lives: int = 3;
+var over: bool = false;
+var cleared: bool = false;
+var flashes: list<int> = [];   // 光っているところ（x, y, 残りこま数）の3つ組
+
+func brick_colors() -> list<int> {
+  return [ui.rgb(230, 80, 70), ui.rgb(240, 160, 60), ui.rgb(240, 220, 80),
+          ui.rgb(110, 200, 120), ui.rgb(90, 170, 240)];
+}
+
+// ブロック1つぶんの絵。**先に描いておいて、あとは貼るだけ**にする。
+// 升目より少し小さく作り、まわりに隙間を残す。
+// 四隅を透明にしておくと、貼ったときに下地が見えて角が落ちて見える
+func make_brick(color: int) -> Canvas {
+  var w = (BW - 2) * K;
+  var h = (BH - 2) * K;
+  var c = ui.canvas(w, h);
+  c.fill_rect(0, 0, w, h, color);
+  // 上を明るく、下を暗くして厚みを出す
+  c.fill_rect(0, 0, w, 2 * K, ui.rgba(255, 255, 255, 90));
+  c.fill_rect(0, h - 2 * K, w, 2 * K, ui.rgba(0, 0, 0, 70));
+  // 四隅は透明にして、角を落とす
+  var clear = ui.rgba(0, 0, 0, 0);
+  for var i in range(K) {
+    for var j in range(K) {
+      c.set(i, j, clear);
+      c.set(w - 1 - i, j, clear);
+      c.set(i, h - 1 - j, clear);
+      c.set(w - 1 - i, h - 1 - j, clear);
+    }
+  }
+  return c;
+}
+
+// 当たったときの光。真ん中が濃く、外へいくほど透けていく丸
+func make_flash() -> Canvas {
+  var r = 10 * K;
+  var c = ui.canvas(r * 2, r * 2);
+  for var i in range(r) {
+    var a = 150 - i * 150 / r;
+    c.fill_circle(r, r, r - i, ui.rgba(255, 255, 210, a));
+  }
+  return c;
+}
+
+func reset_ball() -> void {
+  stuck = true;
+  bx = px + pw / 2.0;
+  by = float(H - 18 * K);
+  vx = 0.0;
+  vy = 0.0;
+}
+
+func reset_all() -> void {
+  bricks = [];
+  for var i in range(COLS * ROWS) { bricks.push(i / COLS + 1); }
+  score = 0;
+  lives = 3;
+  over = false;
+  cleared = false;
+  flashes = [];
+  px = float(W / 2) - pw / 2.0;
+  reset_ball();
+}
+
+// --- 動かす ----------------------------------------------------------------
+var last_mx: int = -1;
+
+func move_paddle() -> void {
+  var speed = 5.0 * float(K);
+  if ui.key("left") || ui.key("a") { px -= speed; }
+  if ui.key("right") || ui.key("d") { px += speed; }
+  // マウスでも動かせる。**動かしたときだけ**付いてくる（キーの邪魔をしない）
+  var mx = ui.mouse_x();
+  if last_mx >= 0 && mx != last_mx { px = float(mx) - pw / 2.0; }
+  last_mx = mx;
+  if px < 0.0 { px = 0.0; }
+  if px > float(W) - pw { px = float(W) - pw; }
+}
+
+func launch() -> void {
+  stuck = false;
+  vx = 2.2 * float(K);
+  vy = -3.0 * float(K);
+}
+
+// ブロックの並びの中で、その場所にあるブロックの番号。無ければ -1
+func brick_at(x: float, y: float) -> int {
+  var cx = (int(x) - (W - COLS * BW * K) / 2) / (BW * K);
+  var cy = (int(y) - TOP * K) / (BH * K);
+  if cx < 0 || cx >= COLS || cy < 0 || cy >= ROWS { return -1; }
+  var i = cy * COLS + cx;
+  if bricks[i] == 0 { return -1; }
+  return i;
+}
+
+func brick_x(i: int) -> int { return (W - COLS * BW * K) / 2 + (i % COLS) * BW * K; }
+func brick_y(i: int) -> int { return TOP * K + (i / COLS) * BH * K; }
+
+func hit_brick(i: int) -> void {
+  bricks[i] = 0;
+  score += 10;
+  flashes.push(brick_x(i) + BW * K / 2);
+  flashes.push(brick_y(i) + BH * K / 2);
+  flashes.push(8);
+  var left = 0;
+  for var b in bricks { if b != 0 { left += 1; } }
+  if left == 0 { cleared = true; }
+}
+
+func move_ball() -> void {
+  if stuck {
+    bx = px + pw / 2.0;
+    by = float(H - 18 * K);
+    return;
+  }
+  var r = float(3 * K);
+
+  // 横と縦を別々に進める。こうすると、どちらの面に当たったかが分かる
+  bx += vx;
+  if bx - r < 0.0 { bx = r; vx = -vx; }
+  if bx + r > float(W) { bx = float(W) - r; vx = -vx; }
+  var ahead = r;
+  if vx < 0.0 { ahead = -r; }
+  var i = brick_at(bx + ahead, by);
+  if i >= 0 { hit_brick(i); vx = -vx; }
+
+  by += vy;
+  if by - r < float(10 * K) { by = float(10 * K) + r; vy = -vy; }
+  var down = r;
+  if vy < 0.0 { down = -r; }
+  var j = brick_at(bx, by + down);
+  if j >= 0 { hit_brick(j); vy = -vy; }
+
+  // 台
+  var py = float(H - 14 * K);
+  if vy > 0.0 && by + r >= py && by - r <= py + float(4 * K) &&
+     bx >= px - r && bx <= px + pw + r {
+    by = py - r;
+    vy = -vy;
+    // 台のどこに当たったかで、跳ね返る向きを変える
+    var t = (bx - px) / pw - 0.5;
+    vx += t * 3.0 * float(K);
+    if vx > 5.0 * float(K) { vx = 5.0 * float(K); }
+    if vx < -5.0 * float(K) { vx = -5.0 * float(K); }
+  }
+
+  // 下に落ちた
+  if by - r > float(H) {
+    lives -= 1;
+    if lives <= 0 { over = true; }
+    reset_ball();
+  }
+}
+
+// --- 描く ------------------------------------------------------------------
+func draw_all() -> void {
+  ui.clear(ui.rgb(14, 14, 22));
+
+  // 上の帯
+  ui.fill_rect(0, 0, W, 10 * K, ui.rgb(24, 24, 36));
+  ui.text(4 * K, 2 * K, f"score {score}", ui.rgb(220, 220, 230));
+  ui.text(W - 60 * K, 2 * K, f"lives {lives}", ui.rgb(220, 220, 230));
+
+  // ブロック。**先に描いておいた絵を貼るだけ**
+  for var i in range(bricks.len()) {
+    if bricks[i] == 0 { continue; }
+    ui.draw(brick_art[bricks[i] - 1], brick_x(i) + K, brick_y(i) + K);
+  }
+
+  // 当たった光。半透明なので、下のものが透けて見える
+  var keep: list<int> = [];
+  for var i in range(flashes.len() / 3) {
+    var fx = flashes[i * 3];
+    var fy = flashes[i * 3 + 1];
+    var life = flashes[i * 3 + 2];
+    if life <= 0 { continue; }
+    var r = flash_art.width() / 2;
+    ui.draw(flash_art, fx - r, fy - r);
+    keep.push(fx); keep.push(fy); keep.push(life - 1);
+  }
+  flashes = keep;
+
+  // 台
+  ui.fill_rect(int(px), H - 14 * K, int(pw), 4 * K, ui.rgb(230, 230, 240));
+  ui.fill_rect(int(px), H - 14 * K, int(pw), 1 * K, ui.rgba(255, 255, 255, 200));
+
+  // 玉と、その尾（うしろほど透ける）
+  for var i in range(4) {
+    var t = float(i);
+    ui.fill_circle(int(bx - vx * t), int(by - vy * t), 3 * K,
+                   ui.rgba(255, 240, 180, 200 - i * 45));
+  }
+
+  if stuck && !over && !cleared {
+    ui.text(W / 2 - 60 * K, H / 2, "space で打ち出す", ui.rgb(200, 200, 210));
+  }
+  if over {
+    ui.text(W / 2 - 40 * K, H / 2 - 8 * K, "game over", ui.rgb(240, 120, 110));
+    ui.text(W / 2 - 44 * K, H / 2 + 4 * K, "r でもう一度", ui.rgb(180, 180, 190));
+  }
+  if cleared {
+    ui.text(W / 2 - 30 * K, H / 2 - 8 * K, "clear!", ui.rgb(140, 220, 150));
+    ui.text(W / 2 - 44 * K, H / 2 + 4 * K, "r でもう一度", ui.rgb(180, 180, 190));
+  }
+}
+
+func main() -> int {
+  K = ui.scale();
+  W = 320 * K;
+  H = 240 * K;
+  ui.open("breakout", W, H);
+  _ = ui.font(11 * K);
+
+  // 色ごとにブロックの絵を1枚ずつ作っておく
+  for var c in brick_colors() { brick_art.push(make_brick(c)); }
+  flash_art = make_flash();
+  reset_all();
+
+  // 画面がまったく無いところでは、決まった場面を描いて PNG にする
+  if !ui.visible() {
+    // 見本の場面なので、台は玉を追いかけて、勝手に少し進める
+    launch();
+    for var i in range(500) {
+      px = bx - pw / 2.0;
+      if px < 0.0 { px = 0.0; }
+      if px > float(W) - pw { px = float(W) - pw; }
+      if stuck { launch(); }
+      move_ball();
+    }
+    draw_all();
+    var w = file.write_bytes("breakout.png", ui.to_png());
+    if w.ok() { print("breakout.png に書きました"); } else { print("書けませんでした"); }
+    return 0;
+  }
+
+  while ui.poll() {
+    if ui.pressed("esc") || ui.pressed("q") { break; }
+    if ui.pressed("r") { reset_all(); }
+    if ui.pressed("space") && stuck && !over && !cleared { launch(); }
+    if (over || cleared) && ui.clicked(0) { reset_all(); }
+
+    move_paddle();
+    if !over && !cleared { move_ball(); }
+    draw_all();
+    ui.present();
+    sleep(0.016);
+  }
+  return 0;
+}
