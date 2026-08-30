@@ -454,6 +454,9 @@ void pump() {
         g.app, S("nextEventMatchingMask:untilDate:inMode:dequeue:"),
         ~0ull, g.distant_past, g.run_mode, 1);
     if (!ev) break;
+    // このイベントを、こちらで受け取りきったか。受け取りきったものまで AppKit に
+    // 渡すと、受け皿のないキーで OS が音を鳴らす（noResponderFor: → NSBeep）
+    bool eaten = false;
     long type = sendl(ev, "type");
     switch (type) {
       case 10: case 11: {   // KeyDown / KeyUp
@@ -496,6 +499,10 @@ void pump() {
             push(e);
           }
         }
+        // キーはここで読み終わっている。menu bar を持たないので、渡しても OS の
+        // 側にすることは無い（Cmd-Q も上で自分で見ている）。
+        // 文字入力の最中だけは、変換を進めるために受け皿へ渡す
+        eaten = !(g_text_on && g_sink);
         break;
       }
       case 12:   // FlagsChanged
@@ -512,7 +519,7 @@ void pump() {
         break;
       default: break;
     }
-    sendv1(g.app, "sendEvent:", ev);   // 窓の移動や閉じるボタンは OS に任せる
+    if (!eaten) sendv1(g.app, "sendEvent:", ev);   // 窓の移動や閉じるボタンは OS に任せる
   }
   // 窓の縁を引かれて大きさが変わっていたら、新しい面の大きさを知らせる
   if (g.win) {
