@@ -14,6 +14,7 @@
 #include <emscripten/emscripten.h>
 
 #include "../core/platform/web.h"
+#include "../core/registry.h"   // ui_shutdown（core/lib/ui.cpp）
 #include "../core/shark.h"
 
 using namespace shark;
@@ -374,6 +375,11 @@ API int shk_pump(int budget) {
   test_finish_one();
   return (g_last_status = (g_mode == M_DONE ? 1 : 0));
 }
+
+// 走らせるのが終わったのに面が開いたままなら、ここで片づける。
+// `shark` コマンドならプロセスごと消えて窓も消えるところ。ブラウザは頁が残るので、
+// 誰も見ていない窓（閉じるボタンを押しても、受け取る側がもう居ない）が居座ってしまう
+API void shk_ui_close() { ui_shutdown(); }
 
 API int shk_idle() { return g_engine && g_engine->idle() ? 1 : 0; }
 API void shk_abort() { if (g_engine) g_engine->abort_run(); }

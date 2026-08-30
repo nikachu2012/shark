@@ -54,6 +54,8 @@ make web-test       # 作ったものを node で確かめる
 - 移植層（`core/platform/web.cpp`）を1つ足しただけ。言語も標準ライブラリもそのまま動く
 - `std.ui` はブラウザの中に**窓を出す**（帯を引けば動き、隅で大きさが変わり、× で閉じる）。
   日本語もそのまま出る（字はブラウザに描いてもらう → [web/README.md](web/README.md)）
+- **ゲームもそのまま動く。**お手本から 2D（ブロック崩し）と 3D（回る立方体）が選べる。
+  キーもマウスも面に届き、`ui.frame()` が刻みを合わせるので、`shark` コマンドと同じ速さで動く
 - 実行は刻んでホストに返るので、**止まらない繰り返しを書いてもブラウザは固まらない**。
   ゲームに組み込むときと同じ仕組み
 - 書くところは Monaco Editor。入力候補・説明・引数の案内が出て、
@@ -71,6 +73,7 @@ make web-test       # 作ったものを node で確かめる
 ./shark run examples/paint.shk      # 下の層。マウスで描く
 ./shark run examples/counter.shk    # 上の層。部品を組んで返す
 ./shark run examples/breakout.shk   # ブロック崩し。絵（Canvas）と透明を使う
+./shark run examples/cube3d.shk     # 回る立方体。三角形と奥行き（z バッファ）を使う
 ```
 
 **下の層**は、画素の並び1枚（面）と、押された・動いたという出来事だけ。

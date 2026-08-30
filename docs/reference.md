@@ -1085,7 +1085,8 @@ ui.text(8, 8, "こんにちは", ui.rgb(255, 255, 255));
 
 動く例が [examples/paint.shk](../examples/paint.shk)（下の層）と
 [examples/counter.shk](../examples/counter.shk)（上の層）、
-[examples/breakout.shk](../examples/breakout.shk)（絵と透明を使ったブロック崩し）
+[examples/breakout.shk](../examples/breakout.shk)（絵と透明を使ったブロック崩し）、
+[examples/cube3d.shk](../examples/cube3d.shk)（三角形と奥行きで描く 3D）
 にあります。
 
 → [spec/library/ui.md](../spec/library/ui.md)

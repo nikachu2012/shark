@@ -1,0 +1,409 @@
+// cube3d.shk — 回る立方体（std.ui の三角形と奥行きを使う見本）
+//
+//   ./shark run examples/cube3d.shk
+//
+// ← → ↑ ↓ かマウスを引いて回す。w s で近づく・遠ざかる。space で回転を止める。
+// d で奥行き（z バッファ）を切り替える。r で最初に戻す。esc か q でおしまい。
+// 窓を持てないところでは端末に出る。画面がまったく無いところ
+// （SHARK_UI=off など）では、決まった向きを描いて cube3d.png に保存する。
+//
+// 見本にしているところ:
+//   ・std.ui が 3D のために持っているのは ui.tri()（三角形を塗る）と
+//     ui.depth()（画素ごとに奥行きを比べる）の2つだけ。**回す・遠近をつける・
+//     裏を落とす・光を当てる は、ぜんぶこのファイルの中に書いてある**
+//   ・奥行きの面があるので、三角形を奥から順に並べ替えなくてよい。立方体を
+//     八面体が突き抜けているところは、並べ替えでは描けない（d を押すと分かる）
+//   ・ui.tri() に渡す奥行きは z そのものではなく -1/z。こちらは画面の上で
+//     まっすぐ変わるので、遠近をつけたまま画素ごとに正しく比べられる
+//   ・真ん中に出している x y z の軸も三角形2つずつで描いてある。**線ではなく
+//     三角形にしてあるので奥行きが効き**、立方体に入ったところは隠れる
+import std.ui;
+import std.math;
+import std.time;
+import std.file;
+
+var K: int = 1;          // 画面の細かさ（HiDPI なら 2）
+var W: int = 360;        // 面の横（画素）
+var H: int = 270;        // 面の縦
+
+var FOCAL: float = 300.0;        // 焦点距離（画素）。大きいほど望遠になる
+var DEPTH_SCALE: float = 1000000.0;   // 奥行きの値の細かさ
+var AXIS_LEN: float = 1.75;      // 軸の長さ（立方体の半分が 1.0）
+var AXIS_W: float = 1.6;         // 軸の太さ（画素）
+var AMBIENT: float = 0.28;       // どの面にも回り込んでくる明るさ
+var KEY_LIGHT: float = 0.58;     // 主な光の強さ
+var FILL_LIGHT: float = 0.32;    // 影の側を起こす、弱い光の強さ
+
+// --- 3次元の点 --------------------------------------------------------------
+// 位置にも、向き（法線）にも、光の向きにも同じものを使う。
+// 演算子の多重定義は無いので、足し引きはメソッドで書く
+class Vec3 {
+  public var x: float;
+  public var y: float;
+  public var z: float;
+
+  func init(x: float, y: float, z: float) {
+    this.x = x; this.y = y; this.z = z;
+  }
+
+  public func dot(o: Vec3) -> float {
+    return this.x * o.x + this.y * o.y + this.z * o.z;
+  }
+  public func minus(o: Vec3) -> Vec3 {
+    return Vec3(this.x - o.x, this.y - o.y, this.z - o.z);
+  }
+  // 外積。2つの向きの、どちらにも直角な向き。面の法線を出すのに使う
+  public func cross(o: Vec3) -> Vec3 {
+    return Vec3(this.y * o.z - this.z * o.y,
+                this.z * o.x - this.x * o.z,
+                this.x * o.y - this.y * o.x);
+  }
+  // 長さを 1 にした同じ向き
+  public func unit() -> Vec3 {
+    var n = math.sqrt(this.dot(this));
+    if n == 0.0 { return Vec3(0.0, 0.0, 0.0); }
+    return Vec3(this.x / n, this.y / n, this.z / n);
+  }
+}
+
+// --- 形 ---------------------------------------------------------------------
+// 頂点の並びと、その番号を3つずつ組にした三角形。三角形1つに色1つ。
+//
+// 三角形の頂点は**外から見て反時計回り**に並べる。この向きが揃っていると、
+// 外積で出した法線が必ず外を向くので、裏側の面をそれだけで見分けられる
+class Mesh {
+  public var verts: list<Vec3>;
+  public var faces: list<int>;     // 3つで三角形1つ（verts の番号）
+  public var colors: list<int>;    // 三角形1つに1色
+
+  public func tri(a: int, b: int, c: int, color: int) -> void {
+    this.faces.push(a); this.faces.push(b); this.faces.push(c);
+    this.colors.push(color);
+  }
+  // 四角い面は、三角形2つに割って足す
+  public func quad(a: int, b: int, c: int, d: int, color: int) -> void {
+    this.tri(a, b, c, color);
+    this.tri(a, c, d, color);
+  }
+}
+
+// 立方体。h は中心から面までの長さ。面ごとに色を変えてある
+func make_cube(h: float) -> Mesh {
+  var m = Mesh();
+  m.verts = [Vec3(-h, -h, -h), Vec3( h, -h, -h), Vec3( h,  h, -h), Vec3(-h,  h, -h),
+             Vec3(-h, -h,  h), Vec3( h, -h,  h), Vec3( h,  h,  h), Vec3(-h,  h,  h)];
+  m.quad(0, 3, 2, 1, ui.rgb(230,  80,  70));   // 手前（z が小さいほう）
+  m.quad(4, 5, 6, 7, ui.rgb(240, 170,  60));   // 奥
+  m.quad(0, 4, 7, 3, ui.rgb( 90, 170, 240));   // 左
+  m.quad(1, 2, 6, 5, ui.rgb(120, 205, 130));   // 右
+  m.quad(3, 7, 6, 2, ui.rgb(235, 225, 120));   // 上
+  m.quad(0, 1, 5, 4, ui.rgb(180, 110, 220));   // 下
+  return m;
+}
+
+// 八面体。r を立方体の半分より大きくすると、6つの角が面から突き出る
+func make_octa(r: float) -> Mesh {
+  var m = Mesh();
+  m.verts = [Vec3( r, 0.0, 0.0), Vec3(-r, 0.0, 0.0),
+             Vec3(0.0,  r, 0.0), Vec3(0.0, -r, 0.0),
+             Vec3(0.0, 0.0,  r), Vec3(0.0, 0.0, -r)];
+  var c = ui.rgb(245, 245, 250);
+  m.tri(0, 2, 4, c); m.tri(0, 5, 2, c); m.tri(0, 4, 3, c); m.tri(0, 3, 5, c);
+  m.tri(1, 4, 2, c); m.tri(1, 2, 5, c); m.tri(1, 3, 4, c); m.tri(1, 5, 3, c);
+  return m;
+}
+
+// --- 場面の持ちもの ---------------------------------------------------------
+var cube: Mesh = Mesh();
+var octa: Mesh = Mesh();
+var sky: Canvas = ui.canvas(1, 1);   // 背景。先に描いておいて、毎こま貼るだけ
+
+var ax: float = 0.35;    // 縦に回した角（ラジアン）
+var ay: float = 0.6;     // 横に回した角
+var wobble: float = 0.0; // 八面体だけの、もうひとつの回り
+var dist: float = 5.4;   // 目から中心までの遠さ
+var spin: bool = true;   // ひとりでに回るか
+var zbuf: bool = true;   // 奥行きの面を使うか
+var drag: bool = false;  // マウスを引いている最中か
+var last_x: int = 0;
+var last_y: int = 0;
+
+// 光の向き（目の側の座標で、面から光源へ向かう向き）。
+// 主な光を左上の手前から、弱い光を右下の手前から当てて、影の側が真っ暗にならないようにする
+func key_light() -> Vec3 { return Vec3(-0.45, 0.72, -0.60).unit(); }
+func fill_light() -> Vec3 { return Vec3(0.75, -0.15, -0.45).unit(); }
+
+// --- 頂点を、目の側の座標に移す ---------------------------------------------
+// Y のまわり（横）に回してから、X のまわり（縦）に回して、目の前に押しやる。
+// できあがった座標は、目が原点で、+z が奥、+y が上
+func to_view(p: Vec3, rx: float, ry: float) -> Vec3 {
+  var s = math.sin(ry);
+  var c = math.cos(ry);
+  var x = p.x * c + p.z * s;
+  var z = p.z * c - p.x * s;
+
+  var s2 = math.sin(rx);
+  var c2 = math.cos(rx);
+  var y = p.y * c2 + z * s2;
+  var z2 = z * c2 - p.y * s2;
+
+  return Vec3(x, y, z2 + dist);
+}
+
+// 遠近をつけて、面の上の場所にする（遠いものほど真ん中に寄る）。
+// 画素の間も要る（軸の太さを出すのに使う）ので float で返す
+func screen_x(v: Vec3) -> float { return float(W) * 0.5 + FOCAL * v.x / v.z; }
+func screen_y(v: Vec3) -> float { return float(H) * 0.5 - FOCAL * v.y / v.z; }
+
+// ui.tri() に渡す奥行き。**z ではなく -1/z を渡す。**
+// 画面の上でまっすぐ変わるのは 1/z のほうなので、三角形の中を割った値も正しくなる。
+// 符号を裏返してあるのは、ui.tri() が「小さいほど手前」だから
+func screen_z(v: Vec3) -> int { return int(-DEPTH_SCALE / v.z); }
+
+// 光の当たり具合で、色を明るく・暗くする
+func shade(color: int, lit: float) -> int {
+  var t = math.clamp(lit, 0.0, 1.0);
+  return ui.rgb(int(float(ui.red(color)) * t),
+                int(float(ui.green(color)) * t),
+                int(float(ui.blue(color)) * t));
+}
+
+// --- 形を1つ描く。ここが「3D を描く」のぜんぶ -------------------------------
+func draw_mesh(m: Mesh, extra_ay: float) -> void {
+  // 1. 頂点を目の側の座標に移して、面の上の場所と奥行きにしておく
+  var view: list<Vec3> = [];
+  var sx: list<int> = [];
+  var sy: list<int> = [];
+  var sz: list<int> = [];
+  for var p in m.verts {
+    var v = to_view(p, ax, ay + extra_ay);
+    view.push(v);
+    sx.push(int(screen_x(v)));
+    sy.push(int(screen_y(v)));
+    sz.push(screen_z(v));
+  }
+
+  // 2. 三角形ごとに、裏を落として、光を当てて、塗る
+  var key_dir = key_light();
+  var fill_dir = fill_light();
+  for var i in range(m.colors.len()) {
+    var a = m.faces[i * 3];
+    var b = m.faces[i * 3 + 1];
+    var c = m.faces[i * 3 + 2];
+
+    // 面の向き（法線）。頂点が外から見て反時計回りなので、これは外を向く
+    var n = view[b].minus(view[a]).cross(view[c].minus(view[a])).unit();
+
+    // 裏側を落とす。目から頂点へ向かう向きと同じほうを向いていれば、
+    // その面は向こう側を向いている（描いても手前の面に隠れる）
+    if n.dot(view[a]) >= 0.0 { continue; }
+
+    // 光の当たり具合。真正面から当たっていれば 1、そっぽを向いていれば 0。
+    // 光が2つあるので、それぞれの当たり具合を足す
+    var lit = AMBIENT
+            + KEY_LIGHT * math.max(0.0, n.dot(key_dir))
+            + FILL_LIGHT * math.max(0.0, n.dot(fill_dir));
+
+    ui.tri(sx[a], sy[a], sz[a],
+           sx[b], sy[b], sz[b],
+           sx[c], sy[c], sz[c],
+           shade(m.colors[i], lit));
+  }
+}
+
+// --- こま数（fps）----------------------------------------------------------
+// 何こま描けたかを数えて、0.5 秒ごとに出す数を入れ替える。
+// 毎こま出し直すと数が跳ねて読めないので、少しならしてから出す
+var fps: int = 0;
+var fps_frames: int = 0;
+var fps_since: float = 0.0;
+
+func count_frame() -> void {
+  fps_frames += 1;
+  var now = time.monotonic().seconds();
+  if fps_since == 0.0 { fps_since = now; return; }   // 1こま目は数え始めるだけ
+  var span = now - fps_since;
+  if span >= 0.5 {
+    fps = int(float(fps_frames) / span + 0.5);
+    fps_frames = 0;
+    fps_since = now;
+  }
+}
+
+// --- 座標の軸（基底）-------------------------------------------------------
+// 真ん中から x・y・z の向きへ1本ずつ。**線ではなく、細長い三角形2つで描く。**
+// そうすると奥行きの面が効くので、立方体の中に入っているところは隠れ、
+// 外へ出たところだけが見える（ui.line() には奥行きが無いので、こうする）
+func draw_axis(dir: Vec3, label: string, color: int) -> void {
+  var o = to_view(Vec3(0.0, 0.0, 0.0), ax, ay);
+  var t = to_view(Vec3(dir.x * AXIS_LEN, dir.y * AXIS_LEN, dir.z * AXIS_LEN), ax, ay);
+
+  var x0 = screen_x(o);
+  var y0 = screen_y(o);
+  var x1 = screen_x(t);
+  var y1 = screen_y(t);
+  var dx = x1 - x0;
+  var dy = y1 - y0;
+  var len = math.sqrt(dx * dx + dy * dy);
+  if len < 1.0 { return; }   // こちらを真っすぐ向いていて、点にしか見えない
+
+  // 画面の上で線に直角な向きへ、半分の太さだけずらして四角にする
+  var hw = AXIS_W * float(K);
+  var nx = -dy / len * hw;
+  var ny = dx / len * hw;
+  var z0 = screen_z(o);
+  var z1 = screen_z(t);
+  ui.tri(int(x0 + nx), int(y0 + ny), z0,
+         int(x0 - nx), int(y0 - ny), z0,
+         int(x1 - nx), int(y1 - ny), z1, color);
+  ui.tri(int(x0 + nx), int(y0 + ny), z0,
+         int(x1 - nx), int(y1 - ny), z1,
+         int(x1 + nx), int(y1 + ny), z1, color);
+
+  // 名札。向こうを向いている軸は、立方体に隠れているので薄く出す
+  var c = color;
+  if t.z > o.z { c = ui.rgba(ui.red(color), ui.green(color), ui.blue(color), 105); }
+  ui.text(int(x1) + 3 * K, int(y1) - ui.text_height() / 2, label, c);
+}
+
+func draw_axes() -> void {
+  draw_axis(Vec3(1.0, 0.0, 0.0), "x", ui.rgb(255,  95,  95));
+  draw_axis(Vec3(0.0, 1.0, 0.0), "y", ui.rgb(150, 245, 120));
+  draw_axis(Vec3(0.0, 0.0, 1.0), "z", ui.rgb(105, 175, 255));
+}
+
+// --- 背景。上から下へ色を変えた帯を、先に絵として描いておく -----------------
+func make_sky() -> Canvas {
+  var c = ui.canvas(W, H);
+  for var y in range(H) {
+    var t = float(y) / float(H);
+    c.fill_rect(0, y, W, 1, ui.rgb(14 + int(t * 20.0),
+                                   18 + int(t * 26.0),
+                                   34 + int(t * 40.0)));
+  }
+  return c;
+}
+
+func reset_view() -> void {
+  ax = 0.35; ay = 0.6; wobble = 0.0; dist = 5.4; spin = true;
+}
+
+func draw_all() -> void {
+  ui.draw(sky, 0, 0);
+
+  // 奥行きの面は、ひとこまごとに「いちばん遠い」に戻す
+  ui.clear_depth();
+
+  draw_mesh(cube, 0.0);
+  draw_mesh(octa, wobble);
+  draw_axes();
+
+  // 上の帯と、いまの様子
+  var bar = ui.text_height() + 4 * K;
+  ui.fill_rect(0, 0, W, bar, ui.rgba(0, 0, 0, 130));
+  ui.text(4 * K, 2 * K, "drag / arrows: turn   w s: zoom   space: spin",
+          ui.rgb(200, 205, 220));
+
+  // d で奥行き（z バッファ）を切り替えられることを、いまの状態と一緒に出す
+  var mode = "d: z-buffer ON";
+  var mode_color = ui.rgb(140, 225, 155);
+  if !zbuf {
+    mode = "d: z-buffer OFF";
+    mode_color = ui.rgb(245, 135, 125);
+  }
+  ui.text(W - ui.text_width(mode) - 4 * K, 2 * K, mode, mode_color);
+
+  // 奥行きを切っているときは、なぜ形が壊れて見えるのかを書いておく
+  if !zbuf {
+    ui.fill_rect(0, H - bar, W, bar, ui.rgba(0, 0, 0, 130));
+    ui.text(4 * K, H - bar + 2 * K,
+            "描いた順に上書きされるだけになる。突き抜けが描けない",
+            ui.rgb(235, 195, 125));
+  }
+
+  // こま数は右下の隅に。まだ数え終わっていないうちは出さない
+  if fps > 0 {
+    var s = f"{fps} fps";
+    ui.text(W - ui.text_width(s) - 4 * K, H - ui.text_height() - 3 * K, s,
+            ui.rgb(155, 165, 180));
+  }
+}
+
+func main() -> int {
+  K = ui.scale();
+  W = 360 * K;
+  H = 270 * K;
+  ui.open("cube3d", W, H);
+  _ = ui.font(11 * K);
+
+  FOCAL = float(H) * 1.15;
+  cube = make_cube(1.0);
+  octa = make_octa(1.42);     // 立方体（半分が 1.0）より大きいので、角が突き出る
+  sky = make_sky();
+
+  ui.depth(true);             // ここから ui.tri() が z を見るようになる
+
+  // 画面がまったく無いところでは、決まった向きを描いて PNG にする
+  if !ui.visible() {
+    ax = 0.42; ay = 0.75; wobble = 0.6;
+    draw_all();
+    var w = file.write_bytes("cube3d.png", ui.to_png());
+    if w.ok() { print("cube3d.png に書きました"); } else { print("書けませんでした"); }
+    return 0;
+  }
+
+  while ui.poll() {
+    if ui.pressed("esc") || ui.pressed("q") { break; }
+    if ui.pressed("r") { reset_view(); }
+    if ui.pressed("space") { spin = !spin; }
+    if ui.pressed("d") {
+      zbuf = !zbuf;
+      ui.depth(zbuf);
+    }
+
+    // 窓の大きさが変わったら、背景と焦点距離を取り直す
+    if ui.width() != W || ui.height() != H {
+      W = ui.width();
+      H = ui.height();
+      FOCAL = float(H) * 1.15;
+      sky = make_sky();
+    }
+
+    // キーで回す
+    if ui.key("left")  { ay -= 0.04; }
+    if ui.key("right") { ay += 0.04; }
+    if ui.key("up")    { ax += 0.03; }   // 上から見下ろす
+    if ui.key("down")  { ax -= 0.03; }
+    if ui.key("w") { dist -= 0.08; }
+    if ui.key("s") { dist += 0.08; }
+    // 近づけすぎない。頂点が目より後ろに回ると、遠近の割り算が壊れる
+    // （手前で切り落とす仕組みは書いていない。中心から角までが 1.8 ほどなので、
+    //   2.6 まで寄っても z は正のまま）
+    dist = math.clamp(dist, 2.6, 12.0);
+
+    // マウスを引いて回す。引いた画素の数だけ角を動かす
+    if ui.mouse(0) {
+      if drag {
+        ay += float(ui.mouse_x() - last_x) * 0.01;
+        ax += float(ui.mouse_y() - last_y) * 0.01;
+      }
+      drag = true;
+      last_x = ui.mouse_x();
+      last_y = ui.mouse_y();
+      ui.cursor("move");
+    } else {
+      drag = false;
+    }
+    // 真上・真下を越えて回り込まないように止める
+    ax = math.clamp(ax, -1.5, 1.5);
+
+    if spin { ay += 0.012; }
+    wobble += 0.021;            // 八面体だけ、もう少し速く回す
+
+    count_frame();
+    draw_all();
+    ui.present();
+    ui.frame();       // 次のこまの刻みまで待つ（sleep で待つと足が出る）
+  }
+  return 0;
+}

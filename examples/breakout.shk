@@ -13,6 +13,7 @@
 //   ・絵は代入するとコピーになるので、色ちがいは「作って塗り替える」で足りる
 import std.ui;
 import std.math;
+import std.time;
 import std.file;
 
 var K: int = 1;          // 画面の細かさ（HiDPI なら 2）
@@ -42,6 +43,25 @@ var lives: int = 3;
 var over: bool = false;
 var cleared: bool = false;
 var flashes: list<int> = [];   // 光っているところ（x, y, 残りこま数）の3つ組
+
+// --- こま数（fps）----------------------------------------------------------
+// 何こま描けたかを数えて、0.5 秒ごとに出す数を入れ替える。
+// 毎こま出し直すと数が跳ねて読めないので、少しならしてから出す
+var fps: int = 0;
+var fps_frames: int = 0;
+var fps_since: float = 0.0;
+
+func count_frame() -> void {
+  fps_frames += 1;
+  var now = time.monotonic().seconds();
+  if fps_since == 0.0 { fps_since = now; return; }   // 1こま目は数え始めるだけ
+  var span = now - fps_since;
+  if span >= 0.5 {
+    fps = int(float(fps_frames) / span + 0.5);
+    fps_frames = 0;
+    fps_since = now;
+  }
+}
 
 func brick_colors() -> list<int> {
   return [ui.rgb(230, 80, 70), ui.rgb(240, 160, 60), ui.rgb(240, 220, 80),
@@ -201,6 +221,11 @@ func draw_all() -> void {
   ui.fill_rect(0, 0, W, 10 * K, ui.rgb(24, 24, 36));
   ui.text(4 * K, 2 * K, f"score {score}", ui.rgb(220, 220, 230));
   ui.text(W - 60 * K, 2 * K, f"lives {lives}", ui.rgb(220, 220, 230));
+  // こま数は帯の真ん中に。まだ数え終わっていないうちは出さない
+  if fps > 0 {
+    var t = f"{fps} fps";
+    ui.text(W / 2 - ui.text_width(t) / 2, 2 * K, t, ui.rgb(150, 155, 170));
+  }
 
   // ブロック。**先に描いておいた絵を貼るだけ**
   for var i in range(bricks.len()) {
@@ -282,9 +307,10 @@ func main() -> int {
 
     move_paddle();
     if !over && !cleared { move_ball(); }
+    count_frame();
     draw_all();
     ui.present();
-    sleep(0.016);
+    ui.frame();       // 次のこまの刻みまで待つ（sleep で待つと足が出る）
   }
   return 0;
 }

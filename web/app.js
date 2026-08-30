@@ -483,6 +483,9 @@
     waiting = false;
     rafId = 0;
     drain();
+    // 面が開いたまま終わったら閉じる（`shark` コマンドならプロセスごと消えるところ）。
+    // 残しておくと、閉じるボタンを押しても受け取る側がもう居ない窓が居座る
+    if (uiScreen) api.uiClose();
     stats();
     buttons();
 
@@ -923,6 +926,7 @@
       startTest: M.cwrap('shk_start_test', 'number', []),
       pump: M.cwrap('shk_pump', 'number', ['number']),
       abort: M.cwrap('shk_abort', null, []),
+      uiClose: M.cwrap('shk_ui_close', null, []),
       exitCode: M.cwrap('shk_exit_code', 'number', []),
       error: M.cwrap('shk_error', 'string', []),
       testPassed: M.cwrap('shk_test_passed', 'number', []),

@@ -204,6 +204,7 @@ createShark().then((M) => {
     pump: M.cwrap('shk_pump', 'number', ['number']),
     idle: M.cwrap('shk_idle', 'number', []),
     abort: M.cwrap('shk_abort', null, []),
+    uiClose: M.cwrap('shk_ui_close', null, []),
     exitCode: M.cwrap('shk_exit_code', 'number', []),
     error: M.cwrap('shk_error', 'string', []),
     testResults: M.cwrap('shk_test_results', 'string', []),
@@ -503,6 +504,115 @@ createShark().then((M) => {
   check('面に字が描かれる', fl[3] === 'ink true', font.out);
   check('無い名前のフォントは false', fl[4] === 'missing false', font.out);
   check('ui.font_builtin() で内蔵に戻る', fl[5] === 'back  true', font.out);
+
+  // --- ゲーム（2D と 3D）--------------------------------------------------
+  // examples/ のものをそのまま読んで、ブラウザの道でも動くかを見る。
+  // 3D は ui.tri() と ui.depth()（奥行き）を、2D は絵（Canvas）と半透明を通る。
+  // 見るのは「窓が開き、こまが進み、絵が変わり、途中で止まらない」の4つ
+  function play(rel, ms, press) {
+    const src = fs.readFileSync(path.join(root, rel), 'utf8');
+    let presents = 0;
+    const orig = dom.ctx.putImageData;
+    dom.ctx.putImageData = function (img) { presents++; return orig(img); };
+    api.config(128, 0, 0);
+    if (api.load(path.basename(rel), src) > 0) {
+      dom.ctx.putImageData = orig;
+      return { diag: api.diagnostics() };
+    }
+    api.startRun();
+    let status = 0;
+    let first = null;
+    let sent = false;
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+      status = api.pump(400000);
+      take();
+      if (status !== 0) break;
+      // 玉を打ち出すなど、動き始めに要るキーを1度だけ押す
+      if (press && !sent && dom.canvas) {
+        dom.key(dom.canvas, 'keydown', press);
+        dom.key(dom.canvas, 'keyup', press);
+        sent = true;
+      }
+      if (!first && sent === !!press && dom.ctx.last) first = Uint8Array.from(dom.ctx.last.data);
+      if (api.idle()) nap(2);
+    }
+    const now = dom.ctx.last ? dom.ctx.last.data : null;
+    let moved = false;
+    if (first && now) for (let i = 0; i < first.length; i++) if (first[i] !== now[i]) { moved = true; break; }
+    const out = { status, presents, moved, err: status === 2 ? api.error() : '',
+                  w: dom.ctx.last ? dom.ctx.last.width : 0,
+                  h: dom.ctx.last ? dom.ctx.last.height : 0 };
+    api.abort();                                  // 遊びっぱなしにしない
+    for (let i = 0; i < 200 && api.pump(200000) === 0; i++) take();
+    take();
+    api.uiClose();                                // 終わったら窓も片づく（app.js の finish）
+    dom.ctx.putImageData = orig;
+    return out;
+  }
+
+  // 面の大きさは ui.scale()（偽 DOM の devicePixelRatio は 2）の倍になる
+  const g3 = play('examples/cube3d.shk', 700);
+  check('3D のゲーム（cube3d.shk）が canvas に出る',
+        g3.status === 0 && g3.presents > 5 && g3.moved && g3.w === 720 && g3.h === 540,
+        JSON.stringify(g3));
+
+  // ブロック崩しは space で打ち出すまで止まっているので、1度押してから見る
+  const g2 = play('examples/breakout.shk', 700, ' ');
+  check('2D のゲーム（breakout.shk）が canvas に出る',
+        g2.status === 0 && g2.presents > 5 && g2.moved && g2.w === 640 && g2.h === 480,
+        JSON.stringify(g2));
+
+  // --- こまの速さ（ui.frame と host_paced）--------------------------------
+  // app.js と同じく「画面を描く合図ごとに1度だけ pump する」で走らせる。
+  // ui.frame() は刻限の半こま手前で起きるので、合図に間に合って 60 出る。
+  // ここが sleep(0.016) だと、描いた分だけ足が出て合図を1つ飛ばし、30 に落ちる
+  // （移植層が PlatformScreen::host_paced を名乗らなくなっても、ここで落ちる）
+  function playVsync(src, ms) {
+    let presents = 0;
+    const orig = dom.ctx.putImageData;
+    dom.ctx.putImageData = function (img) { presents++; return orig(img); };
+    api.config(64, 0, 0);
+    api.load('paced.shk', src);
+    api.startRun();
+    const VSYNC = 1000 / 60;
+    const t0 = Date.now();
+    let ticks = 0, status = 0;
+    while (Date.now() - t0 < ms) {
+      const due = t0 + Math.round(++ticks * VSYNC);
+      const wait = due - Date.now();
+      if (wait > 0) nap(wait);
+      status = api.pump(400000);
+      take();
+      if (status !== 0) break;
+    }
+    api.abort();
+    for (let i = 0; i < 200 && api.pump(200000) === 0; i++) take();
+    take();
+    api.uiClose();
+    dom.ctx.putImageData = orig;
+    return { ticks, presents, status };
+  }
+
+  const paced = playVsync(
+      'import std.ui;\n' +
+      'func main() -> int {\n' +
+      '  ui.open("paced", 64, 48);\n' +
+      '  while ui.poll() {\n' +
+      '    ui.clear(ui.rgb(0, 0, 0));\n' +
+      '    ui.present();\n' +
+      '    ui.frame();\n' +
+      '  }\n' +
+      '  ui.close();\n' +
+      '  return 0;\n' +
+      '}\n', 800);
+  check('ui.frame() は合図ごとに1こま進む（sleep だと半分になるところ）',
+        paced.ticks > 20 && paced.presents >= paced.ticks - 2,
+        JSON.stringify(paced));
+
+  // 止めたあとに窓が居座らないか。app.js は実行が終わるたびに shk_ui_close() を呼ぶ
+  check('止めたあとの窓が片づく（居座らない）',
+        dom.closes >= 3 && !M.sharkScreen, String(dom.closes));
 
   dom.restore();
 
