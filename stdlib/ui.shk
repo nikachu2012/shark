@@ -1074,7 +1074,7 @@ func center(children: list<Widget>) -> Widget;
 /// 例:
 ///   ui.open(80, 40);
 ///   _ = ui.show(ui.col([ui.label("上"), ui.divider(), ui.label("下")]), 0, 0);
-///   print(ui.get(0, 10) != 0 || ui.get(40, 10) != 0);   // true
+///   print(f"{ui.get(0, 14) != 0} {ui.get(79, 14) != 0}");   // true true
 func divider() -> Widget;
 
 /// 部品を描いて、押されたものの名札を返す。
