@@ -271,6 +271,31 @@ int main() {
               "  return hit.len() + png.len() * 0;\n"
               "}");
 
+  // 絵（Canvas）・PNG の読み書き・奥行きの面。持ちものが多いので別に見る
+  check_clean("絵と PNG と奥行き",
+              "import std.ui;\n"
+              "func main() -> int {\n"
+              "  ui.open(\"memcheck\", 32, 24);\n"
+              "  var e = ui.canvas(16, 16, ui.rgb(1, 2, 3));\n"
+              "  var keep = e;\n"                       // 代入のコピー（copy on write）
+              "  e.clear(ui.rgba(255, 0, 0, 128));\n"   // ここで写る
+              "  e.fill_rect(1, 1, 4, 4, ui.rgb(0, 255, 0));\n"
+              "  e.text(0, 0, \"hi\", ui.rgb(255, 255, 255));\n"
+              "  e.tri(0, 0, 0, 15, 0, 0, 0, 15, 0, ui.rgb(0, 0, 255));\n"
+              "  e.blit(0, 0, 2, [1, 2, 3, 4]);\n"
+              "  var small = ui.canvas(2, 2, ui.rgba(0, 0, 0, 0));\n"
+              "  e.draw(small, 1, 1);\n"
+              "  ui.draw(e, 0, 0, 8, 8);\n"
+              "  var png = e.to_png();\n"
+              "  var n = 0;\n"
+              "  if var back = ui.load_png(png) { n = back.width(); }\n"
+              "  ui.depth(true);\n"
+              "  ui.clear_depth();\n"
+              "  ui.tri(0, 0, 5, 31, 0, 5, 0, 23, 5, ui.rgb(255, 255, 0));\n"
+              "  ui.close();\n"                          // 奥行きの面もここで返る
+              "  return n + keep.width() * 0 + png.len() * 0;\n"
+              "}");
+
   check_clean("実行時エラーで止まったあと",
               "func main() -> int { var xs = [1]; var s = \"ながい文字列\" + \"ですよ\"; return xs[5] + s.len(); }");
 

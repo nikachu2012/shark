@@ -17,6 +17,8 @@ namespace shark {
 
 // 字形を FreeType で出す口（入っていなければ中身は空）
 #include "font_ft.inc"
+// PNG を読む（展開も自前。書き出しは下の encode_png）
+#include "png.inc"
 
 static Value* A(Value* args, int i) { return val_deref(&args[i]); }
 
@@ -54,8 +56,11 @@ static void input_stop();   // 下で定義
 static void font_close();   // 下で定義（字の出どころを内蔵に戻す）
 static bool ui_live_redraw(int w, int h);   // 下で定義（窓の縁を引いている間の置き直し）
 
+static void depth_free();   // 下で定義（奥行きの面）
+
 static void drop_surface() {
   input_stop();
+  depth_free();
   // 形を変えたまま終わらない（窓が閉じても、あとに残る機種がある）
   if (g_visible && platform().screen && platform().screen->set_cursor && g_cursor_set != SCUR_Arrow)
     platform().screen->set_cursor(SCUR_Arrow);
@@ -110,15 +115,67 @@ static void resize_surface(int w, int h) {
 }
 
 // ------------------------------------------------------------------ 描く土台
-static inline uint32_t to_color(int64_t v) { return (uint32_t)(v & 0xffffff); }
+// 色は int 1つ。下から青・緑・赤の 8 ビットずつ（0xRRGGBB）で、
+// **いちばん上のバイトは「透け具合」**。0 なら不透明、255 でまるごと透明。
+//
+// 上を「不透明のぶん（アルファ）」ではなく「透け具合」にしてあるのは、
+// そうすると 0 が不透明になり、ui.rgb() の返す数が今までと1つも変わらないため。
+// 書く人が見るのは ui.rgba() / ui.alpha() の**不透明のぶん**（255 が不透明）で、
+// この裏返しは処理系の中だけの話（docs/implementation.md）
+static inline uint32_t to_color(int64_t v) { return (uint32_t)(v & 0xffffffffu); }
+static inline int clearness(uint32_t c) { return (int)(c >> 24); }
 
+// 下地 dst の上に src を重ねた色。どちらも「透け具合」を上のバイトに持つ。
+// 透ける絵の上に透ける絵を重ねても正しくなるよう、まじめに解いてある
+static uint32_t over(uint32_t dst, uint32_t src) {
+  int st = (int)(src >> 24);
+  if (st == 0) return src;      // src が不透明なら、そのまま置き換わる
+  if (st == 255) return dst;    // まるごと透明なら、何も起きない
+  int sa = 255 - st;                    // src の不透明のぶん
+  int da = 255 - (int)(dst >> 24);      // 下地の不透明のぶん
+  int keep = da * (255 - sa) / 255;     // 下地のうち、透けて見えるぶん
+  int oa = sa + keep;                   // 出来上がりの不透明のぶん
+  if (oa <= 0) return 0xff000000u;      // どちらも透明なら、透明のまま
+  uint32_t o = (uint32_t)(255 - oa) << 24;
+  for (int sh = 16; sh >= 0; sh -= 8) {
+    int s = (int)((src >> sh) & 0xff), d = (int)((dst >> sh) & 0xff);
+    o |= (uint32_t)((s * sa + d * keep) / oa) << sh;
+  }
+  return o;
+}
+
+// 半透明なら下地と混ぜて置く。線・四角・円・文字・三角・貼るはこちらを通る
 static inline void put(int x, int y, uint32_t c) {
+  if (x < g_cx0 || x > g_cx1 || y < g_cy0 || y > g_cy1) return;
+  uint32_t* p = &g_px[y * g_w + x];
+  *p = (c >> 24) ? over(*p, c) : c;   // 不透明はそのまま書く（今までと同じ速さ）
+}
+
+// 混ぜずに、その色をそのまま置く。ui.set / ui.clear / ui.blit はこちら。
+// **これが無いと「透明にする」が書けない**（透明を重ねても、下地が残るだけなので）。
+// 絵を直す道具の消しゴムは 絵.set(x, y, ui.rgba(0,0,0,0))
+static inline void put_raw(int x, int y, uint32_t c) {
   if (x < g_cx0 || x > g_cx1 || y < g_cy0 || y > g_cy1) return;
   g_px[y * g_w + x] = c;
 }
 
 // 切り抜きの中に収めてから、横一列を塗る
 static void span(int x, int y, int w, uint32_t c) {
+  if (y < g_cy0 || y > g_cy1) return;
+  int x0 = x, x1 = x + w - 1;
+  if (x0 < g_cx0) x0 = g_cx0;
+  if (x1 > g_cx1) x1 = g_cx1;
+  uint32_t* row = g_px + (size_t)y * (size_t)g_w;
+  if (c >> 24) {
+    if ((c >> 24) == 255) return;   // まるごと透明
+    for (int i = x0; i <= x1; i++) row[i] = over(row[i], c);
+    return;
+  }
+  for (int i = x0; i <= x1; i++) row[i] = c;
+}
+
+// 混ぜずに、その色をそのまま並べる（span の置き換え版）
+static void span_raw(int x, int y, int w, uint32_t c) {
   if (y < g_cy0 || y > g_cy1) return;
   int x0 = x, x1 = x + w - 1;
   if (x0 < g_cx0) x0 = g_cx0;
@@ -225,6 +282,24 @@ static NativeStatus u_rgb(VM& vm, Value* a, int n, Value& out) {
   out = mk_int((r << 16) | (g << 8) | b);
   return N_Ok;
 }
+// 赤緑青に「不透明のぶん」を足して色を作る。a は 255 で不透明、0 でまるごと透明。
+// 中では裏返して「透け具合」で持つので、a=255 のときは ui.rgb() と同じ数になる
+static NativeStatus u_rgba(VM& vm, Value* a, int n, Value& out) {
+  (void)vm; (void)n;
+  int64_t r = A(a, 0)->i, g = A(a, 1)->i, b = A(a, 2)->i, al = A(a, 3)->i;
+  if (r < 0) r = 0; if (r > 255) r = 255;
+  if (g < 0) g = 0; if (g > 255) g = 255;
+  if (b < 0) b = 0; if (b > 255) b = 255;
+  if (al < 0) al = 0; if (al > 255) al = 255;
+  out = mk_int(((255 - al) << 24) | (r << 16) | (g << 8) | b);
+  return N_Ok;
+}
+// 不透明のぶん（0〜255）。255 が不透明。ui.rgb() で作った色は 255 を返す
+static NativeStatus u_alpha(VM& vm, Value* a, int n, Value& out) {
+  (void)vm; (void)n;
+  out = mk_int(255 - (int64_t)clearness(to_color(A(a, 0)->i)));
+  return N_Ok;
+}
 static NativeStatus u_red(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)n; out = mk_int((A(a, 0)->i >> 16) & 0xff); return N_Ok;
 }
@@ -242,7 +317,7 @@ static NativeStatus u_mix(VM& vm, Value* a, int n, Value& out) {
   if (t < 0) t = 0;
   if (t > 1) t = 1;
   int64_t r = 0;
-  for (int sh = 16; sh >= 0; sh -= 8) {
+  for (int sh = 24; sh >= 0; sh -= 8) {   // 透け具合（上のバイト）も一緒に混ぜる
     double v = (double)((c0 >> sh) & 0xff) * (1 - t) + (double)((c1 >> sh) & 0xff) * t;
     int64_t k = (int64_t)(v + 0.5);
     if (k < 0) k = 0; if (k > 255) k = 255;
@@ -257,14 +332,15 @@ static NativeStatus u_clear(VM& vm, Value* a, int n, Value& out) {
   if (!need_open(vm)) return N_Panic;
   // 色を渡さなければ、いまの下地の色（ui.theme）で塗る
   uint32_t c = n >= 1 ? to_color(A(a, 0)->i) : g_bg;
-  for (int y = g_cy0; y <= g_cy1; y++) span(g_cx0, y, g_cx1 - g_cx0 + 1, c);
+  // 塗りつぶすので、混ぜずに置く。ui.rgba(0,0,0,0) を渡せば「まるごと透明にする」
+  for (int y = g_cy0; y <= g_cy1; y++) span_raw(g_cx0, y, g_cx1 - g_cx0 + 1, c);
   out = mk_void();
   return N_Ok;
 }
 static NativeStatus u_set(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   if (!need_open(vm)) return N_Panic;
-  put((int)A(a, 0)->i, (int)A(a, 1)->i, to_color(A(a, 2)->i));
+  put_raw((int)A(a, 0)->i, (int)A(a, 1)->i, to_color(A(a, 2)->i));
   out = mk_void();
   return N_Ok;
 }
@@ -402,8 +478,9 @@ static NativeStatus u_blit(VM& vm, Value* a, int n, Value& out) {
     vm.panic(vm.L("blit の横幅は 1 以上にします", "blit width must be 1 or more"));
     return N_Panic;
   }
+  // 「そのまま置く」ものなので、混ぜない（透明もそのまま入る）
   for (int i = 0; i < src->v.size(); i++) {
-    put(x + i % w, y + i / w, to_color(src->v[i].i));
+    put_raw(x + i % w, y + i / w, to_color(src->v[i].i));
   }
   out = mk_void();
   return N_Ok;
@@ -1061,31 +1138,39 @@ static void chunk(Str& out, const char* type, const Str& data) {
   out.append(body);
   be32(out, crc32_of((const unsigned char*)body.data(), body.size(), 0));
 }
-static NativeStatus u_to_png(VM& vm, Value* a, int n, Value& out) {
-  (void)a; (void)n;
-  if (!need_open(vm)) return N_Panic;
+// 面を PNG にする。透けているところが1つでもあれば透明つき（色の型 6）で、
+// なければ今までどおり赤緑青だけ（色の型 2）で書く。
+// 読む側はどちらも開けるので、透明を使わない絵は今までと同じ大きさのまま
+static Str encode_png(const uint32_t* px, int w, int h) {
+  bool has_clear = false;
+  for (size_t i = 0; i < (size_t)w * (size_t)h && !has_clear; i++)
+    if (px[i] >> 24) has_clear = true;
+  int ch = has_clear ? 4 : 3;
+
   Str png;
   const char sig[8] = {(char)0x89, 'P', 'N', 'G', '\r', '\n', (char)0x1a, '\n'};
   png.append(sig, 8);
 
   Str ihdr;
-  be32(ihdr, (uint32_t)g_w);
-  be32(ihdr, (uint32_t)g_h);
-  ihdr.push(8);   // 1色 8 ビット
-  ihdr.push(2);   // 赤緑青（透過なし）
+  be32(ihdr, (uint32_t)w);
+  be32(ihdr, (uint32_t)h);
+  ihdr.push(8);                        // 1色 8 ビット
+  ihdr.push(has_clear ? 6 : 2);        // 6 = 赤緑青＋透明、2 = 赤緑青
   ihdr.push(0); ihdr.push(0); ihdr.push(0);
   chunk(png, "IHDR", ihdr);
 
   // 各行の頭に「前の行との差の取り方」を置く。0 はそのまま
   Str raw;
-  raw.reserve((g_w * 3 + 1) * g_h);
-  for (int y = 0; y < g_h; y++) {
+  raw.reserve((w * ch + 1) * h);
+  for (int y = 0; y < h; y++) {
     raw.push(0);
-    const uint32_t* row = g_px + (size_t)y * (size_t)g_w;
-    for (int x = 0; x < g_w; x++) {
+    const uint32_t* row = px + (size_t)y * (size_t)w;
+    for (int x = 0; x < w; x++) {
       raw.push((char)((row[x] >> 16) & 0xff));
       raw.push((char)((row[x] >> 8) & 0xff));
       raw.push((char)(row[x] & 0xff));
+      // こちらは「透け具合」、PNG は「不透明のぶん」。裏返して書く
+      if (ch == 4) raw.push((char)(255 - ((row[x] >> 24) & 0xff)));
     }
   }
 
@@ -1110,8 +1195,440 @@ static NativeStatus u_to_png(VM& vm, Value* a, int n, Value& out) {
   be32(z, (s2 << 16) | s1);
   chunk(png, "IDAT", z);
   chunk(png, "IEND", Str());
+  return png;
+}
 
-  out = mk_bytes(png);
+static NativeStatus u_to_png(VM& vm, Value* a, int n, Value& out) {
+  (void)a; (void)n;
+  if (!need_open(vm)) return N_Panic;
+  out = mk_bytes(encode_png(g_px, g_w, g_h));
+  return N_Ok;
+}
+
+// ------------------------------------------------------------------ 絵（Canvas）
+// 画面のほかにも描ける面を持つ。使い道は3つ。
+//   ・絵を読んで出す（ui.load_png）
+//   ・下ごしらえした絵を何度も貼る（スプライト・地形）
+//   ・3D の描き先（ui.tri と奥行きの面）
+//
+// **ふつうの値**にしてある（ハンドルではない）。代入すればコピーになるので、
+// 絵を直す前に `var 前 = 絵;` と控えを取れる。中身は参照数を数えていて、
+// 書き換えるまで写さない（copy on write）ので、控えを取るだけなら安い。
+//
+// 描き先を大域で切り替えると、その絵が消えたときに行き場を失う。そこで
+// **絵に向けたメソッド**（絵.line(...)）にし、その1回の呼び出しの間だけ
+// 面の持ちものを差し替える形にした。画面に描く ui.line(...) と名前はそろえてある
+enum CanvasField { CF_W = 0, CF_H, CF_Px, CF_Cx0, CF_Cy0, CF_Cx1, CF_Cy1, CF_Count };
+
+// 型検査に使う仮の型。本物のクラスは型検査のときに作られる（Widget と同じ仕組み）
+static Type* canvas_stub(TypeTable& t) { return t.generic(Str("Canvas")); }
+
+static bool is_canvas_stub(Type* t) {
+  if (!t) return false;
+  if (t->kind == T_Generic && t->name == "Canvas") return true;
+  if (t->kind == T_Optional && t->a && t->a->kind == T_Generic && t->a->name == "Canvas") return true;
+  return false;
+}
+
+void ui_bind_canvas_class(Registry& r, ClassInfo* real) {
+  if (!real) return;
+  TypeTable& t = r.types();
+  Type* c = t.class_type(real);
+  Type* oc = t.optional_of(c);
+  for (int i = 0; i < r.size(); i++) {
+    NativeEntry& e = r.at(i);
+    if (is_canvas_stub(e.ret)) e.ret = (e.ret->kind == T_Optional) ? oc : c;
+    for (int j = 0; j < e.params.size(); j++)
+      if (is_canvas_stub(e.params[j])) e.params[j] = (e.params[j]->kind == T_Optional) ? oc : c;
+  }
+}
+
+// 本物の Canvas クラス。プログラムごとに変わるので、その都度引き直す
+static ClassInfo* canvas_class(VM& vm) {
+  static Program* seen = 0;
+  static ClassInfo* found = 0;
+  if (vm.prog == seen) return found;
+  seen = vm.prog;
+  found = 0;
+  if (!vm.prog) return 0;
+  for (int i = 0; i < vm.prog->classes.size(); i++) {
+    ClassInfo* c = vm.prog->classes[i];
+    if (c->name == "Canvas" && c->module == "std") { found = c; break; }
+  }
+  return found;
+}
+
+// いま描いている面の持ちもの。絵に描く間だけ差し替える
+struct Target {
+  uint32_t* px; int w, h, cx0, cy0, cx1, cy1; bool open;
+};
+static Target target_save() {
+  Target t;
+  t.px = g_px; t.w = g_w; t.h = g_h;
+  t.cx0 = g_cx0; t.cy0 = g_cy0; t.cx1 = g_cx1; t.cy1 = g_cy1;
+  t.open = g_open;
+  return t;
+}
+static void target_load(const Target& t) {
+  g_px = t.px; g_w = t.w; g_h = t.h;
+  g_cx0 = t.cx0; g_cy0 = t.cy0; g_cx1 = t.cx1; g_cy1 = t.cy1;
+  g_open = t.open;
+}
+
+static bool is_canvas(VM& vm, const Value& v) {
+  if (v.k != V_Obj || v.o->kind != O_Inst) return false;
+  InstObj* o = (InstObj*)v.o;
+  return o->cls && o->cls == canvas_class(vm) && o->fields.size() == CF_Count;
+}
+
+// 絵を作る。色を渡さなければ、まるごと透明で埋める
+static bool make_canvas(VM& vm, int64_t w, int64_t h, uint32_t fill, Value& out) {
+  ClassInfo* cls = canvas_class(vm);
+  if (!cls) {
+    vm.panic(vm.L("この処理系は ui の絵を持っていません", "this build has no ui canvas"));
+    return false;
+  }
+  if (w <= 0 || h <= 0) {
+    vm.panic(vm.L("絵の大きさは 1 以上にします", "canvas size must be 1 or more"));
+    return false;
+  }
+  if (w > 16384 || h > 16384) {
+    vm.panic(vm.L("絵が大きすぎます（縦横とも 16384 まで）",
+                  "canvas too large (up to 16384 on each side)"));
+    return false;
+  }
+  size_t bytes = (size_t)w * (size_t)h * sizeof(uint32_t);
+  if (sk_mem_limit() != 0 && bytes > sk_mem_limit()) {
+    vm.panic(vm.L("絵が大きすぎて、使ってよいメモリに入りません",
+                  "the canvas does not fit in the memory limit"));
+    return false;
+  }
+  Str px;
+  px.reserve((int)bytes);
+  for (size_t i = 0; i < bytes; i++) px.push('\0');
+  uint32_t* p = (uint32_t*)&px[0];
+  for (size_t i = 0; i < (size_t)w * (size_t)h; i++) p[i] = fill;
+
+  out = mk_inst(cls);
+  InstObj* o = as_inst(out);
+  o->fields.push(mk_int(w));
+  o->fields.push(mk_int(h));
+  o->fields.push(mk_bytes(px));
+  o->fields.push(mk_int(0));
+  o->fields.push(mk_int(0));
+  o->fields.push(mk_int(w - 1));
+  o->fields.push(mk_int(h - 1));
+  return true;
+}
+
+// 受け手の絵を描き先にする。**中身を書き換えるので、先に自分だけのものにする**
+static InstObj* canvas_begin(VM& vm, Value* a, Target& saved) {
+  Value* recv = val_deref(&a[0]);
+  if (!is_canvas(vm, *recv)) {
+    vm.panic(vm.L("絵ではありません", "not a canvas"));
+    return 0;
+  }
+  InstObj* o = (InstObj*)obj_unique(*recv);          // 絵そのもの
+  StrObj* px = (StrObj*)obj_unique(o->fields[CF_Px]); // 画素の並びも
+  int w = (int)o->fields[CF_W].i, h = (int)o->fields[CF_H].i;
+  if (px->s.size() < (int)((size_t)w * (size_t)h * sizeof(uint32_t))) {
+    vm.panic(vm.L("絵が壊れています", "corrupt canvas"));
+    return 0;
+  }
+  saved = target_save();
+  g_px = (uint32_t*)&px->s[0];
+  g_w = w; g_h = h;
+  g_cx0 = (int)o->fields[CF_Cx0].i; g_cy0 = (int)o->fields[CF_Cy0].i;
+  g_cx1 = (int)o->fields[CF_Cx1].i; g_cy1 = (int)o->fields[CF_Cy1].i;
+  g_open = true;   // 絵の上では「面がある」。画面を開いていなくても描ける
+  return o;
+}
+
+// 読むだけのとき。**写さない**（obj_unique を通さない）。
+// 控えを持っている絵（参照が2つ以上）でも、読むだけなら写さずに済ませる
+static bool canvas_begin_read(VM& vm, Value* a, Target& saved) {
+  Value* recv = val_deref(&a[0]);
+  if (!is_canvas(vm, *recv)) {
+    vm.panic(vm.L("絵ではありません", "not a canvas"));
+    return false;
+  }
+  InstObj* o = as_inst(*recv);
+  StrObj* px = as_str(o->fields[CF_Px]);
+  int w = (int)o->fields[CF_W].i, h = (int)o->fields[CF_H].i;
+  if (px->s.size() < (int)((size_t)w * (size_t)h * sizeof(uint32_t))) {
+    vm.panic(vm.L("絵が壊れています", "corrupt canvas"));
+    return false;
+  }
+  saved = target_save();
+  g_px = (uint32_t*)px->s.data();   // 読むだけなので、書き込み可能にしなくてよい
+  g_w = w; g_h = h;
+  g_cx0 = 0; g_cy0 = 0; g_cx1 = w - 1; g_cy1 = h - 1;
+  g_open = true;
+  return true;
+}
+
+// 描き終わり。切り抜きは絵の側に覚えておく（絵ごとに持つ）
+static void canvas_end(InstObj* o, const Target& saved) {
+  if (o) {
+    o->fields[CF_Cx0] = mk_int(g_cx0); o->fields[CF_Cy0] = mk_int(g_cy0);
+    o->fields[CF_Cx1] = mk_int(g_cx1); o->fields[CF_Cy1] = mk_int(g_cy1);
+  }
+  target_load(saved);
+}
+
+// 画面に描く u_* を、そのまま絵に向けて呼ぶ。受け手のぶん（a[0]）をずらすだけで、
+// 描くしくみは1つで済む
+typedef NativeStatus (*DrawFn)(VM&, Value*, int, Value&);
+static NativeStatus canvas_forward(DrawFn fn, VM& vm, Value* a, int n, Value& out) {
+  Target saved;
+  InstObj* o = canvas_begin(vm, a, saved);
+  if (!o) return N_Panic;
+  NativeStatus st = fn(vm, a + 1, n - 1, out);
+  canvas_end(o, saved);
+  return st;
+}
+
+// 前もって宣言（下の register_ui より前に要る）
+static NativeStatus u_clear(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_set(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_get(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_hline(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_vline(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_line(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_rect(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_fill_rect(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_circle(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_fill_circle(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_blit(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_clip(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_clip_off(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_text(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_text_scaled(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_draw(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_tri(VM& vm, Value* a, int n, Value& out);
+
+NativeStatus n_canvas_clear(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_clear, vm, a, n, out); }
+NativeStatus n_canvas_set(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_set, vm, a, n, out); }
+NativeStatus n_canvas_hline(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_hline, vm, a, n, out); }
+NativeStatus n_canvas_vline(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_vline, vm, a, n, out); }
+NativeStatus n_canvas_line(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_line, vm, a, n, out); }
+NativeStatus n_canvas_rect(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_rect, vm, a, n, out); }
+NativeStatus n_canvas_fill_rect(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_fill_rect, vm, a, n, out); }
+NativeStatus n_canvas_circle(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_circle, vm, a, n, out); }
+NativeStatus n_canvas_fill_circle(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_fill_circle, vm, a, n, out); }
+NativeStatus n_canvas_blit(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_blit, vm, a, n, out); }
+NativeStatus n_canvas_clip(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_clip, vm, a, n, out); }
+NativeStatus n_canvas_clip_off(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_clip_off, vm, a, n, out); }
+NativeStatus n_canvas_draw(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_draw, vm, a, n, out); }
+NativeStatus n_canvas_tri(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_tri, vm, a, n, out); }
+NativeStatus n_canvas_text(VM& vm, Value* a, int n, Value& out) {
+  return canvas_forward(n >= 6 ? u_text_scaled : u_text, vm, a, n, out);
+}
+// 読むだけ。写さない道を通す（控えを持っていても、読むのは安いまま）
+NativeStatus n_canvas_get(VM& vm, Value* a, int n, Value& out) {
+  Target saved;
+  if (!canvas_begin_read(vm, a, saved)) return N_Panic;
+  NativeStatus st = u_get(vm, a + 1, n - 1, out);
+  target_load(saved);
+  return st;
+}
+
+NativeStatus n_canvas_width(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  Value* recv = val_deref(&a[0]);
+  if (!is_canvas(vm, *recv)) { vm.panic(vm.L("絵ではありません", "not a canvas")); return N_Panic; }
+  out = mk_int(as_inst(*recv)->fields[CF_W].i);
+  return N_Ok;
+}
+NativeStatus n_canvas_height(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  Value* recv = val_deref(&a[0]);
+  if (!is_canvas(vm, *recv)) { vm.panic(vm.L("絵ではありません", "not a canvas")); return N_Panic; }
+  out = mk_int(as_inst(*recv)->fields[CF_H].i);
+  return N_Ok;
+}
+NativeStatus n_canvas_to_png(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  Value* recv = val_deref(&a[0]);
+  if (!is_canvas(vm, *recv)) { vm.panic(vm.L("絵ではありません", "not a canvas")); return N_Panic; }
+  InstObj* o = as_inst(*recv);
+  StrObj* px = as_str(o->fields[CF_Px]);
+  out = mk_bytes(encode_png((const uint32_t*)px->s.data(), (int)o->fields[CF_W].i,
+                            (int)o->fields[CF_H].i));
+  return N_Ok;
+}
+
+// --- 作る・読む -----------------------------------------------------------
+static NativeStatus u_canvas(VM& vm, Value* a, int n, Value& out) {
+  // 色を渡さなければ、まるごと透明（0xff000000）で埋める
+  uint32_t fill = n >= 3 ? to_color(A(a, 2)->i) : 0xff000000u;
+  if (!make_canvas(vm, A(a, 0)->i, A(a, 1)->i, fill, out)) return N_Panic;
+  return N_Ok;
+}
+
+// PNG を読む。読めなければ none（Canvas?）
+static NativeStatus u_load_png(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  StrObj* src = as_str(*A(a, 0));
+  int w = 0, h = 0;
+  Str px;
+  if (!png::load((const unsigned char*)src->s.data(), src->s.size(), &w, &h, px)) {
+    out = mk_none();
+    return N_Ok;
+  }
+  ClassInfo* cls = canvas_class(vm);
+  if (!cls) {
+    vm.panic(vm.L("この処理系は ui の絵を持っていません", "this build has no ui canvas"));
+    return N_Panic;
+  }
+  out = mk_inst(cls);
+  InstObj* o = as_inst(out);
+  o->fields.push(mk_int(w));
+  o->fields.push(mk_int(h));
+  o->fields.push(mk_bytes(px));
+  o->fields.push(mk_int(0));
+  o->fields.push(mk_int(0));
+  o->fields.push(mk_int(w - 1));
+  o->fields.push(mk_int(h - 1));
+  return N_Ok;
+}
+
+// --- 貼る -----------------------------------------------------------------
+// 絵を今の描き先に貼る。透けているところは下地が残る。
+// 大きさを渡すと、その大きさに伸ばす（いちばん近い画素を取る。輪郭がぼけない）
+static NativeStatus u_draw(VM& vm, Value* a, int n, Value& out) {
+  if (!need_open(vm)) return N_Panic;
+  Value* src = A(a, 0);
+  if (!is_canvas(vm, *src)) {
+    vm.panic(vm.L("絵ではありません", "not a canvas"));
+    return N_Panic;
+  }
+  InstObj* o = as_inst(*src);
+  int sw = (int)o->fields[CF_W].i, sh = (int)o->fields[CF_H].i;
+  const uint32_t* sp = (const uint32_t*)as_str(o->fields[CF_Px])->s.data();
+  int dx = (int)A(a, 1)->i, dy = (int)A(a, 2)->i;
+  int dw = n >= 5 ? (int)A(a, 3)->i : sw;
+  int dh = n >= 5 ? (int)A(a, 4)->i : sh;
+  if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0) { out = mk_void(); return N_Ok; }
+  // 同じ絵に貼ろうとしても、読みながら書くことになるだけなので止めない
+  for (int y = 0; y < dh; y++) {
+    int ty = dy + y;
+    if (ty < g_cy0 || ty > g_cy1) continue;
+    int sy = (int)((int64_t)y * sh / dh);
+    const uint32_t* row = sp + (size_t)sy * (size_t)sw;
+    for (int x = 0; x < dw; x++) {
+      int tx = dx + x;
+      if (tx < g_cx0 || tx > g_cx1) continue;
+      uint32_t c = row[(int)((int64_t)x * sw / dw)];
+      if ((c >> 24) == 255) continue;   // まるごと透明なら、下地のまま
+      uint32_t* p = &g_px[(size_t)ty * (size_t)g_w + tx];
+      *p = (c >> 24) ? over(*p, c) : c;
+    }
+  }
+  out = mk_void();
+  return N_Ok;
+}
+
+// --- 三角形と奥行き -------------------------------------------------------
+// 3D は「奥行きのくらべっこ」だけが組み合わせで書けない。そこをここに置き、
+// 見え方の計算（回す・遠近をつける）は Shark の側で書く。
+//
+// 奥行きの面は**1枚だけ**を使い回す。描き先の大きさに合わせて取り直す。
+// 1度に描くのは1つの面なので、これで足りる（spec/library/ui.md）
+static int32_t* g_depth = 0;
+static int g_depth_w = 0, g_depth_h = 0;
+static bool g_depth_on = false;
+static const int32_t kFar = 0x7fffffff;   // いちばん遠い
+
+static void depth_free() {
+  if (g_depth) { sk_free(g_depth); g_depth = 0; }
+  g_depth_w = g_depth_h = 0;
+}
+static void depth_clear() {
+  if (!g_depth) return;
+  for (size_t i = 0; i < (size_t)g_depth_w * (size_t)g_depth_h; i++) g_depth[i] = kFar;
+}
+// 今の描き先に合う大きさにする。大きさが変われば取り直して、まっさらにする
+static bool depth_ensure() {
+  if (g_depth && g_depth_w == g_w && g_depth_h == g_h) return true;
+  depth_free();
+  size_t bytes = (size_t)g_w * (size_t)g_h * sizeof(int32_t);
+  if (sk_mem_limit() != 0 && bytes > sk_mem_limit()) return false;
+  g_depth = (int32_t*)sk_alloc(bytes);
+  if (!g_depth) return false;
+  g_depth_w = g_w; g_depth_h = g_h;
+  depth_clear();
+  return true;
+}
+
+static NativeStatus u_depth(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  if (!need_open(vm)) return N_Panic;
+  bool on = A(a, 0)->b;
+  if (!on) { g_depth_on = false; depth_free(); out = mk_void(); return N_Ok; }
+  if (!depth_ensure()) {
+    vm.panic(vm.L("奥行きの面が、使ってよいメモリに入りません",
+                  "the depth buffer does not fit in the memory limit"));
+    return N_Panic;
+  }
+  g_depth_on = true;
+  out = mk_void();
+  return N_Ok;
+}
+static NativeStatus u_clear_depth(VM& vm, Value* a, int n, Value& out) {
+  (void)a; (void)n;
+  if (!need_open(vm)) return N_Panic;
+  if (g_depth_on && depth_ensure()) depth_clear();
+  out = mk_void();
+  return N_Ok;
+}
+
+static inline int imin3(int a, int b, int c) { int m = a < b ? a : b; return m < c ? m : c; }
+static inline int imax3(int a, int b, int c) { int m = a > b ? a : b; return m > c ? m : c; }
+
+// 三角形を塗る。頂点は画面の座標（x, y）と奥行き（z）。**z は小さいほど手前**。
+// どちら回りでも描く（表裏の選り分けは書く人が Shark 側でする）
+static NativeStatus u_tri(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  if (!need_open(vm)) return N_Panic;
+  int x0 = (int)A(a, 0)->i, y0 = (int)A(a, 1)->i, z0 = (int)A(a, 2)->i;
+  int x1 = (int)A(a, 3)->i, y1 = (int)A(a, 4)->i, z1 = (int)A(a, 5)->i;
+  int x2 = (int)A(a, 6)->i, y2 = (int)A(a, 7)->i, z2 = (int)A(a, 8)->i;
+  uint32_t c = to_color(A(a, 9)->i);
+  if ((c >> 24) == 255) { out = mk_void(); return N_Ok; }   // まるごと透明
+
+  int64_t area = (int64_t)(x1 - x0) * (y2 - y0) - (int64_t)(x2 - x0) * (y1 - y0);
+  if (area == 0) { out = mk_void(); return N_Ok; }          // つぶれている
+  bool use_depth = g_depth_on && depth_ensure();
+
+  int minx = imin3(x0, x1, x2), maxx = imax3(x0, x1, x2);
+  int miny = imin3(y0, y1, y2), maxy = imax3(y0, y1, y2);
+  if (minx < g_cx0) minx = g_cx0;
+  if (miny < g_cy0) miny = g_cy0;
+  if (maxx > g_cx1) maxx = g_cx1;
+  if (maxy > g_cy1) maxy = g_cy1;
+
+  for (int y = miny; y <= maxy; y++) {
+    for (int x = minx; x <= maxx; x++) {
+      // 辺の式。3つとも面積と同じ向きなら、その点は三角形の中
+      int64_t e0 = (int64_t)(x2 - x1) * (y - y1) - (int64_t)(y2 - y1) * (x - x1);
+      int64_t e1 = (int64_t)(x0 - x2) * (y - y2) - (int64_t)(y0 - y2) * (x - x2);
+      int64_t e2 = (int64_t)(x1 - x0) * (y - y0) - (int64_t)(y1 - y0) * (x - x0);
+      if (area > 0) { if (e0 < 0 || e1 < 0 || e2 < 0) continue; }
+      else { if (e0 > 0 || e1 > 0 || e2 > 0) continue; }
+      if (use_depth) {
+        // 3つの頂点の奥行きを、面積の割合で混ぜる
+        double z = ((double)e0 * z0 + (double)e1 * z1 + (double)e2 * z2) / (double)area;
+        int32_t zi = z <= -2147483647.0 ? -2147483647 : (z >= 2147483646.0 ? 2147483646 : (int32_t)z);
+        int32_t* d = &g_depth[(size_t)y * (size_t)g_depth_w + x];
+        if (zi >= *d) continue;   // 手前に何かある
+        *d = zi;
+      }
+      uint32_t* p = &g_px[(size_t)y * (size_t)g_w + x];
+      *p = (c >> 24) ? over(*p, c) : c;
+    }
+  }
+  out = mk_void();
   return N_Ok;
 }
 
@@ -2561,6 +3078,8 @@ void register_ui(Registry& r) {
   r.add("ui.present", u_present, tv);
 
   r.add("ui.rgb", u_rgb, ti, ti, ti, ti);
+  r.add("ui.rgba", u_rgba, ti, ti, ti, ti, ti);
+  r.add("ui.alpha", u_alpha, ti, ti);
   r.add("ui.red", u_red, ti, ti);
   r.add("ui.green", u_green, ti, ti);
   r.add("ui.blue", u_blue, ti, ti);
@@ -2580,6 +3099,20 @@ void register_ui(Registry& r) {
   r.add("ui.clip", u_clip, tv, ti, ti, ti, ti);
   r.add("ui.clip_off", u_clip_off, tv);
   r.add("ui.blit", u_blit, tv, ti, ti, ti, tli);
+
+  // 絵（Canvas）。tcv は型検査のときに本物のクラスに差し替わる（ui_bind_canvas_class）
+  Type* tcv = canvas_stub(r.types());
+  Type* tocv = r.types().optional_of(tcv);
+  r.add("ui.canvas", u_canvas, tcv, ti, ti);
+  r.add("ui.canvas", u_canvas, tcv, ti, ti, ti);
+  r.add("ui.load_png", u_load_png, tocv, tby);
+  r.add("ui.draw", u_draw, tv, tcv, ti, ti);
+  r.add("ui.draw", u_draw, tv, tcv, ti, ti, ti, ti);
+
+  // 三角形と奥行き（3D の土台）
+  r.add("ui.tri", u_tri, tv, ti, ti, ti, ti, ti, ti, ti, ti, ti, ti);
+  r.add("ui.depth", u_depth, tv, tb);
+  r.add("ui.clear_depth", u_clear_depth, tv);
 
   r.add("ui.text", u_text, tv, ti, ti, ts, ti);
   r.add("ui.text", u_text_scaled, tv, ti, ti, ts, ti, ti);

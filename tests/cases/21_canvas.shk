@@ -1,0 +1,152 @@
+// 絵（Canvas）・透明・PNG の読み書き・三角形と奥行き（spec/library/ui.md）
+import std.ui;
+
+// 小さな PNG をその場で作る。to_png で書いて load_png で読み戻す
+func roundtrip(src: Canvas) -> string {
+  if var back = ui.load_png(src.to_png()) {
+    if back.width() != src.width() { return "幅がちがう"; }
+    if back.height() != src.height() { return "高さがちがう"; }
+    for var y in range(src.height()) {
+      for var x in range(src.width()) {
+        if back.get(x, y) != src.get(x, y) { return f"({x},{y}) がちがう"; }
+      }
+    }
+    return "同じ";
+  }
+  return "読めない";
+}
+
+func main() -> int {
+  // --- 色と濃さ ---
+  // ui.rgb() の返す数は今までと変わらない
+  print(f"{ui.rgb(255, 0, 0)} {ui.rgb(0, 0, 255)}");
+  print(f"{ui.alpha(ui.rgb(1, 2, 3))} {ui.alpha(ui.rgba(1, 2, 3, 128))}");
+  print(ui.rgba(255, 0, 0, 255) == ui.rgb(255, 0, 0));
+  // 端は丸める
+  print(f"{ui.alpha(ui.rgba(0, 0, 0, 300))} {ui.alpha(ui.rgba(0, 0, 0, -5))}");
+
+  // --- 重ねる ---
+  ui.open(8, 8);
+  ui.clear(ui.rgb(0, 0, 0));
+  ui.fill_rect(0, 0, 8, 8, ui.rgba(255, 255, 255, 128));
+  print(ui.red(ui.get(1, 1)));            // 黒と白の半々
+  ui.clear(ui.rgb(0, 0, 0));
+  ui.fill_rect(0, 0, 8, 8, ui.rgba(255, 255, 255, 0));
+  print(ui.red(ui.get(1, 1)));            // まるごと透明なら何も起きない
+  // 画面はいつも不透明のまま（重ねても濃さは残らない）
+  print(ui.alpha(ui.get(1, 1)));
+
+  // --- 絵を作る ---
+  var e = ui.canvas(6, 4);
+  print(f"{e.width()} {e.height()} {ui.alpha(e.get(0, 0))}");
+  e.clear(ui.rgb(0, 0, 255));
+  e.set(1, 1, ui.rgb(255, 255, 255));
+  print(f"{e.get(0, 0)} {e.get(1, 1)}");
+  var filled = ui.canvas(3, 3, ui.rgb(0, 255, 0));
+  print(filled.get(1, 1));
+
+  // --- 代入はコピー（絵を直す前に控えが取れる）---
+  var keep = e;
+  e.clear(ui.rgb(255, 0, 0));
+  print(f"{keep.get(0, 0)} {e.get(0, 0)}");
+  // 控えのほうを直しても、元は変わらない
+  keep.set(0, 0, ui.rgb(1, 1, 1));
+  print(f"{keep.get(0, 0)} {e.get(0, 0)}");
+
+  // --- 絵に描く（画面と同じ名前）---
+  var d = ui.canvas(9, 9);
+  d.clear(ui.rgb(0, 0, 0));
+  d.hline(1, 0, 3, ui.rgb(255, 0, 0));
+  d.vline(0, 1, 3, ui.rgb(0, 255, 0));
+  d.line(0, 8, 8, 8, ui.rgb(0, 0, 255));
+  d.rect(2, 2, 3, 3, ui.rgb(255, 255, 0));
+  d.fill_rect(6, 2, 2, 2, ui.rgb(255, 0, 255));
+  d.fill_circle(4, 6, 1, ui.rgb(0, 255, 255));
+  print(f"{d.get(1, 0)} {d.get(0, 1)} {d.get(4, 8)}");
+  print(f"{d.get(2, 2)} {d.get(3, 3)} {d.get(6, 2)} {d.get(4, 6)}");
+  d.circle(4, 4, 0, ui.rgb(9, 9, 9));   // 半径 0 でも落ちない
+  d.blit(0, 0, 2, [ui.rgb(1, 0, 0), ui.rgb(2, 0, 0), ui.rgb(3, 0, 0), ui.rgb(4, 0, 0)]);
+  print(f"{d.get(0, 0)} {d.get(1, 1)}");
+  ui.font_builtin();
+  d.text(0, 0, "H", ui.rgb(255, 255, 255));
+  print(d.get(0, 0));
+
+  // --- 絵ごとの切り抜き ---
+  var c = ui.canvas(8, 8);
+  c.clip(0, 0, 4, 4);
+  c.clear(ui.rgb(255, 0, 0));
+  print(f"{c.get(2, 2)} {c.get(6, 6)}");
+  c.clip_off();
+  c.clear(ui.rgb(0, 255, 0));
+  print(c.get(6, 6));
+
+  // --- 貼る ---
+  var sprite = ui.canvas(2, 2, ui.rgb(255, 0, 0));
+  sprite.set(0, 0, ui.rgba(0, 0, 0, 0));    // 左上だけ透明
+  ui.clear(ui.rgb(0, 0, 255));
+  ui.draw(sprite, 0, 0);
+  print(f"{ui.get(0, 0)} {ui.get(1, 1)}");  // 透明なところは下地のまま
+  // 伸ばして貼る
+  ui.clear(ui.rgb(0, 0, 0));
+  ui.draw(sprite, 0, 0, 4, 4);
+  print(f"{ui.get(0, 0)} {ui.get(3, 3)}");
+  // 絵に絵を貼る
+  var host = ui.canvas(4, 4, ui.rgb(0, 0, 255));
+  host.draw(sprite, 1, 1);
+  print(f"{host.get(1, 1)} {host.get(2, 2)}");
+
+  // --- PNG の読み書き ---
+  // 不透明の絵は赤緑青だけ、透明のある絵は透明つきで書く。どちらも読み戻せる
+  var opaque = ui.canvas(3, 2, ui.rgb(10, 20, 30));
+  print(f"不透明 {roundtrip(opaque)}");
+  var clear1 = ui.canvas(3, 2, ui.rgba(10, 20, 30, 128));
+  clear1.set(0, 0, ui.rgba(0, 0, 0, 0));
+  print(f"透明つき {roundtrip(clear1)}");
+  print(opaque.to_png().to_hex().starts_with("89504e47"));
+  // PNG でないものは読めない
+  if var bad = ui.load_png("これは PNG ではない".bytes()) {
+    print(f"読めてしまった {bad.width()}");
+  } else {
+    print("PNG でないものは none");
+  }
+
+  // --- 三角形 ---
+  ui.clear(ui.rgb(0, 0, 0));
+  ui.tri(0, 0, 0, 7, 0, 0, 0, 7, 0, ui.rgb(255, 0, 0));
+  print(f"{ui.get(1, 1)} {ui.get(7, 7)}");
+  // 回る向きが逆でも塗る
+  ui.clear(ui.rgb(0, 0, 0));
+  ui.tri(0, 7, 0, 7, 0, 0, 0, 0, 0, ui.rgb(0, 255, 0));
+  print(ui.get(1, 1));
+  // つぶれた三角は何も描かない
+  ui.clear(ui.rgb(0, 0, 0));
+  ui.tri(0, 0, 0, 4, 0, 0, 8, 0, 0, ui.rgb(255, 0, 0));
+  print(ui.get(1, 0));
+
+  // --- 奥行き（z バッファ）---
+  ui.depth(true);
+  ui.clear_depth();
+  ui.clear(ui.rgb(0, 0, 0));
+  ui.tri(0, 0, 10, 7, 0, 10, 0, 7, 10, ui.rgb(255, 0, 0));    // 手前
+  ui.tri(0, 0, 50, 7, 0, 50, 0, 7, 50, ui.rgb(0, 255, 0));    // 奥。負ける
+  print(ui.get(1, 1));
+  // 奥行きは画素ごとに効く（傾いた面）
+  ui.clear_depth();
+  ui.clear(ui.rgb(0, 0, 0));
+  ui.tri(0, 0, 0, 7, 0, 700, 0, 7, 0, ui.rgb(255, 0, 0));     // 左が手前、右が奥
+  ui.tri(0, 0, 300, 7, 0, 300, 0, 7, 300, ui.rgb(0, 0, 255));
+  print(f"{ui.get(0, 0)} {ui.get(5, 1)}");
+  // 戻せば、あとに描いたほうが勝つ
+  ui.depth(false);
+  ui.clear(ui.rgb(0, 0, 0));
+  ui.tri(0, 0, 10, 7, 0, 10, 0, 7, 10, ui.rgb(255, 0, 0));
+  ui.tri(0, 0, 50, 7, 0, 50, 0, 7, 50, ui.rgb(0, 255, 0));
+  print(ui.get(1, 1));
+  // 絵にも描ける
+  var solid = ui.canvas(8, 8);
+  solid.clear(ui.rgb(0, 0, 0));
+  solid.tri(0, 0, 0, 7, 0, 0, 0, 7, 0, ui.rgb(255, 255, 0));
+  print(f"{solid.get(1, 1)} {solid.get(7, 7)}");
+
+  return 0;
+}

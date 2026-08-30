@@ -7,7 +7,7 @@ namespace shark {
 // ------------------------------------------------------------------ 準備
 Checker::Checker(Program& prog, Registry& reg, TypeTable& types, DiagBag& diag, Arena& arena)
     : prog_(prog), reg_(reg), t_(types), diag_(diag), arena_(arena), unit_(0), fc_(0),
-      c_error_(0), c_comparable_(0), c_widget_(0) {
+      c_error_(0), c_comparable_(0), c_widget_(0), c_canvas_(0) {
   t_none_ = t_.optional_of(t_.t_unknown());
   make_builtin_classes();
 }
@@ -39,6 +39,26 @@ NativeStatus n_widget_height(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_width_fr(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_height_fr(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_align(VM& vm, Value* args, int n, Value& out);
+// Canvas（絵）のメソッド。書き換えるものは受け手を借りる（本体は lib/ui.cpp）
+NativeStatus n_canvas_width(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_height(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_get(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_set(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_clear(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_hline(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_vline(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_line(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_rect(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_fill_rect(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_circle(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_fill_circle(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_blit(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_text(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_draw(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_tri(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_clip(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_clip_off(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_to_png(VM& vm, Value* args, int n, Value& out);
 
 void Checker::make_builtin_classes() {
   // class Error { public virtual func message() -> string; public virtual func code() -> int; }
@@ -182,6 +202,86 @@ void Checker::make_builtin_classes() {
     layout_class(c_widget_);
     // 関数の表に仮で入れてある Widget を、本物に差し替える（lib/ui.cpp）
     ui_bind_widget_class(reg_, c_widget_);
+
+    // class Canvas — 絵（画素の面）。ui.canvas() / ui.load_png() で作る。
+    // **ふつうの値**なので、代入すればコピーになる（絵を直す前に控えを取れる）。
+    // 画面に描く ui.線() と同じ名前のメソッドを持ち、描き先だけが違う
+    c_canvas_ = new_class(prog_);
+    c_canvas_->name = Str("Canvas");
+    c_canvas_->module = Str("std");
+    c_canvas_->is_public = true;
+    c_canvas_->is_builtin = true;
+    Type* tc = t_.class_type(c_canvas_);
+    struct { const char* name; Type* type; } cf[] = {
+        {"w", t_.t_int()},          // 横の画素数
+        {"h", t_.t_int()},          // 縦の画素数
+        {"px", t_.t_bytes()},       // 画素そのもの（w*h 個の 0xTTRRGGBB）
+        {"cx0", t_.t_int()},        // 切り抜き（両端を含む）。ui.clip と同じ
+        {"cy0", t_.t_int()},
+        {"cx1", t_.t_int()},
+        {"cy1", t_.t_int()},
+    };
+    for (int i = 0; i < (int)(sizeof(cf) / sizeof(cf[0])); i++) {
+      FieldInfo f;
+      f.name = Str(cf[i].name);
+      f.type = cf[i].type;
+      f.is_public = false;   // 中身は見せない。読むのも書くのもメソッドを通す
+      f.owner = c_canvas_;
+      c_canvas_->fields.push(f);
+    }
+    // 絵のメソッド。**書き換えるものは受け手を借りて（by_ref）その場で直す**ので、
+    // 変数に入れた絵がそのまま変わる（list.push と同じ扱い。core/codegen.cpp）
+    Type* ti = t_.t_int();
+    Type* ts2 = t_.t_string();
+    Type* tv2 = t_.t_void();
+    Type* tli2 = t_.list_of(ti);
+    struct { const char* name; NativeFn fn; Type* ret; int np; Type* p[10]; } cm[] = {
+        {"width", n_canvas_width, ti,  0, {}},
+        {"height", n_canvas_height, ti,  0, {}},
+        {"get", n_canvas_get, ti,  2, {ti, ti}},
+        {"set", n_canvas_set, tv2, 3, {ti, ti, ti}},
+        {"clear", n_canvas_clear, tv2, 1, {ti}},
+        {"hline", n_canvas_hline, tv2, 4, {ti, ti, ti, ti}},
+        {"vline", n_canvas_vline, tv2, 4, {ti, ti, ti, ti}},
+        {"line", n_canvas_line, tv2, 5, {ti, ti, ti, ti, ti}},
+        {"rect", n_canvas_rect, tv2, 5, {ti, ti, ti, ti, ti}},
+        {"fill_rect", n_canvas_fill_rect, tv2, 5, {ti, ti, ti, ti, ti}},
+        {"circle", n_canvas_circle, tv2, 4, {ti, ti, ti, ti}},
+        {"fill_circle", n_canvas_fill_circle, tv2, 4, {ti, ti, ti, ti}},
+        {"blit", n_canvas_blit, tv2, 4, {ti, ti, ti, tli2}},
+        {"text", n_canvas_text, tv2, 4, {ti, ti, ts2, ti}},
+        {"text", n_canvas_text, tv2, 5, {ti, ti, ts2, ti, ti}},
+        {"draw", n_canvas_draw, tv2, 3, {tc, ti, ti}},
+        {"draw", n_canvas_draw, tv2, 5, {tc, ti, ti, ti, ti}},
+        {"tri", n_canvas_tri, tv2, 10, {ti, ti, ti, ti, ti, ti, ti, ti, ti, ti}},
+        {"clip", n_canvas_clip, tv2, 4, {ti, ti, ti, ti}},
+        {"clip_off", n_canvas_clip_off, tv2, 0, {}},
+        {"to_png", n_canvas_to_png, t_.t_bytes(), 0, {}},
+    };
+    for (int i = 0; i < (int)(sizeof(cm) / sizeof(cm[0])); i++) {
+      FuncInfo* f = new_func(prog_);
+      f->name = Str(cm[i].name);
+      f->module = Str("std");
+      f->owner = c_canvas_;
+      f->is_method = true;
+      f->is_public = true;
+      f->is_native = true;
+      f->native = cm[i].fn;
+      f->ret = cm[i].ret;
+      for (int j = 0; j < cm[i].np; j++) {
+        ParamInfo p;
+        p.name = Str("a");
+        p.type = cm[i].p[j];
+        f->params.push(p);
+      }
+      MethodRef m;
+      m.name = f->name;
+      m.func = f->index;
+      m.is_public = true;
+      c_canvas_->methods.push(m);
+    }
+    layout_class(c_canvas_);
+    ui_bind_canvas_class(reg_, c_canvas_);
   }
 }
 

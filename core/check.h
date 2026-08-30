@@ -137,6 +137,7 @@ class Checker {
   ClassInfo* c_error_;
   ClassInfo* c_comparable_;
   ClassInfo* c_widget_;   // std.ui の Widget（std.ui を持たない処理系では 0）
+  ClassInfo* c_canvas_;   // std.ui の Canvas（絵。同上）
   Type* t_none_;       // none リテラルの型（どの T? にも入る）
 };
 

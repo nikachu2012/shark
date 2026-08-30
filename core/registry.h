@@ -28,8 +28,10 @@ class Registry {
  public:
   explicit Registry(TypeTable& types) : types_(types) {}
 
+  // 引数は 10 個まで（ui.tri が 10 個いる）
   int add(const char* name, NativeFn fn, Type* ret,
-          Type* p0 = 0, Type* p1 = 0, Type* p2 = 0, Type* p3 = 0, Type* p4 = 0);
+          Type* p0 = 0, Type* p1 = 0, Type* p2 = 0, Type* p3 = 0, Type* p4 = 0,
+          Type* p5 = 0, Type* p6 = 0, Type* p7 = 0, Type* p8 = 0, Type* p9 = 0);
   // 型検査では使わない（checker が型を決める）もの
   int add_untyped(const char* name, NativeFn fn);
   void mark_ref0(int id) { e_[id].ref0 = true; }
@@ -112,6 +114,7 @@ void ui_shutdown();
 // 型検査が本物を作ったところで差し替える（core/check.cpp から呼ぶ）
 struct ClassInfo;
 void ui_bind_widget_class(Registry& r, ClassInfo* real);
+void ui_bind_canvas_class(Registry& r, ClassInfo* real);
 
 }  // namespace shark
 #endif

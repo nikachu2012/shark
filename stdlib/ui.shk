@@ -142,6 +142,32 @@ func present() -> void;
 ///   print(ui.rgb(255, 0, 0));   // 16711680
 func rgb(r: int, g: int, b: int) -> int;
 
+/// 赤・緑・青に「濃さ（不透明のぶん）」を足して色を作る。
+///
+/// a は 255 で不透明、0 でまるごと透明、途中なら半透明。
+/// 半透明の色で描くと、下にあるものが透けて見える。
+///
+/// ui.rgb(r, g, b) は ui.rgba(r, g, b, 255) と同じ色になる。
+/// **今までどおり描くぶんには、何も変わらない。**
+///
+/// 引数:
+///   r, g, b   赤・緑・青（0〜255）
+///   a         濃さ（0〜255）。255 が不透明
+///
+/// 例:
+///   ui.open(4, 4);
+///   ui.clear(ui.rgb(0, 0, 0));
+///   ui.fill_rect(0, 0, 4, 4, ui.rgba(255, 255, 255, 128));   // 半分だけ白
+///   print(ui.red(ui.get(1, 1)));   // 128
+func rgba(r: int, g: int, b: int, a: int) -> int;
+
+/// 色の濃さ（0〜255）。255 なら不透明、0 ならまるごと透明。
+///
+/// 例:
+///   print(ui.alpha(ui.rgb(10, 20, 30)));         // 255
+///   print(ui.alpha(ui.rgba(10, 20, 30, 128)));   // 128
+func alpha(color: int) -> int;
+
 /// 色の赤のぶん（0〜255）。
 ///
 /// 例:
@@ -297,6 +323,113 @@ func clip_off() -> void;
 ///   ui.blit(2, 2, 2, dot);
 ///   print(ui.get(3, 3));   // 16777215
 func blit(x: int, y: int, w: int, pixels: list<int>) -> void;
+
+// ------------------------------------------------------------------ 絵
+
+/// 絵（画素の面）を作る。色を渡さなければ、まるごと透明で始まる。
+///
+/// 画面のほかにも描ける面が持てる。使い道は3つ。
+///
+///   ・絵を読んで出す（ui.load_png）
+///   ・先に描いておいて何度も貼る（スプライト・地形）。毎回描き直すより速い
+///   ・3D の描き先（絵.tri と ui.depth）
+///
+/// 絵は**ふつうの値**で、代入すればコピーになる。書き換えるまで中身は写さないので、
+/// 「直す前に控えを取る」が安く書ける（絵を直す道具を作るときに効く）。
+///
+///   var 控え = 絵;      // ここでは写さない
+///   絵.clear(0);        // ここで初めて写る。控えは元のまま
+///
+/// 描くメソッドは画面と同じ名前で、描き先だけが違う（絵.line など）。
+///
+/// 引数:
+///   width, height   大きさ（画素。1〜16384）
+///   color           埋める色（省くと、まるごと透明）
+///
+/// 例:
+///   var e = ui.canvas(4, 4, ui.rgb(0, 0, 255));
+///   print(f"{e.width()}x{e.height()} {e.get(2, 2)}");   // 4x4 255
+func canvas(width: int, height: int) -> Canvas;
+func canvas(width: int, height: int, color: int) -> Canvas;
+
+/// PNG を読んで絵にする。読めなければ none。
+///
+/// 透明はそのまま入る。白黒・パレット・色つきのどれでも、
+/// 深さは 1/2/4/8/16 ビットまで読める。**編み込み（interlace）だけは読めない**。
+///
+/// 書き戻すのは 絵.to_png()。読む → 直す → 書き戻す で透明は失われない。
+///
+/// 例:
+///   var e = ui.canvas(2, 2, ui.rgba(255, 0, 0, 128));
+///   if var back = ui.load_png(e.to_png()) {
+///     print(f"{back.width()} {ui.alpha(back.get(0, 0))}");   // 2 128
+///   }
+func load_png(data: bytes) -> Canvas?;
+
+/// 絵を今の面に貼る。透けているところは、下にあるものが残る。
+///
+/// 大きさを渡すと、その大きさに伸び縮みする。いちばん近い画素を取るので、
+/// 粗い絵を大きくしても輪郭がぼけない（絵を直す道具の「拡大して見る」に使える）。
+///
+/// 引数:
+///   image    貼る絵
+///   x, y     置く場所（左上）
+///   w, h     伸ばす大きさ（省くと、絵のままの大きさ）
+///
+/// 例:
+///   var e = ui.canvas(2, 2, ui.rgb(0, 255, 0));
+///   ui.open(8, 8);
+///   ui.draw(e, 1, 1);
+///   print(ui.get(2, 2));   // 65280
+func draw(image: Canvas, x: int, y: int) -> void;
+func draw(image: Canvas, x: int, y: int, w: int, h: int) -> void;
+
+// ------------------------------------------------------------ 三角形と奥行き
+
+/// 三角形を塗る。頂点は面の座標（x, y）と奥行き（z）。
+///
+/// **z は小さいほど手前。**ui.depth(true) にしてあれば、画素ごとに
+/// 「もう手前に何かあるか」を見て、あれば描かない（奥行きの面＝z バッファ）。
+/// これが 3D で唯一、組み合わせでは書けないところなので、ここに置いてある。
+///
+/// 回す・遠近をつけるといった見え方の計算は Shark の側で書く。
+/// ここに渡すのは、計算し終わった**面の上の座標**。
+///
+/// 表と裏の選り分けはしない（どちら回りでも塗る）。要るなら、
+/// 3つの頂点の向きから自分で決める。
+///
+/// 例:
+///   ui.open(8, 8);
+///   ui.tri(0, 0, 0, 7, 0, 0, 0, 7, 0, ui.rgb(255, 0, 0));
+///   print(f"{ui.get(1, 1)} {ui.get(6, 6)}");   // 16711680 0
+func tri(x0: int, y0: int, z0: int, x1: int, y1: int, z1: int, x2: int, y2: int, z2: int, color: int) -> void;
+
+/// 奥行きの面（z バッファ）を使うかどうか。
+///
+/// true にすると ui.tri() が z を見るようになる。false で使うのをやめ、面も返す。
+/// 面は1枚だけを使い回し、描き先の大きさに合わせて取り直す。
+///
+/// 例:
+///   ui.open(8, 8);
+///   ui.depth(true);
+///   ui.clear_depth();
+///   ui.tri(0, 0, 50, 7, 0, 50, 0, 7, 50, ui.rgb(0, 255, 0));   // 奥
+///   ui.tri(0, 0, 10, 7, 0, 10, 0, 7, 10, ui.rgb(255, 0, 0));   // 手前
+///   print(ui.get(1, 1));   // 16711680
+///   ui.depth(false);
+func depth(on: bool) -> void;
+
+/// 奥行きの面を「いちばん遠い」に戻す。ひとこまごとに1回呼ぶ。
+///
+/// ui.depth(false) のときは何も起きない。
+///
+/// 例:
+///   ui.open(8, 8);
+///   ui.depth(true);
+///   ui.clear_depth();
+///   print(ui.width());   // 8
+///   ui.depth(false);
+func clear_depth() -> void;
 
 // ------------------------------------------------------------------ 文字
 
@@ -1047,6 +1180,186 @@ func theme(bg: int, fg: int, accent: int) -> void;
 
 
 // ------------------------------------------------------------ 部品の見た目
+
+/// 絵（画素の面）。ui.canvas() か ui.load_png() で作る。
+///
+/// **ふつうの値**なので、代入すればコピーになる。中身は書き換えるまで写さないので、
+/// 「直す前に控えを取る」が安く書ける。
+///
+/// 描くメソッドは画面に描く ui.* と同じ名前・同じ引数で、描き先だけが違う。
+/// 切り抜き（clip）は絵ごとに覚えている。
+///
+/// 例:
+///   var e = ui.canvas(8, 8, ui.rgb(0, 0, 255));
+///   var keep = e;                   // ここでは写さない
+///   e.clear(ui.rgb(255, 0, 0));     // ここで写る
+///   print(f"{keep.get(0, 0)} {e.get(0, 0)}");   // 255 16711680
+class Canvas {
+  /// 横の画素数。
+  ///
+  /// 例:
+  ///   print(ui.canvas(12, 5).width());   // 12
+  func width() -> int;
+
+  /// 縦の画素数。
+  ///
+  /// 例:
+  ///   print(ui.canvas(12, 5).height());   // 5
+  func height() -> int;
+
+  /// 点の色を読む。外を尋ねたら 0。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(4, 4, ui.rgb(0, 255, 0));
+  ///   print(e.get(1, 1));   // 65280
+  func get(x: int, y: int) -> int;
+
+  /// 点を打つ。半透明の色なら、下にある色と混ざる。
+  ///
+  /// 絵を直す道具の「筆」は、これ1つで書ける。
+  /// ui.rgba(0, 0, 0, 0) を打てば「消しゴム」になる。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(4, 4, ui.rgb(0, 0, 255));
+  ///   e.set(1, 1, ui.rgba(0, 0, 0, 0));   // 消す
+  ///   print(ui.alpha(e.get(1, 1)));       // 0
+  func set(x: int, y: int, color: int) -> void;
+
+  /// ぜんぶ1色で塗る。切り抜きの中だけを塗る。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(4, 4);
+  ///   e.clear(ui.rgb(255, 0, 0));
+  ///   print(e.get(2, 2));   // 16711680
+  func clear(color: int) -> void;
+
+  /// 横の線。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(8, 8, ui.rgb(0, 0, 0));
+  ///   e.hline(1, 2, 4, ui.rgb(255, 0, 0));
+  ///   print(f"{e.get(1, 2)} {e.get(5, 2)}");   // 16711680 0
+  func hline(x: int, y: int, w: int, color: int) -> void;
+
+  /// 縦の線。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(8, 8, ui.rgb(0, 0, 0));
+  ///   e.vline(2, 1, 4, ui.rgb(255, 0, 0));
+  ///   print(f"{e.get(2, 1)} {e.get(2, 5)}");   // 16711680 0
+  func vline(x: int, y: int, h: int, color: int) -> void;
+
+  /// 2点をつなぐ線。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(8, 8);
+  ///   e.line(0, 0, 7, 7, ui.rgb(255, 0, 0));
+  ///   print(e.get(3, 3));   // 16711680
+  func line(x0: int, y0: int, x1: int, y1: int, color: int) -> void;
+
+  /// 四角の枠。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(8, 8, ui.rgb(0, 0, 0));
+  ///   e.rect(1, 1, 4, 4, ui.rgb(255, 0, 0));
+  ///   print(f"{e.get(1, 1)} {e.get(2, 2)}");   // 16711680 0
+  func rect(x: int, y: int, w: int, h: int, color: int) -> void;
+
+  /// 中まで塗った四角。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(8, 8);
+  ///   e.fill_rect(1, 1, 4, 4, ui.rgb(255, 0, 0));
+  ///   print(e.get(2, 2));   // 16711680
+  func fill_rect(x: int, y: int, w: int, h: int, color: int) -> void;
+
+  /// 円の枠。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(9, 9, ui.rgb(0, 0, 0));
+  ///   e.circle(4, 4, 3, ui.rgb(255, 0, 0));
+  ///   print(f"{e.get(4, 1)} {e.get(4, 4)}");   // 16711680 0
+  func circle(x: int, y: int, r: int, color: int) -> void;
+
+  /// 中まで塗った円。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(9, 9);
+  ///   e.fill_circle(4, 4, 3, ui.rgb(255, 0, 0));
+  ///   print(e.get(4, 4));   // 16711680
+  func fill_circle(x: int, y: int, r: int, color: int) -> void;
+
+  /// 画素の並びをそのまま置く。並べ方は ui.blit と同じ。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(4, 4);
+  ///   e.blit(1, 1, 2, [ui.rgb(255, 0, 0), ui.rgb(0, 255, 0),
+  ///                    ui.rgb(0, 0, 255), ui.rgb(255, 255, 255)]);
+  ///   print(e.get(2, 2));   // 16777215
+  func blit(x: int, y: int, w: int, pixels: list<int>) -> void;
+
+  /// 文字を描く。字形は画面と同じもの（ui.font で決まる）。
+  ///
+  /// 例:
+  ///   ui.font_builtin();
+  ///   var e = ui.canvas(40, 12);
+  ///   e.text(1, 1, "Hi", ui.rgb(255, 255, 255));
+  ///   print(e.get(1, 1));   // 16777215
+  func text(x: int, y: int, s: string, color: int) -> void;
+  func text(x: int, y: int, s: string, color: int, scale: int) -> void;
+
+  /// 別の絵を、この絵に貼る。透けているところは下が残る。
+  ///
+  /// 大きさを渡すと伸び縮みする（ui.draw と同じ）。
+  ///
+  /// 例:
+  ///   var a = ui.canvas(8, 8);
+  ///   var b = ui.canvas(2, 2, ui.rgb(0, 255, 0));
+  ///   a.draw(b, 1, 1);
+  ///   print(a.get(2, 2));   // 65280
+  func draw(image: Canvas, x: int, y: int) -> void;
+  func draw(image: Canvas, x: int, y: int, w: int, h: int) -> void;
+
+  /// 三角形を塗る。ui.tri と同じで、描き先がこの絵になる。
+  ///
+  /// 奥行き（ui.depth）は、画面と同じ1枚を使う。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(8, 8, ui.rgb(0, 0, 0));
+  ///   e.tri(0, 0, 0, 7, 0, 0, 0, 7, 0, ui.rgb(255, 0, 0));
+  ///   print(f"{e.get(1, 1)} {e.get(6, 6)}");   // 16711680 0
+  func tri(x0: int, y0: int, z0: int, x1: int, y1: int, z1: int, x2: int, y2: int, z2: int, color: int) -> void;
+
+  /// ここから外には描かない。絵ごとに覚えている。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(8, 8, ui.rgb(0, 0, 0));
+  ///   e.clip(0, 0, 4, 4);
+  ///   e.clear(ui.rgb(255, 0, 0));
+  ///   print(f"{e.get(2, 2)} {e.get(6, 6)}");   // 16711680 0
+  func clip(x: int, y: int, w: int, h: int) -> void;
+
+  /// 切り抜きをやめて、絵いっぱいに戻す。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(8, 8);
+  ///   e.clip(0, 0, 4, 4);
+  ///   e.clip_off();
+  ///   e.clear(ui.rgb(255, 0, 0));
+  ///   print(e.get(6, 6));   // 16711680
+  func clip_off() -> void;
+
+  /// この絵を PNG にして返す。
+  ///
+  /// 透けているところが1つでもあれば透明つきで、なければ赤緑青だけで書く。
+  /// ui.load_png() で読み戻せる。
+  ///
+  /// 例:
+  ///   var e = ui.canvas(4, 4, ui.rgb(255, 0, 0));
+  ///   var png = e.to_png();
+  ///   print(png.to_hex().starts_with("89504e47"));   // true
+  func to_png() -> bytes;
+}
 
 /// 画面に出す部品。ui.label() などで作り、ui.col / ui.row / ui.grid で組んで ui.show() に渡す。
 ///

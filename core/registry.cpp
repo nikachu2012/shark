@@ -3,16 +3,13 @@
 namespace shark {
 
 int Registry::add(const char* name, NativeFn fn, Type* ret, Type* p0, Type* p1, Type* p2, Type* p3,
-                  Type* p4) {
+                  Type* p4, Type* p5, Type* p6, Type* p7, Type* p8, Type* p9) {
   NativeEntry e;
   e.name = Str(name);
   e.fn = fn;
   e.ret = ret ? ret : types_.t_void();
-  if (p0) e.params.push(p0);
-  if (p1) e.params.push(p1);
-  if (p2) e.params.push(p2);
-  if (p3) e.params.push(p3);
-  if (p4) e.params.push(p4);
+  Type* ps[10] = {p0, p1, p2, p3, p4, p5, p6, p7, p8, p9};
+  for (int i = 0; i < 10; i++) if (ps[i]) e.params.push(ps[i]);
   e_.push(e);
   return e_.size() - 1;
 }

@@ -208,9 +208,50 @@ NativeStatus n_widget_height(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_width_fr(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_height_fr(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_align(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_width(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_height(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_get(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_set(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_clear(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_hline(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_vline(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_line(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_rect(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_fill_rect(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_circle(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_fill_circle(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_blit(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_text(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_draw(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_tri(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_clip(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_clip_off(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_to_png(VM& vm, Value* args, int n, Value& out);
 
 NativeFn builtin_native_method(const Str& cls, const Str& name, const Vec<ParamInfo>& params) {
   int nparams = params.size();
+  if (cls == "Canvas") {
+    // 引数の数だけで決まる（同じ名前で数の違うものは、本体も同じ）
+    if (name == "width" && nparams == 0) return n_canvas_width;
+    if (name == "height" && nparams == 0) return n_canvas_height;
+    if (name == "to_png" && nparams == 0) return n_canvas_to_png;
+    if (name == "clip_off" && nparams == 0) return n_canvas_clip_off;
+    if (name == "get" && nparams == 2) return n_canvas_get;
+    if (name == "set" && nparams == 3) return n_canvas_set;
+    if (name == "clear" && nparams == 1) return n_canvas_clear;
+    if (name == "hline" && nparams == 4) return n_canvas_hline;
+    if (name == "vline" && nparams == 4) return n_canvas_vline;
+    if (name == "line" && nparams == 5) return n_canvas_line;
+    if (name == "rect" && nparams == 5) return n_canvas_rect;
+    if (name == "fill_rect" && nparams == 5) return n_canvas_fill_rect;
+    if (name == "circle" && nparams == 4) return n_canvas_circle;
+    if (name == "fill_circle" && nparams == 4) return n_canvas_fill_circle;
+    if (name == "blit" && nparams == 4) return n_canvas_blit;
+    if (name == "text" && (nparams == 4 || nparams == 5)) return n_canvas_text;
+    if (name == "draw" && (nparams == 3 || nparams == 5)) return n_canvas_draw;
+    if (name == "tri" && nparams == 10) return n_canvas_tri;
+    if (name == "clip" && nparams == 4) return n_canvas_clip;
+  }
   if (cls == "Widget" && nparams == 1) {
     // 幅と高さは、int なら画素、float なら取り分（fr）で、本体が別
     bool fr = params[0].type && params[0].type->kind == T_Float;
