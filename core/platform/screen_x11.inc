@@ -528,7 +528,8 @@ const PlatformScreen kX11Screen = {x11::screen_scale, x11::open, x11::close,
                                   x11::present,      x11::poll, true,
                                   0, 0, 0, 0, 0, 0, 0,   // 文字入力と切り貼りはまだ持たない
                                   0,                     // set_redraw（X11 は止まらないので要らない）
-                                  x11::set_cursor,   x11::set_resizable};
+                                  x11::set_cursor,   x11::set_resizable,
+                                  false};   // 刻みはこちらで作る（眠って起きる）
 
 const PlatformScreen* x11_screen() { return x11::load() ? &kX11Screen : 0; }
 

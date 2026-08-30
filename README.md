@@ -84,7 +84,7 @@ while ui.poll() {
   ui.clear(ui.rgb(0, 20, 40));
   ui.fill_circle(ui.mouse_x(), ui.mouse_y(), 12, ui.rgb(255, 140, 60));
   ui.present();
-  sleep(0.016);
+  ui.frame();                  // 次のこまの刻みまで待つ（sleep で待つと足が出る）
 }
 ```
 

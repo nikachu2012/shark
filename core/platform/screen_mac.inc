@@ -779,7 +779,8 @@ const PlatformScreen kMacScreen = {mac::screen_scale,  mac::open,           mac:
                                   mac::text_input,    mac::text_state,
                                   mac::text_selection, mac::text_select,
                                   mac::text_replace,  mac::clipboard_get,  mac::clipboard_set,
-                                  mac::set_redraw,    mac::set_cursor,     mac::set_resizable};
+                                  mac::set_redraw,    mac::set_cursor,     mac::set_resizable,
+                                  false};   // 刻みはこちらで作る（眠って起きる）
 
 const PlatformScreen* mac_screen() { return mac::load() ? &kMacScreen : 0; }
 

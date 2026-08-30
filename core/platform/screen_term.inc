@@ -399,7 +399,8 @@ int t_scale() { return 1; }
 // こちらで受け皿を持つ必要がない（→ text_input は 0）
 // 端末にマウスの形は無い（set_cursor も 0）
 const PlatformScreen kTermScreen = {t_scale, t_open, t_close, t_present, t_poll, false,
-                                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+                                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                   false};   // 刻みはこちらで作る（眠って起きる）
 
 const PlatformScreen* term_screen() { return &kTermScreen; }
 

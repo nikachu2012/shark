@@ -83,7 +83,7 @@ func main() -> int {
 
     draw_bar(colors, pick);
     ui.present();
-    sleep(0.016);
+    ui.frame();
   }
   ui.close();
   print("おしまい");

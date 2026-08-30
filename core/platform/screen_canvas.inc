@@ -876,4 +876,5 @@ const PlatformScreen kCanvasScreen = {
     canvas::text_select,    canvas::text_replace,   canvas::clipboard_get,
     canvas::clipboard_set,
     0,                      // 窓の縁を引いている間の描き直しは要らない（ブラウザは止まらない）
-    canvas::set_cursor,     canvas::set_resizable};
+    canvas::set_cursor,     canvas::set_resizable,
+    true};                  // 刻みは requestAnimationFrame が握っている（app.js）

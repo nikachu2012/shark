@@ -919,7 +919,7 @@ func main() -> int {
     ui.text(4, 4, "press esc", ui.rgb(255, 255, 255));
 
     ui.present();                          // 3. 画面に出す
-    sleep(0.016);
+    ui.frame();                            // 4. 次のこまの刻みまで待つ
   }
   ui.close();
   return 0;

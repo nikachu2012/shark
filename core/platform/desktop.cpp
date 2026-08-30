@@ -523,6 +523,7 @@ struct ScreenInit {
     kScreen.set_redraw = s_set_redraw;
     kScreen.set_cursor = s_set_cursor;
     kScreen.set_resizable = s_set_resizable;
+    kScreen.host_paced = false;   // 刻みはこちらで作る（眠って起きる）
   }
 };
 ScreenInit g_screen_init;

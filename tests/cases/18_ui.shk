@@ -1,5 +1,6 @@
 // std.ui — 画面が無いところでも、描いた結果は面に残る（spec/library/ui.md）
 import std.ui;
+import std.time;
 
 // 宣言的な入り口（ui.run）に渡すもの
 var t_count = 0;
@@ -332,6 +333,18 @@ func main() -> int {
   _ = ui.poll();
   ui.present();
   print("cursor ok");
+
+  // --- こまの速さ（ui.frame）---
+  // 刻限を決めて待つので、5こまぶんは必ず4こまぶん以上かかる。
+  // 画面が無いところでは host_paced も無いので、刻限ちょうどまで待つ
+  ui.open(8, 8);
+  var t0 = time.monotonic().seconds();
+  for var i in range(5) { ui.frame(120); }
+  var spent = time.monotonic().seconds() - t0;
+  print(f"frame {spent >= 4.0 / 120.0} {spent < 2.0}");
+  // 速さを変えられる。1〜1000 から外れると止まる
+  ui.frame(1000);
+  print("frame ok");
 
   // --- PNG ---
   ui.open(4, 4);

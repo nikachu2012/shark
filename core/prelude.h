@@ -89,7 +89,7 @@ static const char* kUiRunSource =
     "      _ = ui.show(view());\n"
     "    }\n"
     "    ui.present();\n"
-    "    sleep(0.016);\n"
+    "    ui.frame();\n"
     "  }\n"
     "  ui.close();\n"
     "}\n"

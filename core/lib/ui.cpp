@@ -58,7 +58,11 @@ static bool ui_live_redraw(int w, int h);   // 下で定義（窓の縁を引い
 
 static void depth_free();   // 下で定義（奥行きの面）
 
+// 次のこまの刻限（単調時計のナノ秒）。0 はまだ数え始めていない（ui.frame）
+static int64_t g_frame_at = 0;
+
 static void drop_surface() {
+  g_frame_at = 0;
   input_stop();
   depth_free();
   // 形を変えたまま終わらない（窓が閉じても、あとに残る機種がある）
@@ -270,6 +274,47 @@ static NativeStatus u_present(VM& vm, Value* a, int n, Value& out) {
   if (g_visible && platform().screen) platform().screen->present(g_px, g_w, g_h);
   out = mk_void();
   return N_Ok;
+}
+
+// 次のこまの刻限まで待つ。
+//
+// 「1こま描いてから 16ms 眠る」と書くと、**描くのにかかった分だけ足が出る**。
+// ここは眠る長さではなく**刻限**を決めて、そこまで待つので、描くのが速い機種でも
+// 遅い機種でも同じ速さで進む。
+//
+// ホストが刻みを握っている機種（ブラウザの requestAnimationFrame）では、
+// 刻限の少し手前で起きる。刻限のすぐ後ろに起きると、その回のきっかけに間に合わず
+// 次のきっかけまで丸ごと待つことになり、速さが半分になるため。
+// 半こま手前にしてあるのは、描くのにその半分より長くかかっていれば、
+// どのみち間に合っていないから（spec/library/ui.md「こまの速さ」）
+static NativeStatus u_frame(VM& vm, Value* a, int n, Value& out) {
+  if (!need_open(vm)) return N_Panic;
+  TaskState* t = vm.task();
+  if (t->cancel_req) { t->wake_at = 0; return N_Cancel; }
+  if (t->wake_at == 0) {
+    const int64_t fps = n > 0 ? A(a, 0)->i : 60;
+    if (fps < 1 || fps > 1000) {
+      vm.panic(vm.L("こまの速さは 1〜1000 にします", "frame rate must be between 1 and 1000"));
+      return N_Panic;
+    }
+    const int64_t period = 1000000000LL / fps;
+    const int64_t now = platform().monotonic_nanos();
+    if (g_frame_at == 0) g_frame_at = now;
+    g_frame_at += period;
+    if (g_frame_at < now) g_frame_at = now;   // 追いつけていない。刻限を取り直す
+    const PlatformScreen* sc = g_visible ? platform().screen : 0;
+    const int64_t lead = (sc && sc->host_paced) ? period / 2 : 0;
+    const int64_t target = g_frame_at - lead;
+    if (target <= now) { out = mk_void(); return N_Ok; }
+    t->wake_at = target;
+    return N_Wait;
+  }
+  if (platform().monotonic_nanos() >= t->wake_at) {
+    t->wake_at = 0;
+    out = mk_void();
+    return N_Ok;
+  }
+  return N_Wait;
 }
 
 // ------------------------------------------------------------------ 色
@@ -3076,6 +3121,8 @@ void register_ui(Registry& r) {
   r.add("ui.visible", u_visible, tb);
   r.add("ui.scale", u_scale, ti);
   r.add("ui.present", u_present, tv);
+  r.add("ui.frame", u_frame, tv);
+  r.add("ui.frame", u_frame, tv, ti);
 
   r.add("ui.rgb", u_rgb, ti, ti, ti, ti);
   r.add("ui.rgba", u_rgba, ti, ti, ti, ti, ti);
