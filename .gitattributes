@@ -1,0 +1,16 @@
+# 行の終わりは、どの機種でも LF にそろえる。
+#
+# Windows の git は既定（core.autocrlf=true）で取り出すときに CRLF に変える。
+# そうなると tests/*.expected と実行結果が食い違い、sh のスクリプトも
+# 「\r というコマンドは無い」と言われて動かなくなる。
+# ここでそろえておけば、Windows で取り出しても Linux や macOS と同じものになる。
+* text=auto eol=lf
+
+# Windows 用の入り口だけは CRLF（cmd と Windows PowerShell が読むため）
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# 同梱のフォント。中身をいじらせない（改行の置き換えで壊れる）
+*.otf binary
+*.ttf binary
+*.ttc binary

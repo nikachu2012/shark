@@ -34,12 +34,13 @@ func main() -> int {
   print(fmt.truncate("とても長い名前です", 8));
   print(fmt.apply(3.14159, ".3f"));
 
-  print(path.join("data", "fish.json"));
+  // 区切り文字は環境に合わせて変わる（Windows は \）。見比べられるよう / にそろえる
+  print(path.join("data", "fish.json").replace(path.separator(), "/"));
   print(path.dir("data/fish.json"));
   print(path.name("data/fish.json"));
   print(path.stem("data/fish.json"));
   print(path.ext("data/fish.json"));
-  print(path.normalize("a/b/../c"));
+  print(path.normalize("a/b/../c").replace(path.separator(), "/"));
 
   var j = try_parse("{\"items\":[{\"name\":\"さめ\",\"size\":400}]}");
   print(j["items"][0]["name"].string() ?? "×");

@@ -14,6 +14,14 @@ import subprocess
 import sys
 import time
 
+# Windows の端末は既定が UTF-8 ではない。Shark も、この道具の知らせも UTF-8 なので、
+# 出す側と読む側の両方をそろえておく（そろえないと日本語が化け、読むときは落ちる）
+if sys.platform == 'win32':
+    import ctypes
+    ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 ROOT = os.path.dirname(os.path.abspath(os.path.dirname(__file__)))
 BENCH = os.path.join(ROOT, "bench")
 BUILD = os.path.join(BENCH, "build")
@@ -31,12 +39,25 @@ CASES = [
 
 
 def sh(cmd):
-    return subprocess.run(cmd, capture_output=True, text=True)
+    return subprocess.run(cmd, capture_output=True, text=True,
+                          encoding='utf-8', errors='replace')
+
+
+def need_cc():
+    """C のコンパイラ（cc）があるか。無ければ、入れ方を伝えて終わる"""
+    if shutil.which("cc"):
+        return
+    print("C のコンパイラ（cc）が見つかりません。速さ比べには C も要ります。")
+    if sys.platform == 'win32':
+        print("  Windows では MSYS2（pacman -S mingw-w64-x86_64-gcc）か")
+        print("  LLVM（clang）を入れて、cc として呼べるようにしてください。")
+        print("  Visual Studio の cl.exe は、渡す指定が違うので使えません。")
+    sys.exit(1)
 
 
 def build_c(name):
     os.makedirs(BUILD, exist_ok=True)
-    out = os.path.join(BUILD, name)
+    out = os.path.join(BUILD, name + (".exe" if sys.platform == 'win32' else ""))
     src = os.path.join(BENCH, "c", name + ".c")
     r = sh(["cc", "-O2", "-o", out, src])
     if r.returncode != 0:
@@ -51,7 +72,8 @@ def measure(cmd):
     out = None
     for _ in range(REPEAT):
         t0 = time.perf_counter()
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           encoding='utf-8', errors='replace')
         dt = time.perf_counter() - t0
         if r.returncode != 0:
             return None, "（失敗）" + r.stderr.strip()[:200]
@@ -65,9 +87,14 @@ def main():
     cases = [c for c in CASES if not want or c[0] in want]
 
     shark = os.path.join(ROOT, "shark")
+    if not os.path.exists(shark) and os.path.exists(shark + ".exe"):
+        shark += ".exe"   # Windows
+
     if not os.path.exists(shark):
         print("先に make してください")
         sys.exit(1)
+
+    need_cc()
 
     print("環境")
     print("  OS       :", platform.platform())

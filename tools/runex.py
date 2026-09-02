@@ -15,6 +15,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import shkdoc  # noqa: E402
 
+# Windows の端末は既定が UTF-8 ではない。Shark も、この道具の知らせも UTF-8 なので、
+# 出す側と読む側の両方をそろえておく（そろえないと日本語が化け、読むときは落ちる）
+if sys.platform == 'win32':
+    import ctypes
+    ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 
 def items_of(page):
     for it in page['items']:
@@ -29,6 +37,9 @@ def main():
     show = '--show' in only
     only = [o for o in only if o != '--show']
     shark = os.path.join(ROOT, 'shark')
+    if not os.path.exists(shark) and os.path.exists(shark + '.exe'):
+        shark += '.exe'   # Windows
+
     pages = shkdoc.parse(ROOT)
     ok = bad = skip = missing = 0
     work = tempfile.mkdtemp(prefix='shkdoc-')
@@ -53,6 +64,7 @@ def main():
                 # std.ui の例で窓が開かないようにする（spec/library/ui.md）
                 env = dict(os.environ, SHARK_UI='off')
                 p = subprocess.run([shark, 'run', path], capture_output=True, text=True,
+                                   encoding='utf-8', errors='replace',
                                    timeout=20, cwd=work, stdin=subprocess.DEVNULL, env=env)
             except subprocess.TimeoutExpired:
                 bad += 1

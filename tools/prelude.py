@@ -6,6 +6,13 @@
 # コアはファイルを読まないので、Shark で書いた部分は埋め込んで持つ。
 # 直すのは stdlib/prelude.shk の方で、core/prelude.h は作られたもの。
 import os
+import sys
+
+# Windows の端末は既定が UTF-8 ではない。知らせが化けないようにそろえる
+if sys.platform == 'win32':
+    import ctypes
+    ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, 'stdlib/prelude.shk')
@@ -61,7 +68,9 @@ def main():
     # 宣言的に書くときの入り口（std.ui を入れたときだけ読む）
     emit(out, 'kUiRunSource', ui)
     out.append(TAIL)
-    with open(OUT, 'w', encoding='utf-8') as f:
+    # 行の終わりは LF に固定する（Windows の既定は CRLF で、
+    # そのままだと機種ごとに違う core/prelude.h ができてしまう）
+    with open(OUT, 'w', encoding='utf-8', newline='\n') as f:
         f.write(''.join(out))
     print('core/prelude.h（%d 行 + ui %d 行）' % (len(body), len(ui)))
 

@@ -15,6 +15,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import shkdoc  # noqa: E402
 
+# Windows の端末は既定が UTF-8 ではない。Shark も、この道具の知らせも UTF-8 なので、
+# 出す側と読む側の両方をそろえておく（そろえないと日本語が化け、読むときは落ちる）
+if sys.platform == 'win32':
+    import ctypes
+    ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 
 def esc(s):
     return html.escape(s, quote=True)
@@ -247,12 +255,12 @@ ul.index a:hover { text-decoration: underline; }
 def build(root, out_dir, stdlib='stdlib'):
     pages = shkdoc.parse(root, stdlib)
     os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, 'style.css'), 'w', encoding='utf-8') as f:
+    with open(os.path.join(out_dir, 'style.css'), 'w', encoding='utf-8', newline='\n') as f:
         f.write(STYLE)
-    with open(os.path.join(out_dir, 'index.html'), 'w', encoding='utf-8') as f:
+    with open(os.path.join(out_dir, 'index.html'), 'w', encoding='utf-8', newline='\n') as f:
         f.write(render_index(pages))
     for page in pages:
-        with open(os.path.join(out_dir, page['file'] + '.html'), 'w', encoding='utf-8') as f:
+        with open(os.path.join(out_dir, page['file'] + '.html'), 'w', encoding='utf-8', newline='\n') as f:
             f.write(render_page(page, pages))
     return pages
 
