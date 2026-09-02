@@ -42,7 +42,6 @@ HCURSOR (WINAPI* LoadCursorW_)(HINSTANCE, LPCWSTR) = 0;
 HCURSOR (WINAPI* SetCursor_)(HCURSOR) = 0;
 UINT (WINAPI* MapVirtualKeyW_)(UINT, UINT) = 0;
 SHORT (WINAPI* GetKeyState_)(int) = 0;
-int (WINAPI* GetSystemMetrics_)(int) = 0;
 BOOL (WINAPI* OpenClipboard_)(HWND) = 0;
 BOOL (WINAPI* CloseClipboard_)(void) = 0;
 BOOL (WINAPI* EmptyClipboard_)(void) = 0;
@@ -137,7 +136,6 @@ bool load() {
   grab(lib_user, &SetCursor_, "SetCursor");
   grab(lib_user, &MapVirtualKeyW_, "MapVirtualKeyW");
   grab(lib_user, &GetKeyState_, "GetKeyState");
-  grab(lib_user, &GetSystemMetrics_, "GetSystemMetrics");
   grab(lib_user, &OpenClipboard_, "OpenClipboard");
   grab(lib_user, &CloseClipboard_, "CloseClipboard");
   grab(lib_user, &EmptyClipboard_, "EmptyClipboard");
@@ -189,21 +187,7 @@ int screen_scale() {
   return s < 1 ? 1 : (s > 4 ? 4 : s);
 }
 
-// 画面ぜんたいの大きさ（画素）。ui.scale() が「どれだけ大きく描くか」を決めるのに使う。
-// 細かさを OS に伝えたあとなので、返るのは画面の画素そのもの
-bool screen_size(int* w, int* h) {
-  if (!load() || !GetSystemMetrics_) return false;
-  int sw = GetSystemMetrics_(0);   // SM_CXSCREEN
-  int sh = GetSystemMetrics_(1);   // SM_CYSCREEN
-  if (sw <= 0 || sh <= 0) return false;
-  *w = sw;
-  *h = sh;
-  return true;
-}
-
-// 面が小さいときだけ、整数倍に広げる（大きい面は画面の画素と1対1）。
-// ui.scale() を掛けて面を取れば、たいてい広げる手前の大きさになるので、
-// ここが効くのは「倍率を使わずに小さい面を頼んだ」ときだけ
+// 面が小さいときだけ、整数倍に広げる（大きい面は画面の画素と1対1）
 int pick_scale(int w, int h) {
   int s = 1;
   while (s < 6 && w * (s + 1) <= 640 && h * (s + 1) <= 480) s++;
@@ -913,8 +897,7 @@ const PlatformScreen kWinScreen = {win::screen_scale,  win::open,  win::close,
                                    win::clipboard_get, win::clipboard_set,
                                    win::set_redraw,
                                    win::set_cursor,    win::set_resizable,
-                                   false,              // 刻みはこちらで作る（眠って起きる）
-                                   win::screen_size};
+                                   false};   // 刻みはこちらで作る（眠って起きる）
 
 const PlatformScreen* win_screen() { return win::load() ? &kWinScreen : 0; }
 

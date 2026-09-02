@@ -810,17 +810,6 @@ void s_set_cursor(int kind) {
   if (g_active && g_active->set_cursor) g_active->set_cursor(kind);
 }
 
-// 画面ぜんたいの大きさ。細かさと同じく**開く前にも呼べる**。
-// 窓を開かないと決まっているときは「言えない」を返す（見えない面に画面は無い）
-bool s_screen_size(int* w, int* h) {
-  if (ui_off()) return false;
-  if (g_active && g_active->screen_size) return g_active->screen_size(w, h);
-  if (const PlatformScreen* m = mac_screen()) if (m->screen_size) return m->screen_size(w, h);
-  if (const PlatformScreen* v = win_screen()) if (v->screen_size) return v->screen_size(w, h);
-  if (const PlatformScreen* x = x11_screen()) if (x->screen_size) return x->screen_size(w, h);
-  return false;
-}
-
 // 画面の細かさ。**開く前にも呼べる**ので、まだ選んでいなければ開けそうな順に尋ねる。
 // 窓を開かないと決まっているとき（SHARK_UI=off）は 1。見えない面に細かさは無い
 int s_scale() {
@@ -852,7 +841,6 @@ struct ScreenInit {
     kScreen.set_cursor = s_set_cursor;
     kScreen.set_resizable = s_set_resizable;
     kScreen.host_paced = false;   // 刻みはこちらで作る（眠って起きる）
-    kScreen.screen_size = s_screen_size;
   }
 };
 ScreenInit g_screen_init;

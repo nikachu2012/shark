@@ -408,22 +408,6 @@ Sz view_size(Obj view) {
   return r.size;
 }
 
-// 画面ぜんたいの大きさ（画素）。ui.scale() が「どれだけ大きく描くか」を決めるのに使う。
-// frame は**点**で返るので、画面の細かさを掛けて画素に直す。窓を開く前にも呼べる
-bool screen_size(int* w, int* h) {
-  if (!load()) return false;
-  Obj scr = send(C("NSScreen"), "mainScreen");
-  if (!scr) return false;
-  Sz z = view_size(scr);
-  int k = screen_scale();
-  int sw = (int)(z.w * (double)k + 0.5);
-  int sh = (int)(z.h * (double)k + 0.5);
-  if (sw <= 0 || sh <= 0) return false;
-  *w = sw;
-  *h = sh;
-  return true;
-}
-
 // 窓の縁を引いている間に呼ばれる刻み（open で掛けたタイマー）。
 // 引いている間は sendEvent: から戻れず、Shark の側は描き直せない。層の伸び縮み
 // （contentsGravity）に任せると絵が引き伸ばされるので、ここで**等倍のまま**出し直す。
@@ -796,8 +780,7 @@ const PlatformScreen kMacScreen = {mac::screen_scale,  mac::open,           mac:
                                   mac::text_selection, mac::text_select,
                                   mac::text_replace,  mac::clipboard_get,  mac::clipboard_set,
                                   mac::set_redraw,    mac::set_cursor,     mac::set_resizable,
-                                  false,              // 刻みはこちらで作る（眠って起きる）
-                                  mac::screen_size};
+                                  false};   // 刻みはこちらで作る（眠って起きる）
 
 const PlatformScreen* mac_screen() { return mac::load() ? &kMacScreen : 0; }
 

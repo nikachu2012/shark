@@ -306,9 +306,8 @@ for (;;) {
 - 画素は `0x00RRGGBB` の並びのまま `StretchDIBits` で貼る。上下は
   `biHeight` を負にして上の行から並べる。拡大は混ぜない（`COLORONCOLOR`）
 - **HiDPI**：`SetProcessDpiAwarenessContext` で「細かさはこちらが見る」と伝えるので、
-  窓の中身の大きさは画面の画素そのもの。細かさは `GetDpiForWindow`（96 が等倍）、
-  画面ぜんたいの大きさは `GetSystemMetrics` で返す。`ui.scale()` はこの2つから
-  「描くときに掛ける倍率」を作る（下の「描く倍率」）
+  窓の中身の大きさは画面の画素そのもの。細かさは `GetDpiForWindow`（96 が等倍）で、
+  `ui.scale()` が返す
 - 出来事は `PeekMessage` で**待たずに**取り、`TranslateMessage` に
   「打たれた文字」（`WM_CHAR`）を作ってもらう。上下に分かれた字（絵文字など）は
   片割れを覚えておいて組み立てる
