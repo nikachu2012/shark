@@ -217,16 +217,23 @@ void Engine::run_only(int func_index, bool with_inits) {
 }
 
 // ------------------------------------------------------------------ 診断の整形
+// 行末の改行は落とす。Windows で書かれたソースは行が \r\n で終わるので、
+// 残したままだと診断に見えない \r が混ざる
+static Str trim_cr(const Str& s) {
+  if (s.size() > 0 && s[s.size() - 1] == '\r') return s.sub(0, s.size() - 1);
+  return s;
+}
+
 static Str line_of(const Str& src, int line) {
   int cur = 1, start = 0;
   for (int i = 0; i < src.size(); i++) {
     if (cur == line && (src[i] == '\n' || i == src.size() - 1)) {
       int end = src[i] == '\n' ? i : i + 1;
-      return src.sub(start, end - start);
+      return trim_cr(src.sub(start, end - start));
     }
     if (src[i] == '\n') { cur++; start = i + 1; }
   }
-  if (cur == line && start < src.size()) return src.sub(start, src.size() - start);
+  if (cur == line && start < src.size()) return trim_cr(src.sub(start, src.size() - start));
   return Str();
 }
 
