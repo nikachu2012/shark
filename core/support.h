@@ -94,6 +94,10 @@ class Vec {
     o.d_ = d; o.n_ = n; o.c_ = c;
   }
 
+  // 実行時コンパイルが、作った機械語から中身を読むために使う（core/jit.cpp）
+  static int data_offset() { return (int)offsetof(Vec, d_); }
+  static int size_offset() { return (int)offsetof(Vec, n_); }
+
  private:
   T* d_; int n_; int c_;
 };

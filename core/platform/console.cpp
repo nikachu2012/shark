@@ -35,8 +35,10 @@ const Platform kConsole = {
         //   埋めるまで std.crypto の乱数は実行時エラーになる。ハッシュは使える）
     0,  // 画面なし（機種の描画先を持っているなら PlatformScreen を埋める。
         //   埋めるまで std.ui は見えない面に描くだけになる → spec/library/ui.md）
-    0   // 字なし（機種が字を描いてくれるなら PlatformFont を埋める。
+    0,  // 字なし（機種が字を描いてくれるなら PlatformFont を埋める。
         //   埋めるまで std.ui の字は内蔵の 5×7（ASCII）だけになる）
+    0   // 動的コードなし（実行できるメモリを持っているなら PlatformExec を埋める。
+        //   埋めるまで実行時コンパイルはせず、常に仮想マシンで動く → spec/runtime/execution.md）
 };
 
 }  // namespace

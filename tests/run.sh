@@ -13,18 +13,20 @@ shark="$root/shark"
 pass=0
 fail=0
 
+# $2 は shark に渡す足しの指定（実行時コンパイルの入れ替えに使う）
 run_dir() {
   dir="$1"
+  how="${2:-}"
   cd "$root/$dir" || exit 1
   for f in *.shk; do
     exp="${f%.shk}.expected"
     [ -f "$exp" ] || continue
-    got=$("$shark" run --no-color "$f" 2>&1)
+    got=$("$shark" run --no-color $how "$f" 2>&1)
     if [ "$got" = "$(cat "$exp")" ]; then
       pass=$((pass + 1))
     else
       fail=$((fail + 1))
-      echo "fail  $dir/$f"
+      echo "fail  $dir/$f $how"
       printf '%s\n' "$got" | diff -u "$exp" - | sed -n '3,12p'
     fi
   done
@@ -33,6 +35,15 @@ run_dir() {
 
 run_dir tests/cases
 run_dir tests/errors
+
+# 実行時コンパイル（spec/runtime/execution.md）。
+# 「どちらで実行しても結果は同じ」を見るため、同じものを両極で走らせる。
+#   --jit off     仮想マシンだけ
+#   --jit always  1回目から機械語にする（機械語を作れない機種では、ただの仮想マシン）
+run_dir tests/cases "--jit off"
+run_dir tests/errors "--jit off"
+run_dir tests/cases "--jit always"
+run_dir tests/errors "--jit always"
 
 cd "$root/tests" || exit 1
 
@@ -63,6 +74,17 @@ if [ -x "$root/tests/bytecheck" ]; then
   else
     fail=$((fail + 1))
     cat /tmp/shark_bytecheck.txt
+  fi
+fi
+
+# 止まらないループでも刻みでホストに返るか（C++ 側）。
+# 実行時コンパイルの側が回り続けると、ここで戻ってこなくなる
+if [ -x "$root/tests/stepcheck" ]; then
+  if "$root/tests/stepcheck" > /tmp/shark_stepcheck.txt 2>&1; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    cat /tmp/shark_stepcheck.txt
   fi
 fi
 

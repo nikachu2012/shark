@@ -204,7 +204,8 @@ const Platform kWeb = {
     w_write_out, w_write_err, w_read_line, w_exit,
     &kFile, &kOS, &kRandom,
     &kCanvasScreen,    // std.ui の面は canvas に出す（spec/library/ui.md）
-    &kCanvasFont};     // 字もブラウザに描いてもらう
+    &kCanvasFont,      // 字もブラウザに描いてもらう
+    0};                // 動的コードは持たない（WebAssembly なので機械語は作らない）
 
 }  // namespace
 

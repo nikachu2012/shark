@@ -20,6 +20,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -48,6 +50,58 @@ void* d_alloc(size_t n) { return malloc(n ? n : 1); }
 void* d_realloc(void* p, size_t n) { return realloc(p, n ? n : 1); }
 void  d_free(void* p) { free(p); }
 void  d_fatal(const char* msg) { fputs(msg, stderr); fputc('\n', stderr); abort(); }
+
+// --- 動的コード（実行時コンパイル用の実行可能メモリ）-----------------------
+//
+// 機械語を書いて、そこへ飛べるようにする（spec/runtime/platform.md）。
+// Apple Silicon は「書ける」と「実行できる」を同時に立てられないので、
+// MAP_JIT で場所を取り、書く間だけ書き込みを許す。
+// Windows はまだ用意していない（exec が 0 なので、常に仮想マシンで動く）。
+#if !defined(_WIN32)
+void* x_alloc(size_t n) {
+  int prot = PROT_READ | PROT_WRITE;
+  int flags = MAP_PRIVATE | MAP_ANON;
+#if defined(__APPLE__) && defined(__aarch64__)
+  prot |= PROT_EXEC;
+  flags |= MAP_JIT;
+#endif
+  void* p = mmap(0, n, prot, flags, -1, 0);
+  return p == MAP_FAILED ? 0 : p;
+}
+#if !(defined(__APPLE__) && defined(__aarch64__))
+// mprotect は頁（ページ）の単位でしか効かないので、頁の切れ目まで広げる
+void x_protect(void* p, size_t n, int prot) {
+  size_t ps = (size_t)getpagesize();
+  uintptr_t a = (uintptr_t)p & ~(uintptr_t)(ps - 1);
+  uintptr_t e = ((uintptr_t)p + n + ps - 1) & ~(uintptr_t)(ps - 1);
+  mprotect((void*)a, (size_t)(e - a), prot);
+}
+#endif
+void x_unlock(void* p, size_t n) {
+#if defined(__APPLE__) && defined(__aarch64__)
+  (void)p;
+  (void)n;
+  pthread_jit_write_protect_np(0);
+#else
+  x_protect(p, n, PROT_READ | PROT_WRITE);
+#endif
+}
+void x_commit(void* p, size_t n) {
+#if defined(__APPLE__) && defined(__aarch64__)
+  pthread_jit_write_protect_np(1);
+#else
+  x_protect(p, n, PROT_READ | PROT_EXEC);
+#endif
+  // 書いたものが命令として読まれるように、命令の置き場を合わせる
+  __builtin___clear_cache((char*)p, (char*)p + n);
+}
+void x_free(void* p, size_t n) { munmap(p, n); }
+
+const PlatformExec kExec = {x_alloc, x_unlock, x_commit, x_free};
+const PlatformExec* desktop_exec() { return &kExec; }
+#else
+const PlatformExec* desktop_exec() { return 0; }
+#endif
 
 int64_t d_now() {
 #if defined(_WIN32)
@@ -524,7 +578,8 @@ const Platform kDesktop = {
     d_now, d_mono, d_sleep, d_local_offset,
     d_write_out, d_write_err, d_read_line, d_exit,
     &kFile, &kOS, &kRandom, desktop_screen(),
-    0};   // 字は FreeType が読む（core/lib/font_ft.inc）ので、移植層は持たない
+    0,    // 字は FreeType が読む（core/lib/font_ft.inc）ので、移植層は持たない
+    desktop_exec()};
 
 }  // namespace
 

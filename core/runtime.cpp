@@ -8,6 +8,8 @@ Runtime::Runtime(const Config& cfg) : cfg_(cfg), reg_(types_), prog_(0), ok_(fal
   vm_.stack_size = cfg.stack_size;
   vm_.task_stack_size = cfg.task_stack_size;
   vm_.max_call_depth = cfg.max_call_depth;
+  vm_.jit_on = cfg.jit;
+  vm_.jit_threshold = cfg.jit_threshold;
   vm_.diag = &diag_;
   sk_mem_set_limit(cfg.memory_limit);
   // Engine と同じものを同じ順で入れる。ここが揃っていないと関数の番号が食い違う

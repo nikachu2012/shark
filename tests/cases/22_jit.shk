@@ -1,0 +1,97 @@
+// 実行時コンパイル（spec/runtime/execution.md）。
+// どの行も、何度も通ってから答えを見る。機械語にしても仮想マシンでも同じになること。
+// しきい値を超えるまで回すので、既定のまま走らせても機械語の側を通る
+
+func fib(n: int) -> int {
+  if n < 2 { return n; }
+  return fib(n - 1) + fib(n - 2);
+}
+
+func bump(ref n: int, by: int) { n = n + by; }
+
+func pick(i: int) -> int? {
+  if i % 3 == 0 { return none; }
+  return i;
+}
+
+class Fish {
+  public var size: int;
+  public var weight: float;
+  public func init(size: int, weight: float) { this.size = size; this.weight = weight; }
+  public func grow(n: int) -> int { this.size += n; return this.size; }
+}
+
+func main() -> int {
+  // 整数の計算（あふれの手前まで）
+  var sum = 0;
+  for var i in range(2000) { sum += i % 7 - i / 3 + i * 2; }
+  print(sum);
+
+  // ビット演算とずらし
+  var bits = 0;
+  for var i in range(2000) { bits = (bits | (1 << (i % 63))) ^ (i & 3); }
+  print(bits);
+
+  // 小数
+  var f = 1.0;
+  for var i in range(2000) { f = f * 1.001 - 0.0005; }
+  print(f > 1.0);
+  print(-f < 0.0);
+
+  // 比べもの（int どうしと、そうでないもの）
+  var c = 0;
+  for var i in range(2000) {
+    if i < 1000 { c += 1; }
+    if i >= 1000 { c += 2; }
+    if "さめ" != "たこ" { c += 4; }
+    if 1.5 <= 1.5 { c += 8; }
+  }
+  print(c);
+
+  // 配列・添字・入れ物の中身
+  var xs: list<int> = [];
+  for var i in range(2000) { xs.push(i * 2); }
+  var t = 0;
+  for var i in range(2000) { t += xs[i]; }
+  print(t);
+
+  // クラスの中身とメソッド
+  var fish = Fish(1, 0.5);
+  for var i in range(2000) { _ = fish.grow(1); }
+  print(fish.size);
+  print(fish.weight);
+
+  // 借用（ref）
+  var n = 0;
+  for var i in range(2000) { bump(ref n, 3); }
+  print(n);
+
+  // 値なし（T?）
+  var got = 0;
+  var skipped = 0;
+  for var i in range(2000) {
+    if var v = pick(i) { got += v; } else { skipped += 1; }
+  }
+  print(got);
+  print(skipped);
+
+  // 再帰（呼び出しと戻り）
+  print(fib(21));
+
+  // 文字列づくりと key-value
+  var m: map<string, int> = {};
+  for var i in range(2000) { m["k" + string(i % 8)] = i; }
+  var mt = 0;
+  for var k in m.keys() { mt += m[k]; }
+  print(mt);
+
+  // あふれたら、仮想マシンと同じところで止まること
+  var big = 1;
+  var steps = 0;
+  for var i in range(2000) {
+    if big > 1000000000 { big = 1; steps += 1; }
+    big = big * 3;
+  }
+  print(steps);
+  return 0;
+}

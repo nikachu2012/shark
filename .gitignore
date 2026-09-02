@@ -8,6 +8,7 @@
 /examples/embed/stage_bytecode.h
 /tests/memcheck
 /tests/bytecheck
+/tests/stepcheck
 /bench/build/
 /docs/reference/
 /web/dist/

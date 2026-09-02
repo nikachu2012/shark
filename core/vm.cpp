@@ -2,6 +2,7 @@
 
 #include <math.h>
 
+#include "jit.h"
 #include "opcodes.h"
 #include "platform/platform.h"
 
@@ -47,15 +48,22 @@ void chan_obj_dispose(ChanObj* o) { chan_unref(o->c); }
 VM::VM()
     : prog(0), reg(0), diag(0), cur(0), status(SK_Running), exit_code(0), error_line(0),
       stack_size(65536), task_stack_size(4096), max_call_depth(10000), started_at(0), aborted(false), rng_state(0x853c49e6748fea9bull),
-      steps_since_switch(0), has_panic(false), idle_hint(false), input_wait(false), boot_pos(0) {}
+      steps_since_switch(0), jit(0), jit_on(true), jit_threshold(0), jit_last(0),
+      has_panic(false), idle_hint(false), input_wait(false), boot_pos(0) {}
 
 VM::~VM() {
+  jit_free(jit);
   for (int i = 0; i < tasks.size(); i++) task_unref(tasks[i]);
   for (int i = 0; i < globals.size(); i++) val_release(globals[i]);
   obj_release_pool_free();
 }
 
 void VM::set_program(Program* p, Registry* r) {
+  if (p != prog) {
+    // 前のプログラムの機械語は、関数ごと消えるので捨てる
+    jit_clear(jit);
+    jit_last = 0;
+  }
   prog = p;
   reg = r;
 }
@@ -86,6 +94,9 @@ Value VM::default_of(Type* t) {
 void VM::start(bool with_inits) {
   // ここから先に確保するものは「実行中のプログラムのぶん」として数える
   MemRunScope run_scope;
+  // 実行時コンパイルの用意（機種が持っていなければ 0 のまま）
+  if (jit_on && !jit) jit = jit_new();
+  jit_last = 0;
   // 読み込み直しに備えて、前回のぶんを離してから始める
   for (int i = 0; i < tasks.size(); i++) task_unref(tasks[i]);
   tasks.clear();
@@ -106,6 +117,7 @@ void VM::start(bool with_inits) {
   if (boot.size() == 0) { status = SK_Finished; return; }
   // 最初の関数を呼ぶ
   FuncInfo* f = prog->funcs[boot[boot_pos++]];
+  if (jit) jit_hot(jit, *this, f);
   Frame fr;
   fr.fn = f;
   fr.ip = 0;
@@ -245,6 +257,8 @@ bool VM::switch_task() {
 
 // 読み込み直しの前に、抱えているものを全部離す
 void VM::reset() {
+  jit_clear(jit);
+  jit_last = 0;
   for (int i = 0; i < tasks.size(); i++) task_unref(tasks[i]);
   tasks.clear();
   for (int i = 0; i < globals.size(); i++) val_release(globals[i]);
@@ -302,6 +316,8 @@ bool VM::call_function(int fidx, int nargs) {
     push(out);
     return true;
   }
+  // 何度も呼ばれる関数は機械語にする（spec/runtime/execution.md）
+  if (jit && jit_hot(jit, *this, f)) jit_last = 0;
   Frame fr;
   fr.fn = f;
   fr.ip = 0;
@@ -368,6 +384,7 @@ RunStatus VM::step(int budget) {
       if (cur == 0 && boot_pos < boot.size()) {
         val_release(res);
         FuncInfo* f = prog->funcs[boot[boot_pos++]];
+        if (jit && jit_hot(jit, *this, f)) jit_last = 0;
         Frame fr;
         fr.fn = f;
         fr.ip = 0;
@@ -393,6 +410,16 @@ RunStatus VM::step(int budget) {
 
     Frame& fr0 = t->frames.back();
     FuncInfo* fn = fr0.fn;
+    // 機械語があれば、そちらで走らせる（spec/runtime/execution.md）。
+    // 直前に見た関数と同じなら、もう無いと分かっているので見に行かない
+    if (fn != jit_last) {
+      jit_last = fn;
+      if (jit && jit_run(jit, *this, t, fr0, &budget)) {
+        budget--;   // 入るたびに1つ使う（何も進まなかったときも、必ず前へ出るように）
+        jit_last = 0;
+        continue;
+      }
+    }
     const uint8_t* code = fn->code.data();
     int ip = fr0.ip;
     int base = fr0.base;
@@ -746,7 +773,12 @@ RunStatus VM::step(int budget) {
       }
 
       // --- 分岐 ---
-      case OP_JUMP: { ip += 4; int a = RD_I32(ip); fr0.ip = a; break; }
+      case OP_JUMP: {
+        ip += 4; int a = RD_I32(ip); fr0.ip = a;
+        // ループが1回転するたびに数える（熱くなったら機械語にする）
+        if (jit && a <= op_start && jit_hot(jit, *this, fn)) jit_last = 0;
+        break;
+      }
       case OP_JUMP_IF_FALSE: {
         ip += 4; int a = RD_I32(ip);
         Value v = t->stack[t->sp - 1];
@@ -1171,48 +1203,52 @@ RunStatus VM::step(int budget) {
     }
 
     if (op != OP_CALL_NATIVE && op != OP_PARALLEL) steps_since_switch = 0;
-
-    // メモリを使いすぎていないか、命令の切れ目ごとに見る
-    if (!has_panic && sk_mem_over()) {
-      panic(L(Str("メモリを使いすぎました\n  上限は ") +
-                str_from_int((int64_t)(sk_mem_limit() >> 20)) +
-                " MB です。増え続ける配列や文字列がないか見てください",
-              Str("out of memory\n  the limit is ") +
-                str_from_int((int64_t)(sk_mem_limit() >> 20)) +
-                " MB; look for a list or string that keeps growing"));
-    }
-
-    // panic の後始末
-    if (has_panic) {
-      has_panic = false;
-      TaskState* pt = tasks[cur];
-      pt->panic_msg = pending_panic;
-      pt->panic_trace = build_trace();
-      if (cur == 0) {
-        status = SK_Error;
-        error_message = pending_panic;
-        error_trace = pt->panic_trace;
-        if (pt->frames.size() > 0) {
-          Frame& f = pt->frames.back();
-          error_line = (f.ip > 0 && f.ip - 1 < f.fn->lines.size()) ? (int)f.fn->lines[f.ip - 1] : 0;
-          error_file = f.fn->file.size() ? f.fn->file : f.fn->module;
-        }
-        // 止めたあとは、抱えていた値を離す（メモリを使いすぎて止まったときのため）
-        pt->frames.clear();
-        for (int i = 0; i < pt->sp; i++) val_release(pt->stack[i]);
-        pt->sp = 0;
-        pt->places.clear();
-        return status;
-      }
-      // タスクの panic は、そのタスクだけを止める
-      pt->status = TS_Panicked;
-      pt->frames.clear();
-      for (int i = 0; i < pt->sp; i++) val_release(pt->stack[i]);
-      pt->sp = 0;
-      if (!switch_task()) return status;
-    }
+    if (!after_step()) return status;
   }
   return status;
+}
+
+// 命令を1つ実行したあとの後始末。false なら step() はそのまま戻る。
+// 機械語（jit.cpp）からも、同じ意味になるように呼ぶ
+bool VM::finish_instruction() {
+  // メモリを使いすぎていないか、命令の切れ目ごとに見る
+  if (!has_panic && sk_mem_over()) {
+    panic(L(Str("メモリを使いすぎました\n  上限は ") +
+              str_from_int((int64_t)(sk_mem_limit() >> 20)) +
+              " MB です。増え続ける配列や文字列がないか見てください",
+            Str("out of memory\n  the limit is ") +
+              str_from_int((int64_t)(sk_mem_limit() >> 20)) +
+              " MB; look for a list or string that keeps growing"));
+  }
+  if (!has_panic) return true;
+
+  // panic の後始末
+  has_panic = false;
+  TaskState* pt = tasks[cur];
+  pt->panic_msg = pending_panic;
+  pt->panic_trace = build_trace();
+  if (cur == 0) {
+    status = SK_Error;
+    error_message = pending_panic;
+    error_trace = pt->panic_trace;
+    if (pt->frames.size() > 0) {
+      Frame& f = pt->frames.back();
+      error_line = (f.ip > 0 && f.ip - 1 < f.fn->lines.size()) ? (int)f.fn->lines[f.ip - 1] : 0;
+      error_file = f.fn->file.size() ? f.fn->file : f.fn->module;
+    }
+    // 止めたあとは、抱えていた値を離す（メモリを使いすぎて止まったときのため）
+    pt->frames.clear();
+    for (int i = 0; i < pt->sp; i++) val_release(pt->stack[i]);
+    pt->sp = 0;
+    pt->places.clear();
+    return false;
+  }
+  // タスクの panic は、そのタスクだけを止める
+  pt->status = TS_Panicked;
+  pt->frames.clear();
+  for (int i = 0; i < pt->sp; i++) val_release(pt->stack[i]);
+  pt->sp = 0;
+  return switch_task();
 }
 
 }  // namespace shark

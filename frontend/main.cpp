@@ -92,6 +92,10 @@ static void setup(Engine& e) {
   e.set_module_loader(module_loader, 0);
 }
 
+// 実行時コンパイル（--jit）。off で仮想マシンだけ、always は1回目から機械語にする
+static bool g_jit = true;
+static int g_jit_threshold = 0;   // 0 は既定
+
 static size_t g_memory_mb = 64;   // --memory で変えられる
 static bool g_memory_given = false;  // 保存したバイトコードは、作ったときの量を引き継ぐ
 
@@ -113,6 +117,8 @@ static int cmd_run_bytecode(const Str& file, const Str& bytes, Lang lang, bool c
   modules_to_config(h.modules, &cfg);   // 作ったときと同じ組み合わせにする
   cfg.lang = lang;
   cfg.memory_limit = (size_t)(g_memory_given ? (int)g_memory_mb : h.memory_mb) << 20;
+  cfg.jit = g_jit;
+  cfg.jit_threshold = g_jit_threshold;
   Runtime rt(cfg);
   rt.set_io(host_io());
   if (!rt.load(bytes, &err)) {
@@ -147,6 +153,8 @@ static int cmd_run(const Str& file, bool check_only, Lang lang, bool strict, boo
   cfg.lang = lang;
   cfg.strict = strict;
   cfg.memory_limit = g_memory_mb << 20;
+  cfg.jit = g_jit;
+  cfg.jit_threshold = g_jit_threshold;
   Engine e(cfg);
   setup(e);
   const Vec<Diagnostic>& ds = e.load(file, src);
@@ -254,6 +262,8 @@ static int cmd_build(const Str& file, const Str& out_given, bool bytecode_only,
   cfg.lang = lang;
   cfg.strict = strict;
   cfg.memory_limit = g_memory_mb << 20;
+  cfg.jit = g_jit;
+  cfg.jit_threshold = g_jit_threshold;
   Engine e(cfg);
   setup(e);
   const Vec<Diagnostic>& ds = e.load(file, src);
@@ -369,6 +379,8 @@ static int cmd_test(const Str& file, Lang lang, bool color, const Str& filter) {
   Config cfg;
   cfg.lang = lang;
   cfg.memory_limit = g_memory_mb << 20;
+  cfg.jit = g_jit;
+  cfg.jit_threshold = g_jit_threshold;
   Engine e(cfg);
   setup(e);
   const Vec<Diagnostic>& ds = e.load(file, src);
@@ -477,6 +489,8 @@ static void usage() {
       "  --lang ja|en   診断の言語（既定は ja）\n"
       "  --memory <MB>  使ってよいメモリの量。超えたら実行時エラー（既定は 64、0 で上限なし）\n"
       "  --strict       警告もエラーとして扱う\n"
+      "  --jit <mode>   実行時コンパイル。on / off / always（既定は on。\n"
+      "                 always は1回目から機械語にする）\n"
       "  --no-color     色を付けない（環境変数 NO_COLOR でも同じ）\n"
       "\n"
       "build のときだけ:\n"
@@ -517,6 +531,16 @@ int main_impl(int argc, char** argv) {
     if ((a == "-o" || a == "--out") && i + 1 < argc) { out_path = Str(argv[++i]); continue; }
     if (a == "--bytecode") { bytecode_only = true; continue; }
     if (a == "--runtime" && i + 1 < argc) { runtime_path = Str(argv[++i]); continue; }
+    if (a == "--jit" && i + 1 < argc) {
+      Str m(argv[++i]);
+      if (m == "off") g_jit = false;
+      else if (m == "always") g_jit_threshold = 1;   // 1回目から作る（試すため）
+      else if (m != "on") {
+        fprintf(stderr, "--jit には on / off / always を渡します\n");
+        return 2;
+      }
+      continue;
+    }
     if (a == "--no-color") { color = false; continue; }
     if (a == "-h" || a == "--help") { usage(); return 0; }
     rest.push(a);

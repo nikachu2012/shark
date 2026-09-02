@@ -39,7 +39,7 @@ endif
 #   FE_SRC  ソースからバイトコードを作るところ（字句解析・構文解析・型検査・コード生成）
 RT_SRC = \
   core/support.cpp core/value.cpp core/program.cpp core/types.cpp core/diag.cpp \
-  core/vm.cpp core/registry.cpp core/bytecode.cpp core/runtime.cpp \
+  core/vm.cpp core/jit.cpp core/registry.cpp core/bytecode.cpp core/runtime.cpp \
   core/platform/desktop.cpp core/platform/console.cpp \
   core/lib/format.cpp core/lib/builtin.cpp core/lib/math.cpp core/lib/time.cpp \
   core/lib/task.cpp core/lib/fmt.cpp core/lib/path.cpp core/lib/file.cpp \
@@ -56,7 +56,8 @@ VM_FRONT_SRC = frontend/vm_main.cpp
 
 OBJ = $(CORE_SRC:.cpp=.o) $(FRONT_SRC:.cpp=.o)
 VM_OBJ = $(RT_SRC:.cpp=.o) $(VM_FRONT_SRC:.cpp=.o)
-HDR = $(wildcard core/*.h core/platform/*.h core/platform/*.inc core/lib/*.inc frontend/*.h)
+HDR = $(wildcard core/*.h core/*.inc core/platform/*.h core/platform/*.inc core/lib/*.inc \
+                 frontend/*.h)
 
 all: shark sharkvm
 
@@ -99,7 +100,7 @@ sharkvm: $(VM_OBJ)
 %.o: %.cpp $(HDR)
 	$(CXX) $(CORE_FLAGS) -c $< -o $@
 
-test: shark sharkvm tests/memcheck tests/bytecheck
+test: shark sharkvm tests/memcheck tests/bytecheck tests/stepcheck
 	@sh tests/run.sh
 
 # メモリの後始末と上限を見る（tests/run.sh から呼ばれる）
@@ -108,6 +109,10 @@ tests/memcheck: tests/memcheck.o $(CORE_SRC:.cpp=.o)
 
 # 壊れたバイトコードを断るか見る（tests/run.sh から呼ばれる）
 tests/bytecheck: tests/bytecheck.o $(CORE_SRC:.cpp=.o)
+	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
+
+# 止まらないループでも刻みでホストに返るか（tests/run.sh から呼ばれる）
+tests/stepcheck: tests/stepcheck.o $(CORE_SRC:.cpp=.o)
 	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
 
 # コアのソース一覧を出す（web/build.sh が使う）。
@@ -144,7 +149,7 @@ web-test: web
 
 clean:
 	rm -f $(OBJ) $(VM_OBJ) examples/embed/game.o examples/embed/game tests/memcheck.o tests/memcheck shark sharkvm
-	rm -f tests/bytecheck.o tests/bytecheck
+	rm -f tests/bytecheck.o tests/bytecheck tests/stepcheck.o tests/stepcheck
 	rm -f examples/embed/build_stage.o examples/embed/build_stage examples/embed/play_stage.o \
 	      examples/embed/play_stage examples/embed/stage_bytecode.h
 	rm -rf docs/reference

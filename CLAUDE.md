@@ -48,6 +48,7 @@ make bench          # C・Python・Shark の速さ比べ（python3 bench/run.py 
 ```
 core/       実行系。字句解析→構文解析→型検査→コード生成→仮想マシン。C++17、
             -fno-exceptions -fno-rtti、外部ライブラリなし（FreeType のみ任意）
+  jit.cpp     実行時コンパイル（任意機能）。機種ごとの機械語は jit_arm64.inc
   platform/   移植層（desktop / console / web）← 機種ごとに差し替える場所
   lib/        標準ライブラリの実装（*.cpp）。ホスト関数は Engine::register_host() に足す
 frontend/   shark コマンド（main.cpp）と sharkvm（vm_main.cpp）。コアを呼ぶ参考実装
@@ -59,7 +60,7 @@ tests/      .shk と .expected の組 + memcheck / bytecheck（C++ 側の検査�
 
 ### コアは2層に分かれる（Makefile の RT_SRC / FE_SRC）
 
-- **RT_SRC**（実行装置）: vm・bytecode・registry・lib など、バイトコードを動かすのに
+- **RT_SRC**（実行装置）: vm・jit・bytecode・registry・lib など、バイトコードを動かすのに
   要るもの。`sharkvm` はこれだけをリンクし、`shark build` はこれを土台に
   バイトコードを焼き込んで単一バイナリを作る
 - **FE_SRC**（前側）: lexer・parser・check・codegen・shark.cpp。ソースから
@@ -86,6 +87,8 @@ tests/      .shk と .expected の組 + memcheck / bytecheck（C++ 側の検査�
 - `null`・例外・`async` は無い。値なしは `T?`、失敗は `Result<T>`、同時実行は
   `task`（スレッドは使わない）。すべての代入はコピーで、共有は `ref` だけ
 - 無限ループでもホストが固まらないよう、実行は刻んでホストに返る
+- 実行時コンパイルは**任意機能**。作れない機種では仮想マシンのまま動き、結果は変わらない
+  （`--jit off` / `--jit always` で両極を試せる。tests/run.sh が両方で走らせている）
 - 診断は構造化データで返し、直し方まで示す（`--lang ja|en`）。仕様が決めていない
   実装上の決めごとは docs/implementation.md の表にある
 - 未決事項は spec/open-questions.md

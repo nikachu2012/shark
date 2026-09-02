@@ -13,6 +13,8 @@ namespace shark {
 struct Config {
   Lang lang;
   bool strict;        // 警告をエラーとして扱う
+  bool jit;           // 実行時コンパイルを使う（持たない機種では、立てても仮想マシンのまま）
+  int jit_threshold;  // 何回通ったら機械語にするか。0 は既定（spec/open-questions.md の 2）
   int stack_size;       // main の値スタックの大きさ（値の数）
   int task_stack_size;  // task で走らせるものの値スタックの大きさ
   int max_call_depth;   // 呼び出しの深さの上限
@@ -21,7 +23,8 @@ struct Config {
   bool with_file, with_path, with_text, with_fmt, with_json, with_os, with_crypto, with_test,
       with_ui;
   Config()
-      : lang(LANG_JA), strict(false), stack_size(65536), task_stack_size(4096),
+      : lang(LANG_JA), strict(false), jit(true), jit_threshold(0), stack_size(65536),
+        task_stack_size(4096),
         max_call_depth(10000), memory_limit(64u << 20), with_file(true), with_path(true),
         with_text(true), with_fmt(true), with_json(true), with_os(true), with_crypto(true),
         with_test(true), with_ui(true) {}

@@ -12,6 +12,8 @@
 
 namespace shark {
 
+struct JitState;
+
 enum RunStatus { SK_Running = 0, SK_Finished = 1, SK_Error = 2 };
 
 struct Frame {
@@ -83,6 +85,12 @@ struct VM {
   uint64_t rng_state;
   int steps_since_switch;
 
+  // 実行時コンパイル（jit.h）。持たない機種では jit が 0 のまま動く
+  JitState* jit;
+  bool jit_on;          // 使ってよいか（Config で切れる）
+  int jit_threshold;    // 何回通ったら作るか。0 は既定
+  FuncInfo* jit_last;   // 直前に「機械語が無い」と分かった関数。毎命令の見に行きを省く
+
   VM();
   ~VM();
 
@@ -112,6 +120,10 @@ struct VM {
   bool call_function(int fidx, int nargs);
   int  spawn_task(int fidx, int nargs, Value* args);
   bool switch_task();
+  // 命令1つぶんの後始末（メモリの見張りと panic）。false なら step() はそのまま戻る。
+  // 何も起きていないときが大半なので、そこだけここで済ませる
+  bool after_step() { return (!has_panic && !sk_mem_over()) ? true : finish_instruction(); }
+  bool finish_instruction();
   void finish_task(TaskState* t, const Value& result);
 
   Str pending_panic;

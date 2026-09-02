@@ -206,6 +206,25 @@ struct PlatformScreen {
   bool host_paced;
 };
 
+// --- 任意機能：動的コード -------------------------------------------------
+//
+// 実行時コンパイル（spec/runtime/execution.md）が使う。無い機種では 0 でよく、
+// そのときは常に仮想マシンで実行する。**どちらで実行しても結果は同じ**。
+//
+//   1. alloc で場所を取る（書ける状態で返る）
+//   2. そこに機械語を書く
+//   3. commit で実行できるようにする（命令の置き場＝命令キャッシュも合わせる）
+//
+// 書いたあとにもう一度書き足すときは、unlock を呼んでから書く。
+// 「書ける」と「実行できる」を同時に立てられない機種（Apple Silicon など）が
+// あるので、この2つは別々の口にしてある。
+struct PlatformExec {
+  void* (*alloc)(size_t n);            // 取れなければ 0
+  void  (*unlock)(void* p, size_t n);  // また書けるようにする
+  void  (*commit)(void* p, size_t n);  // 書き終わり。ここから実行できる
+  void  (*free)(void* p, size_t n);
+};
+
 // --- 必須 ----------------------------------------------------------------
 struct Platform {
   void* (*alloc)(size_t n);
@@ -228,6 +247,7 @@ struct Platform {
   const PlatformRandom* random;  // 無ければ 0
   const PlatformScreen* screen;  // 無ければ 0
   const PlatformFont*   font;    // 無ければ 0（内蔵の 5×7 か FreeType になる）
+  const PlatformExec*   exec;    // 無ければ 0（実行時コンパイルをしない）
 };
 
 // いま使っている移植層。差し替えるときは platform_set() を呼ぶ
