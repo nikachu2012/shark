@@ -22,6 +22,19 @@ make web-test       # 作ったものを node で確かめる
 make bench          # C・Python・Shark の速さ比べ（python3 bench/run.py loop fib で絞れる）
 ```
 
+Windows（Visual Studio）では make の代わりに:
+
+```
+tools\build_win.bat          # shark.exe と sharkvm.exe を作る（外部依存なし）
+tools\build_win.bat freetype # FreeType を取ってきて静的に作る（日本語の字形。一度だけ）
+tools\build_win.bat test     # 作ってから tests\ を走らせる（sh が要る）
+tools\build_win.bat clean
+```
+
+中身は `tools/build_win.ps1`。ソースの一覧は Makefile の RT_SRC / FE_SRC が正で、
+このスクリプトはその写しなので、**コアのソースを増減したら両方を直す**。
+MSYS2 / MinGW の make なら Makefile がそのまま動く（`.exe` は Makefile が付ける）。
+
 ```
 ./shark run <file.shk>      # 実行（.shkc も渡せる）
 ./shark check <file.shk>    # 型検査だけ
@@ -55,6 +68,8 @@ web/        同じコアを WebAssembly にした一式（移植層は core/plat
 stdlib/     標準ライブラリの宣言ファイル（*.shk）← 名前・型・説明・例はここが正
 spec/       仕様（syntax / types/ / runtime/ / library/）。思想は spec/README.md
 tests/      .shk と .expected の組 + memcheck / bytecheck（C++ 側の検査）
+assets/     同梱するもの。fonts/ に Noto Sans JP（OFL 1.1）。
+            探すのはコアではなくフロントエンド（host_use_bundled_font → SHARK_FONT）
 ```
 
 ### コアは2層に分かれる（Makefile の RT_SRC / FE_SRC）

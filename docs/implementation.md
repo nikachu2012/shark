@@ -265,23 +265,23 @@ for (;;) {
 ### 画面の出し先（`std.ui`）
 
 `shark` コマンドの移植層（`core/platform/desktop.cpp`）は、`PlatformScreen` を
-2つ持っていて、開けたものを使う。どちらも開けなければ画面なしになり、
+3つ持っていて、開けたものを使う。どれも開けなければ画面なしになり、
 見えない面に描く。`SHARK_UI=off` にすると、窓を試さずにそこへ落とせる。
 
-| 順 | 出し先 | ソース |
-|---|---|---|
-| 1 | 窓（macOS） | `core/platform/screen_mac.inc` |
-| 1 | 窓（X11） | `core/platform/screen_x11.inc` |
+| 出し先 | ソース |
+|---|---|
+| 窓（macOS） | `core/platform/screen_mac.inc` |
+| 窓（Windows） | `core/platform/screen_win.inc` |
+| 窓（X11） | `core/platform/screen_x11.inc` |
 
-**どれも作るときに要るライブラリが無い。**窓に要る関数は実行時に `dlopen` で取りに行く。
-X11 の開発ファイルが入っていない機械でも、そのまま作れて動く（窓が開かないだけ）。
+**どれも作るときに要るライブラリが無い。**窓に要る関数は実行時に取りに行く
+（`dlopen` / `LoadLibrary`）。X11 の開発ファイルが入っていない機械でも、
+そのまま作れて動く（窓が開かないだけ）。
 `make` に足したのは、古い glibc 向けの `-ldl` だけ。
 
-どちらの窓も「離した」が届くので `has_key_up` は `true`。届かない機種のために、
+どの窓も「離した」が届くので `has_key_up` は `true`。届かない機種のために、
 `false` なら「押された刻みの間だけ押されている」とみなす道はコアに残してある
 （[spec/library/ui.md](../spec/library/ui.md)）。
-
-Windows では窓を持たない（`0`）。見えない面には描ける。
 
 #### 窓（macOS）
 
@@ -297,6 +297,25 @@ Windows では窓を持たない（`0`）。見えない面には描ける。
   `kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little` として読ませている
 - 出来事は `nextEventMatchingMask:untilDate:` に `distantPast` を渡して**待たずに**取る
 - 閉じるボタンと Cmd-Q は「閉じてくれ」として渡す
+
+#### 窓（Windows）
+
+- `user32.dll` と `gdi32.dll` を `LoadLibrary` で開き、要る関数だけ `GetProcAddress`
+  で引く。`<windows.h>` はどの Windows にも入っているので型はそこから借り、
+  **繋ぐ `.lib` だけを無くしてある**（X11 版と同じ考え）
+- 画素は `0x00RRGGBB` の並びのまま `StretchDIBits` で貼る。上下は
+  `biHeight` を負にして上の行から並べる。拡大は混ぜない（`COLORONCOLOR`）
+- **HiDPI**：`SetProcessDpiAwarenessContext` で「細かさはこちらが見る」と伝えるので、
+  窓の中身の大きさは画面の画素そのもの。細かさは `GetDpiForWindow`（96 が等倍）で、
+  `ui.scale()` が返す
+- 出来事は `PeekMessage` で**待たずに**取り、`TranslateMessage` に
+  「打たれた文字」（`WM_CHAR`）を作ってもらう。上下に分かれた字（絵文字など）は
+  片割れを覚えておいて組み立てる
+- 記号のキーは並びが機種ごとに違うので、`MapVirtualKey` に「何の字か」を尋ねる
+- 縁を引いている間、Windows はこちらを止めてしまう。macOS と同じく `set_redraw` を
+  持っていて、その間も引き直せる
+- `WM_CLOSE` は「閉じてくれ」として渡すだけで、窓は壊さない
+- 切り貼りの置き場は `CF_UNICODETEXT`。**窓を開いていなくても使える**
 
 #### 窓（X11）
 
@@ -318,6 +337,22 @@ Windows では窓を持たない（`0`）。見えない面には描ける。
 - **変換中（`hasMarkedText`）は `SEV_Key` も出さない。**そのキーは変換のもので、
   `enter` は確定、`esc` は取り消し、空白と矢印は候補選びに使われる。
   渡してしまうと、確定した拍子に入力欄から焦点が外れる（コア側にも同じ見張りを置いてある）
+- **Windows は IMM32** を実行時に引いて使う。macOS の `NSTextView` にあたる
+  受け皿が無いので、**入力欄の中身は移植層が持つ**（`screen_win.inc` の `Input`）。
+  数え方はコアの `text_selection` と揃えて**文字（コードポイント）**で、
+  UTF-8 との行き来はその境目だけで済ませる
+  - `WM_IME_COMPOSITION` の `GCS_COMPSTR` が変換中の文字列、`GCS_RESULTSTR` が
+    確定した文字列。**確定はここで受け取り、`DefWindowProc` に渡さない**
+    （渡すと、そのあと `WM_CHAR` でもう一度届いて二重に入る）
+  - 変換中の字はコアが下線つきで描くので、OS の吹き出しは出させない
+    （`WM_IME_SETCONTEXT` から `ISC_SHOWUICOMPOSITIONWINDOW` を落とす）。
+    候補の一覧は OS のものを使い、`ImmSetCandidateWindow` で入力欄の下に出す
+  - 変換中は `SEV_Key` も `SEV_Text` も出さない。そのキーは変換のものだから
+  - 入力欄に入れている間は、打った字を `SEV_Text` に出さず自分の中身に入れる。
+    カーソル移動・back・delete・shift で選ぶ・ctrl+A/C/V/X も移植層が受ける
+    （コアは変換を持つ出し先の入力欄には触らない → `core/lib/ui.cpp` の `input_frame`）
+  - 入力欄から離れている間は `ImmAssociateContextEx` で IME を外す。
+    付けたままだと、ゲームのキーが変換に横取りされる
 - X11 は XIM を持たないので、打った文字がそのまま入る
 - 持たない出し先では、コアが今までどおり `ui.typed()` と back で組み立てる
 
@@ -328,10 +363,11 @@ Windows では窓を持たない（`0`）。見えない面には描ける。
   単位は**文字の数**で、UTF-16 との行き来は移植層の中で済ませる
 - 持たない出し先では、コアが文字の数（`g_caret` / `g_anchor`）を覚えて動かす。
   なぞり・shift＋矢印・home/end・delete はこちらの実装
-- 切り貼りの置き場は macOS の `NSPasteboard`。**窓を開いていなくても使える**ので、
-  画面なしで動かしているときも同じ置き場に入る
+- 切り貼りの置き場は macOS の `NSPasteboard`、Windows の `CF_UNICODETEXT`。
+  どちらも**窓を開いていなくても使える**ので、画面なしで動かしているときも同じ置き場に入る
 - Cmd-C などは、menu bar を持たないと OS 側で拾われない。
-  受け皿に `copy:` `paste:` `cut:` `selectAll:` `undo:` を直接頼んでいる
+  受け皿に `copy:` `paste:` `cut:` `selectAll:` `undo:` を直接頼んでいる。
+  Windows も menu bar を持たないので、ctrl+A/C/V/X は移植層が直に受ける
 - 右で押したときのメニューは**こちらで描く**（どの出し先でも同じ）。
   `ui.show()` の頭で押されたところを見て、下の部品には渡さない
 
@@ -476,6 +512,8 @@ row の中の部品に書いた `float.infinity()` で、row ごと外の余り�
 
 - **FreeType はこの処理系で唯一の外部ライブラリ**で、任意。
   `make` が `pkg-config` で見つけたときだけ `-DSHARK_FREETYPE` を付ける。
+  Windows には `pkg-config` が無いので、`tools/build_win.bat freetype` が元を
+  取ってきて**静的に**作り、`shark.exe` の中に入れる（配るときに DLL が付かない）。
   無ければ中身は丸ごと消え、内蔵の字形だけになる（入れ方は README）
 - 字形は `FT_LOAD_RENDER` で濃さ（8 ビット）にして、下地と混ぜて置く。
   そのぶん縁がなめらかになる
@@ -484,6 +522,23 @@ row の中の部品に書いた `float.infinity()` で、row ごと外の余り�
   これを高さにすると**字の下に 11 画素のあきが残る**ので使わない
   （改行のときだけ 1.25 倍にして下げる）
 - 覚え書きは (文字, 大きさ) を鍵にした開番地法の表。いっぱいになったら丸ごと捨てる
+- **控え（フォールバック）。**1本のフォントに世界中の字は入っていない。
+  同梱の Noto Sans JP も、絵文字やハングルは持たない。そこで
+  `FT_Get_Char_Index` が 0（その字を持っていない）なら、控えのフォントを探す
+  - 控えは**要るときに1本ずつ**読む。何も足りていなければ1本も読まない
+  - **読んだ控えは抱えたままにする。**「この字が無かったから捨てる」にすると、
+    あとで来た別の字をそのフォントが持っていても、もう見に行けない
+    （読む順は前に進むだけなので）。そのかわり**4本まで**に制限する
+  - どれも持っていなければ本命の `.notdef`（□）を出す。
+    無いことが見て分かるほうがよいので、消してしまわない
+  - 高さと基準線は**本命だけ**で決める。控えごとに変わると行の高さが字で揺れる
+  - 候補の場所を知っているのは `ui.cpp`（コアは自分でファイルを開かない）。
+    `ft::set_fallback_source()` で口を1つ渡し、`ft::` はその番号を進めるだけ
+  - 濃さの並べ方はフォントによって違うので、`copy_bits()` で 8 ビットの濃さ・
+    1 ビットの白黒・色つき（BGRA。いまは形だけ使う）の3つを受ける
+  - 読んだぶんだけメモリが要る。Windows で測ると
+    日本語だけ 17 MB → 記号 18 MB → 絵文字 39 MB → どの控えにも無い字 68 MB。
+    絵文字のフォントが 12 MB あるためで、**要らなければ 0**
 - **移植層の字**（`PlatformFont`）は、FreeType と同じ形（濃さの並びと置き場所）を返す口。
   ブラウザはフォントのファイルを読めないので、canvas に1文字ずつ描かせて濃さを写し取る。
   コアは `core/lib/ui.cpp` の `font_*()` を通すだけで、どちらを使っているかを知らない
@@ -492,6 +547,13 @@ row の中の部品に書いた `float.infinity()` で、row ごと外の余り�
   処理系を捨てるときに `ui_shutdown()` が返す
 - フォントを読むのは移植層のファイル機能（`PlatformFile`）。
   コアは自分でファイルを開かない決めごとのまま
+- **同梱のフォント**は `assets/fonts/NotoSansJP-Regular.otf`（Noto Sans JP Regular、
+  SIL Open Font License 1.1）。探すのはコアではなく**フロントエンド**で、
+  `host_use_bundled_font()`（`frontend/host.h`）が実行ファイルの隣を見て、
+  あれば環境変数 `SHARK_FONT` に入れる。これは
+  「`SHARK_FONT` → 機種によくある場所」というもとからの探し順のいちばん前で、
+  **すでに `SHARK_FONT` があれば、そちらが勝つ**。
+  コアが自分から場所を探さない決めごとを崩さずに、配ったものがそのまま日本語を出せる
 
 ### まだ入力が無いとき
 

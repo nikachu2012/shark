@@ -40,6 +40,40 @@ make embed && ./examples/embed/game   # ゲームに組み込む例
   --lang ja|en / --strict  診断の言語 / 警告をエラーとして扱う
 ```
 
+## Windows で作る
+
+Windows には `make` が無いので、代わりに `tools\build_win.bat` を使う。
+**要るのは Visual Studio の C++ だけ**で、外のライブラリは1つも要らない
+（窓は `user32.dll` を実行時に取りに行く）。
+
+```
+tools\build_win.bat            shark.exe と sharkvm.exe を作る
+tools\build_win.bat freetype   日本語の字を出す FreeType を足す（一度だけ。下）
+tools\build_win.bat test       作ってから tests\ を走らせる（sh が要る）
+tools\build_win.bat clean      作ったものを消す
+
+.\shark.exe run examples\hello.shk
+```
+
+| | |
+|---|---|
+| コンパイラ | [Visual Studio](https://visualstudio.microsoft.com/) 2019 以降の「**C++ によるデスクトップ開発**」（Build Tools だけでもよい）。置き場所は `vswhere` が自動で探す |
+| `test` に要るもの | `sh`（[Git for Windows](https://gitforwindows.org/) に付いてくる）。無いときは作るところまでは動く |
+| MSYS2 / MinGW を使うなら | `make` がそのまま動く（`.exe` の付け外しは Makefile が面倒を見る） |
+
+- **日本語はそのまま通る。**診断も `print` も UTF-8 で出て、`shark run 日本語.shk` のような
+  ファイル名も渡せる（端末の符号と命令行を、起動のときに UTF-8 にそろえている）
+- `shark build` が作るのは `.exe`。名前に付いていなければ自動で足す
+- 窓（`std.ui`）は Win32 の窓が開く。キー・文字・マウス・大きさの変更・× で閉じるが届き、
+  切り貼りの置き場（クリップボード）とマウスの形も使える。
+  画面の細かさ（HiDPI）は OS に尋ねて `ui.scale()` が返す
+- **日本語の変換（IME）もそのまま使える。**変換中の字は入力欄に下線つきで出て、
+  候補の一覧は Windows のものが入力欄のすぐ下に出る。確定するとその字が入る。
+  入力欄では ctrl+A / ctrl+C / ctrl+V / ctrl+X も効く
+- 日本語の**字形**は同梱の Noto Sans JP で出る。そのためには FreeType を足しておく
+  （`tools\build_win.bat freetype`。下の「日本語の字を出す」）。
+  足さないと窓の中の日本語は □ になる
+
 ## ブラウザで動かす
 
 同じコアを WebAssembly にしたものが [web/](web/README.md) にある。
@@ -126,6 +160,7 @@ ui.run("かうんた", 420, 300, view);
 | | |
 |---|---|
 | macOS | 窓（AppKit） |
+| Windows | 窓（Win32 + GDI） |
 | Linux ほか | 窓（X11） |
 | 窓が開けないところ | 見えない面に描く。結果は `ui.get()` と `ui.to_png()` で取れる |
 
@@ -137,7 +172,7 @@ ui.open("さめ", 420 * k, 300 * k);   // 見た目の大きさは変わらず�
 _ = ui.font(12 * k);                 // 12pt くらい
 ```
 
-- 窓に要る関数は**実行時に**取りに行く（`dlopen`）ので、
+- 窓に要る関数は**実行時に**取りに行く（`dlopen` / `LoadLibrary`）ので、
   **作るときに要るライブラリは無い**。X11 の無い機械でもそのまま作れる
 - 画面が無くても同じように動くので、**画面の要るプログラムでもテストが書ける**
 - `SHARK_UI=off` で窓を開かず、見えない面に描かせられる
@@ -154,18 +189,23 @@ _ = ui.font(12 * k);                 // 12pt くらい
 （日本語が □ になるだけ）。日本語の字形を自前で抱えると処理系が数百 KB 太るので、
 ここだけ外に頼ることにした（[spec/library/ui.md](spec/library/ui.md)）。
 
+**フォントは同梱してある。**`assets/fonts/NotoSansJP-Regular.otf`
+（Noto Sans JP Regular / [SIL Open Font License 1.1](assets/fonts/LICENSE-NotoSansJP.txt)）で、
+`shark` は実行ファイルの隣にあるこれを既定にする。
+機種に何が入っているかを気にせず、どこでも同じ字で出る。
+別のものを使いたいときは、環境変数 `SHARK_FONT` にその場所を入れる
+（そちらが勝つ）か、`ui.font(path, size)` で直に渡す。
+
 ### 1. FreeType を入れる
 
 | | |
 |---|---|
+| Windows（Visual Studio） | `tools\build_win.bat freetype`（元を取ってきて静的に作る。ほかに要るものは無い） |
 | macOS | `brew install freetype` |
 | Debian / Ubuntu | `sudo apt install libfreetype-dev pkg-config` |
 | Fedora / RHEL | `sudo dnf install freetype-devel pkgconf-pkg-config` |
 | Arch | `sudo pacman -S freetype2 pkgconf` |
 | Windows（MSYS2） | `pacman -S mingw-w64-x86_64-freetype mingw-w64-x86_64-pkgconf` |
-
-日本語のフォントも要る。macOS と Windows は最初から入っている。
-Linux で無ければ `sudo apt install fonts-noto-cjk`（Debian / Ubuntu）など。
 
 ### 2. 作り直す
 
@@ -179,6 +219,7 @@ make clean && make          # 見つかれば FreeType つきで作られる
 |---|---|
 | 入っていても使わない | `make FREETYPE=0` |
 | pkg-config が無い | `make FREETYPE=1 FT_CFLAGS=-I/opt/freetype/include/freetype2 FT_LIBS="-L/opt/freetype/lib -lfreetype"` |
+| Windows（Visual Studio） | `tools\build_win.bat freetype` のあと `tools\build_win.bat`。すでに手元にあるものを使うなら `tools\build_win.bat build -FtInclude <include> -FtLib <freetype.lib>` |
 | 使われているか見る | `./shark run examples/counter.shk`（日本語が出れば入っている） |
 
 `make clean` を挟むのは、`make` が「作るときの指定が変わったこと」までは見ないため。
@@ -199,8 +240,32 @@ ui.text(8 * k, 8 * k, "こんにちは", ui.rgb(255, 255, 255));
 ```
 
 探す順番は、環境変数 `SHARK_FONT` → 機種によくある場所。
-探すのは**本文の太さ**（macOS はヒラギノ角ゴシック W4、Linux は Noto Sans CJK Regular）。
-別の太さが要るときは、自分で選ぶ。
+`shark` コマンドは、`SHARK_FONT` が空なら**同梱の Noto Sans JP**（実行ファイルの隣の
+`assets/fonts/`）をそこに入れるので、何もしなければそれが使われる。
+同梱のものが無いときは機種によくある場所を見る
+（macOS はヒラギノ角ゴシック W4、Windows は游ゴシック、Linux は Noto Sans CJK Regular）。
+探すのは**本文の太さ**で、別の太さが要るときは自分で選ぶ。
+
+### 持っていない字は、控えのフォントから（フォールバック）
+
+1本のフォントに世界中の字は入っていない。同梱の Noto Sans JP も、日本語と英数字は
+持っているが**絵文字やハングルは持っていない**。そこで、いま使っているフォントに
+無い字が来たら、**機種のフォントから順に探す**。
+
+```shark
+_ = ui.font(20);
+ui.text(10, 10, "日本語 ✓ 한국어 🦈", ui.rgb(0, 0, 0));   // ぜんぶ出る
+```
+
+- 控えは**要るときに1本ずつ**読む。足りているうちは1本も読まない
+- 探すのは `SHARK_FONT_FALLBACK`（`;` 区切り。使う人が決めたものが勝つ）→
+  機種のフォント（記号 → 絵文字 → ハングル → 日本語 の順）
+- どの控えも持っていなければ □ になる。無いことが見て分かるように、そのまま出す
+- 行の高さと基準線は**本命のフォント**で決まるので、控えが混じっても行が揺れない
+- 読んだフォントはそのまま抱えるので、**そのぶんメモリが要る**（4本まで）。
+  Windows で測ると、日本語だけなら 17 MB、絵文字を出すと 39 MB。
+  絵文字のフォントが 12 MB あるためで、使わなければ増えない
+- **色は付かない。**絵文字は形（白黒）で出る。字の色は `ui.text()` に渡した色になる
 
 ```shark
 _ = ui.font("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 15);
@@ -217,7 +282,12 @@ print(ui.font_name());      // いま使っているもの。内蔵なら空
 - 部品（ボタンなど）の寸法は字の大きさから決まるので、`ui.font()` を変えるだけで
   全体の釣り合いが付いてくる
 - `shark build` で作った単一バイナリは、FreeType つきで作ったなら
-  配る先にも FreeType が要る（`make FREETYPE=0` で作れば要らない）
+  配る先にも FreeType が要る（`make FREETYPE=0` で作れば要らない）。
+  Windows の `tools\build_win.bat freetype` は**静的に**繋ぐので、これは要らない
+- 同梱のフォントを一緒に配るときは、`assets/fonts/` を実行ファイルの隣に置く。
+  置かないときは機種のフォントに落ちる（見つからなければ日本語は □）
+- **絵文字は同梱のフォントには入っていない。**機種の絵文字フォントを控えから読むので
+  形は出るが、**色は付かない**（上の「控えのフォントから」）
 - ブラウザ版（`make web`）とゲーム機向けの雛形には FreeType を入れない。
   ブラウザは**ブラウザ自身に字を描いてもらう**ので、`ui.font()` はそのまま使えて日本語も出る
   （移植層の `PlatformFont`。ゲーム機向けの雛形は内蔵の字形だけ）
@@ -309,7 +379,9 @@ examples/ サンプル。embed/ はゲームに組み込む例（その場で読
 tests/    テスト（make test）
 bench/    C・Python・Shark の速さ比べ（python3 bench/run.py）
 stdlib/   標準ライブラリの宣言（名前・型・説明・例）。リファレンスと補完のもと
-tools/    宣言を読む道具（リファレンス生成・例の実行・prelude の埋め込み）
+tools/    宣言を読む道具（リファレンス生成・例の実行・prelude の埋め込み）と、
+          Windows で作る入口（build_win.bat / build_win.ps1）
+assets/   同梱するもの。fonts/ に Noto Sans JP（日本語の字形）
 docs/     利用者向けのリファレンスと実装メモ。gen.py が stdlib/ から HTML を作る
 spec/     仕様
   types/      型システム
