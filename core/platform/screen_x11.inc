@@ -115,6 +115,8 @@ void (*SetWMNormalHints)(Display*, XID, SizeHints*) = 0;   // 無くてもよい
 XID (*LookupKeysym)(KeyEvent*, int) = 0;
 int (*LookupString)(KeyEvent*, char*, int, XID*, void*) = 0;
 int (*XFree_)(void*) = 0;
+int (*DisplayWidth_)(Display*, int) = 0;    // 無くてもよい（画面の大きさ）
+int (*DisplayHeight_)(Display*, int) = 0;
 int (*SetDetectableAutoRepeat)(Display*, int, int*) = 0;   // 無くてもよい
 void* (*SetErrorHandler)(void*) = 0;                       // 無くてもよい
 // マウスの形。どれも無くてもよい（取れなければ、形は変えないだけ）
@@ -196,6 +198,8 @@ bool load() {
   ok &= grab(&LookupKeysym, "XLookupKeysym");
   ok &= grab(&LookupString, "XLookupString");
   ok &= grab(&XFree_, "XFree");
+  grab(&DisplayWidth_, "XDisplayWidth");                          // 無くてもよい
+  grab(&DisplayHeight_, "XDisplayHeight");
   grab(&SetDetectableAutoRepeat, "XkbSetDetectableAutoRepeat");   // 無くてもよい
   grab(&SetWMNormalHints, "XSetWMNormalHints");                    // 無くてもよい
   grab(&SetErrorHandler, "XSetErrorHandler");
@@ -213,6 +217,29 @@ bool load() {
 
 // X11 は画面の細かさを1つに決めていない。等倍として扱う
 int screen_scale() { return 1; }
+
+// 画面ぜんたいの大きさ（画素）。ui.scale() が「どれだけ大きく描くか」を決めるのに使う。
+// **窓を開く前にも呼ばれる**ので、まだ繋いでいなければ、いったん繋いで尋ねてから閉じる
+bool screen_size(int* w, int* h) {
+  if (!load() || !DisplayWidth_ || !DisplayHeight_) return false;
+  Display* d = g.dpy;
+  bool temp = false;
+  if (!d) {
+    const char* disp = getenv("DISPLAY");
+    if (!disp || !disp[0]) return false;
+    d = OpenDisplay(0);
+    if (!d) return false;
+    temp = true;
+  }
+  int scr = DefaultScreen(d);
+  int sw = DisplayWidth_(d, scr);
+  int sh = DisplayHeight_(d, scr);
+  if (temp) CloseDisplay(d);
+  if (sw <= 0 || sh <= 0) return false;
+  *w = sw;
+  *h = sh;
+  return true;
+}
 
 // 面が小さいときだけ、整数倍に広げる（大きい面は画面の画素と1対1）
 int pick_scale(int w, int h) {
@@ -529,7 +556,8 @@ const PlatformScreen kX11Screen = {x11::screen_scale, x11::open, x11::close,
                                   0, 0, 0, 0, 0, 0, 0,   // 文字入力と切り貼りはまだ持たない
                                   0,                     // set_redraw（X11 は止まらないので要らない）
                                   x11::set_cursor,   x11::set_resizable,
-                                  false};   // 刻みはこちらで作る（眠って起きる）
+                                  false,             // 刻みはこちらで作る（眠って起きる）
+                                  x11::screen_size};
 
 const PlatformScreen* x11_screen() { return x11::load() ? &kX11Screen : 0; }
 

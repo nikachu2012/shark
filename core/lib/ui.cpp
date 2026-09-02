@@ -247,12 +247,37 @@ static NativeStatus u_width(VM& vm, Value* a, int n, Value& out) {
 static NativeStatus u_height(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)a; (void)n; out = mk_int(g_h); return N_Ok;
 }
-// 画面の細かさ。HiDPI（Retina）なら 2。**開く前でも呼べる**
+// 描くときに掛ける倍率（ui.scale）。**開く前でも呼べる**。
+//
+//   画面の細かさ（HiDPI）× 画面の広さで決まる段数
+//
+// 細かさだけでは足りない。ふつうの細かさの広い画面でも、320×240 の面をそのまま
+// 出すと切手のように小さい。かといって移植層が窓を引き伸ばすと、描いた画素が
+// そのまま拡大されて、字も丸も粗くなる。**はじめから大きく描いてもらう**ほうを取る。
+//
+// 段数は画面の高さ（点。細かさで割り戻したもの）で決める。540 点ごとに1段、3 段まで。
+//   1366×768 → 1、1920×1080 → 2、2560×1440 → 2、3840×2160 → 3
+//
+// 画面の大きさを言えない出し先（PlatformScreen::screen_size が 0）と、
+// 画面が無いところ（SHARK_UI=off）では 1 段で、今までどおり細かさだけになる
+static int draw_scale() {
+  const PlatformScreen* s = platform().screen;
+  if (!s || !s->scale) return 1;
+  int dpi = s->scale();
+  if (dpi < 1) dpi = 1;
+  int zoom = 1;
+  int sw = 0, sh = 0;
+  if (s->screen_size && s->screen_size(&sw, &sh) && sh > 0) {
+    zoom = (sh / dpi) / 540;
+    if (zoom < 1) zoom = 1;
+    if (zoom > 3) zoom = 3;
+  }
+  return dpi * zoom;
+}
+
 static NativeStatus u_scale(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)a; (void)n;
-  const PlatformScreen* s = platform().screen;
-  int k = (s && s->scale) ? s->scale() : 1;
-  out = mk_int(k < 1 ? 1 : k);
+  out = mk_int(draw_scale());
   return N_Ok;
 }
 static NativeStatus u_visible(VM& vm, Value* a, int n, Value& out) {
