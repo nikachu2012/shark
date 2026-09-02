@@ -36,7 +36,9 @@ struct PlatformOS {
   bool (*cwd)(Str* out);
   bool (*chdir)(const char* path);
   const char* (*temp_dir)();
-  // 外部プログラム。持たない環境では 0
+  // 外部プログラム。持たない環境では 0。
+  // out と err は UTF-8 で返すこと（機種の符号で書くプログラムがある環境では、
+  // ここで直す → spec/library/os.md）
   bool (*run)(const char* cmd, const Vec<Str>& args, int* code, Str* out, Str* err);
 };
 

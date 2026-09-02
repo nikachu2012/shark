@@ -3,6 +3,13 @@
 // ここを自分の機種のものに差し替える（spec/skeleton.md）。
 #if defined(_WIN32)
 #define _CRT_RAND_S   // 暗号用の乱数 rand_s を使う。stdlib.h より前に要る
+// windows.h は大きいので、要らないところを外し、min/max の置き換えも止める
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #endif
 
 #include "platform.h"
@@ -13,8 +20,14 @@
 #include <time.h>
 
 #if defined(_WIN32)
+#include <windows.h>
+
+#include <imm.h>   // 変換つきの文字入力（screen_win.inc）。繋ぐ .lib は要らない
+
 #include <direct.h>
 #include <io.h>
+#include <sys/stat.h>
+#include <wchar.h>
 #else
 #include <dirent.h>
 #include <errno.h>
@@ -44,6 +57,90 @@
 namespace shark {
 namespace {
 
+#if defined(_WIN32)
+// --- 字の符号（Windows だけ）---------------------------------------------
+//
+// Shark は道も名前も、中も外もぜんぶ UTF-8。ところが Windows の char を取る
+// API は「その機械の言語の符号」（日本語の Windows なら CP932）として読むので、
+// UTF-8 のまま渡すと日本語の入ったファイル名が開けない。
+// そこで OS を呼ぶ手前で UTF-16（W 付きの API）に直し、返ってきたら戻す。
+struct Wide {
+  wchar_t small_[512];
+  wchar_t* p;
+  explicit Wide(const char* s) : p(small_) {
+    small_[0] = 0;
+    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, 0, 0);   // 0 で終わる分も含む長さ
+    if (n <= 0) return;
+    if (n > (int)(sizeof small_ / sizeof small_[0])) {
+      wchar_t* big = (wchar_t*)malloc((size_t)n * sizeof(wchar_t));
+      if (!big) return;   // 取れなければ空の道になり、呼んだ側が失敗として扱う
+      p = big;
+    }
+    MultiByteToWideChar(CP_UTF8, 0, s, -1, p, n);
+  }
+  ~Wide() { if (p != small_) free(p); }
+  const wchar_t* get() const { return p; }
+ private:
+  Wide(const Wide&);
+  Wide& operator=(const Wide&);
+};
+
+// UTF-8 として筋の通ったバイトの並びか
+bool looks_utf8(const Str& s) {
+  int i = 0;
+  while (i < s.size()) {
+    unsigned char c = (unsigned char)s[i];
+    int n;
+    if (c < 0x80) { i++; continue; }
+    else if ((c & 0xe0) == 0xc0) n = 1;
+    else if ((c & 0xf0) == 0xe0) n = 2;
+    else if ((c & 0xf8) == 0xf0) n = 3;
+    else return false;
+    if (i + n >= s.size()) return false;   // 途中で切れている
+    for (int k = 1; k <= n; k++)
+      if (((unsigned char)s[i + k] & 0xc0) != 0x80) return false;
+    i += n + 1;
+  }
+  return true;
+}
+
+Str from_wide(const wchar_t* w) {
+  Str r;
+  int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, 0, 0, 0, 0);
+  if (n <= 1) return r;   // 1 は「0 だけ」＝空
+  char* buf = (char*)malloc((size_t)n);
+  if (!buf) return r;
+  WideCharToMultiByte(CP_UTF8, 0, w, -1, buf, n, 0, 0);
+  r.append(buf, n - 1);   // 末尾の 0 は Str が自分で置く
+  free(buf);
+  return r;
+}
+
+// 外のプログラムが返した字を UTF-8 にそろえる。
+//
+// Windows のプログラムは、その機械の言語の符号（日本語なら CP932）で書くものと、
+// UTF-8 で書くものが混ざっている。どちらかは名乗ってくれないので、
+// **UTF-8 として筋が通っていればそのまま**、通らなければ機械の符号として読み直す。
+void adopt_utf8(Str* s) {
+  if (s->size() == 0 || looks_utf8(*s)) return;
+  int wn = MultiByteToWideChar(CP_OEMCP, 0, s->data(), s->size(), 0, 0);
+  if (wn <= 0) return;   // それでも読めなければ、届いたバイトのまま渡す
+  wchar_t* w = (wchar_t*)malloc((size_t)wn * sizeof(wchar_t));
+  if (!w) return;
+  MultiByteToWideChar(CP_OEMCP, 0, s->data(), s->size(), w, wn);
+  int un = WideCharToMultiByte(CP_UTF8, 0, w, wn, 0, 0, 0, 0);
+  if (un > 0) {
+    char* u = (char*)malloc((size_t)un);
+    if (u) {
+      WideCharToMultiByte(CP_UTF8, 0, w, wn, u, un, 0, 0);
+      *s = Str(u, un);
+      free(u);
+    }
+  }
+  free(w);
+}
+#endif
+
 void* d_alloc(size_t n) { return malloc(n ? n : 1); }
 void* d_realloc(void* p, size_t n) { return realloc(p, n ? n : 1); }
 void  d_free(void* p) { free(p); }
@@ -51,7 +148,11 @@ void  d_fatal(const char* msg) { fputs(msg, stderr); fputc('\n', stderr); abort(
 
 int64_t d_now() {
 #if defined(_WIN32)
-  return (int64_t)time(0) * 1000000000ll;
+  // 1601-01-01 からの 100 ナノ秒きざみ。Unix の紀元まで 11644473600 秒ある
+  FILETIME ft;
+  GetSystemTimeAsFileTime(&ft);
+  uint64_t t = ((uint64_t)ft.dwHighDateTime << 32) | (uint64_t)ft.dwLowDateTime;
+  return (int64_t)(t - 116444736000000000ull) * 100;
 #else
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
@@ -60,7 +161,14 @@ int64_t d_now() {
 }
 int64_t d_mono() {
 #if defined(_WIN32)
-  return (int64_t)clock() * (1000000000ll / CLOCKS_PER_SEC);
+  // 高い分解能の数え上げ。clock() は 1000分の1秒しか刻めず、こまの速さに使えない
+  LARGE_INTEGER f, c;
+  if (!QueryPerformanceFrequency(&f) || f.QuadPart <= 0) return (int64_t)GetTickCount64() * 1000000ll;
+  QueryPerformanceCounter(&c);
+  // 先に割ってから掛ける（掛けてから割ると 64 ビットからあふれる）
+  int64_t sec = (int64_t)(c.QuadPart / f.QuadPart);
+  int64_t rem = (int64_t)(c.QuadPart % f.QuadPart);
+  return sec * 1000000000ll + rem * 1000000000ll / (int64_t)f.QuadPart;
 #else
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -70,8 +178,9 @@ int64_t d_mono() {
 void d_sleep(int64_t n) {
   if (n <= 0) return;
 #if defined(_WIN32)
-  extern void Sleep(unsigned long);
-  Sleep((unsigned long)(n / 1000000));
+  // Windows は 1000分の1秒きざみでしか待てない。0 に切り捨てると
+  // 「休むつもりが休まない」空回りになるので、切り上げる
+  ::Sleep((DWORD)((n + 999999ll) / 1000000ll));
 #else
   struct timespec ts;
   ts.tv_sec = (time_t)(n / 1000000000ll);
@@ -100,6 +209,35 @@ void d_write_out(const char* s, int n) { fwrite(s, 1, (size_t)n, stdout); fflush
 void d_write_err(const char* s, int n) { fwrite(s, 1, (size_t)n, stderr); }
 bool d_read_line(Str* out) {
   out->clear();
+#if defined(_WIN32)
+  // 端末から**直に**打たれているときは、UTF-16 で受け取る。
+  // char で読む道は「その機械の言語の符号」を通るので、日本語が落ちることがある。
+  // 流し込まれている（`< file` や `|`）ときは、下のふつうの読み方に落ちる
+  HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+  DWORD mode = 0;
+  if (h && h != INVALID_HANDLE_VALUE && GetConsoleMode(h, &mode)) {
+    Vec<wchar_t> line;
+    bool any = false;
+    for (;;) {
+      wchar_t buf[512];
+      DWORD got = 0;
+      if (!ReadConsoleW(h, buf, (DWORD)(sizeof buf / sizeof buf[0]), &got, 0) || got == 0) break;
+      any = true;
+      bool eol = false;
+      for (DWORD i = 0; i < got; i++) {
+        if (buf[i] == L'\r') continue;
+        if (buf[i] == L'\n') { eol = true; break; }
+        line.push(buf[i]);
+      }
+      if (eol) break;   // 行が長いときは、続きをもう一度読む
+    }
+    if (line.size() > 0) {
+      line.push(0);   // from_wide は 0 で終わる並びを取る
+      *out = from_wide(&line[0]);
+    }
+    return any;
+  }
+#endif
   int c;
   bool any = false;
   while ((c = fgetc(stdin)) != EOF) {
@@ -117,7 +255,13 @@ void* f_open(const char* path, const char* mode, Str* err) {
   const char* m = "rb";
   if (mode[0] == 'w') m = "wb";
   else if (mode[0] == 'a') m = "ab";
+#if defined(_WIN32)
+  Wide wp(path);
+  wchar_t wm[4] = {(wchar_t)m[0], (wchar_t)m[1], 0, 0};
+  FILE* f = _wfopen(wp.get(), wm);
+#else
   FILE* f = fopen(path, m);
+#endif
   if (!f) { *err = Str("ファイルを開けません: ") + path; return 0; }
   return (void*)f;
 }
@@ -126,21 +270,25 @@ bool f_write(void* h, const char* buf, int n) { return (int)fwrite(buf, 1, (size
 void f_close(void* h) { fclose((FILE*)h); }
 bool f_exists(const char* p) {
 #if defined(_WIN32)
-  return _access(p, 0) == 0;
+  Wide wp(p);
+  return GetFileAttributesW(wp.get()) != INVALID_FILE_ATTRIBUTES;
 #else
   struct stat st; return stat(p, &st) == 0;
 #endif
 }
 bool f_is_dir(const char* p) {
 #if defined(_WIN32)
-  struct _stat st; if (_stat(p, &st) != 0) return false; return (st.st_mode & _S_IFDIR) != 0;
+  Wide wp(p);
+  DWORD a = GetFileAttributesW(wp.get());
+  return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) != 0;
 #else
   struct stat st; if (stat(p, &st) != 0) return false; return S_ISDIR(st.st_mode);
 #endif
 }
 bool f_size(const char* p, int64_t* out) {
 #if defined(_WIN32)
-  struct _stat st; if (_stat(p, &st) != 0) return false;
+  Wide wp(p);
+  struct _stat64 st; if (_wstat64(wp.get(), &st) != 0) return false;   // 2GB を超えても数えられる
 #else
   struct stat st; if (stat(p, &st) != 0) return false;
 #endif
@@ -148,19 +296,36 @@ bool f_size(const char* p, int64_t* out) {
 }
 bool f_modified(const char* p, int64_t* ns) {
 #if defined(_WIN32)
-  struct _stat st; if (_stat(p, &st) != 0) return false;
+  Wide wp(p);
+  struct _stat64 st; if (_wstat64(wp.get(), &st) != 0) return false;
 #else
   struct stat st; if (stat(p, &st) != 0) return false;
 #endif
   *ns = (int64_t)st.st_mtime * 1000000000ll; return true;
 }
 bool f_remove(const char* p, Str* err) {
+#if defined(_WIN32)
+  Wide wp(p);
+  bool ok = f_is_dir(p) ? (RemoveDirectoryW(wp.get()) != 0) : (DeleteFileW(wp.get()) != 0);
+  if (!ok) { *err = Str("消せません: ") + p; return false; }
+  return true;
+#else
   if (remove(p) != 0) { *err = Str("消せません: ") + p; return false; }
   return true;
+#endif
 }
 bool f_rename(const char* a, const char* b, Str* err) {
+#if defined(_WIN32)
+  Wide wa(a), wb(b);
+  // 行き先があれば置き換える（POSIX の rename と同じにする）
+  if (!MoveFileExW(wa.get(), wb.get(), MOVEFILE_REPLACE_EXISTING)) {
+    *err = Str("名前を変えられません: ") + a; return false;
+  }
+  return true;
+#else
   if (rename(a, b) != 0) { *err = Str("名前を変えられません: ") + a; return false; }
   return true;
+#endif
 }
 bool f_make_dir(const char* p, Str* err) {
   Str cur;
@@ -169,7 +334,8 @@ bool f_make_dir(const char* p, Str* err) {
     if (s[i] == '/' || s[i] == '\\' || s[i] == 0) {
       if (cur.size() > 0) {
 #if defined(_WIN32)
-        _mkdir(cur.c_str());
+        Wide wc(cur.c_str());
+        CreateDirectoryW(wc.get(), 0);
 #else
         mkdir(cur.c_str(), 0777);
 #endif
@@ -183,8 +349,22 @@ bool f_make_dir(const char* p, Str* err) {
 }
 bool f_list(const char* dir, Vec<Str>* out, Str* err) {
 #if defined(_WIN32)
-  *err = Str("一覧を取れません: ") + dir;
-  return false;
+  // Windows は「その中のもの」ではなく「この形に合うもの」を探す道具しか無いので、
+  // 道のうしろに \* を足して「なんでも」にする
+  Str pat(dir);
+  if (pat.size() && pat[pat.size() - 1] != '/' && pat[pat.size() - 1] != '\\') pat += "\\";
+  pat += "*";
+  Wide wp(pat.c_str());
+  WIN32_FIND_DATAW fd;
+  HANDLE h = FindFirstFileW(wp.get(), &fd);
+  if (h == INVALID_HANDLE_VALUE) { *err = Str("開けません: ") + dir; return false; }
+  do {
+    const wchar_t* n = fd.cFileName;
+    if (n[0] == L'.' && (n[1] == 0 || (n[1] == L'.' && n[2] == 0))) continue;   // . と ..
+    out->push(from_wide(n));
+  } while (FindNextFileW(h, &fd));
+  FindClose(h);
+  return true;
 #else
   DIR* d = opendir(dir);
   if (!d) { *err = Str("開けません: ") + dir; return false; }
@@ -213,36 +393,69 @@ const char* o_name() {
 #endif
 }
 bool o_env(const char* name, Str* out) {
+#if defined(_WIN32)
+  // getenv は CP932 で返すので、UTF-16 で取って UTF-8 に直す
+  Wide wn(name);
+  wchar_t buf[2048];
+  DWORD n = GetEnvironmentVariableW(wn.get(), buf, (DWORD)(sizeof buf / sizeof buf[0]));
+  if (n == 0) return false;
+  if (n < (DWORD)(sizeof buf / sizeof buf[0])) { *out = from_wide(buf); return true; }
+  wchar_t* big = (wchar_t*)malloc((size_t)n * sizeof(wchar_t));   // 長いときは取り直す
+  if (!big) return false;
+  DWORD got = GetEnvironmentVariableW(wn.get(), big, n);
+  bool ok = got > 0 && got < n;
+  if (ok) *out = from_wide(big);
+  free(big);
+  return ok;
+#else
   const char* v = getenv(name);
   if (!v) return false;
   *out = Str(v); return true;
+#endif
 }
 void o_set_env(const char* name, const char* value) {
 #if defined(_WIN32)
-  Str s = Str(name) + "=" + value; _putenv(s.c_str());
+  Wide wn(name), wv(value);
+  SetEnvironmentVariableW(wn.get(), wv.get());
 #else
   setenv(name, value, 1);
 #endif
 }
 bool o_cwd(Str* out) {
-  char buf[4096];
 #if defined(_WIN32)
-  if (!_getcwd(buf, sizeof buf)) return false;
+  wchar_t buf[4096];
+  DWORD n = GetCurrentDirectoryW((DWORD)(sizeof buf / sizeof buf[0]), buf);
+  if (n == 0 || n >= (DWORD)(sizeof buf / sizeof buf[0])) return false;
+  *out = from_wide(buf); return true;
 #else
+  char buf[4096];
   if (!getcwd(buf, sizeof buf)) return false;
-#endif
   *out = Str(buf); return true;
+#endif
 }
 bool o_chdir(const char* p) {
 #if defined(_WIN32)
-  return _chdir(p) == 0;
+  Wide wp(p);
+  return SetCurrentDirectoryW(wp.get()) != 0;
 #else
   return chdir(p) == 0;
 #endif
 }
 const char* o_temp_dir() {
 #if defined(_WIN32)
-  const char* t = getenv("TEMP"); return t ? t : "C:\\Temp";
+  // 一度調べて覚える（const char* を返すので、消えない置き場が要る）
+  static Str dir;
+  if (dir.size() == 0) {
+    wchar_t buf[4096];
+    DWORD n = GetTempPathW((DWORD)(sizeof buf / sizeof buf[0]), buf);
+    if (n > 0 && n < (DWORD)(sizeof buf / sizeof buf[0])) {
+      // うしろの \ は落とす（path.join が自分で足す）
+      while (n > 0 && (buf[n - 1] == L'\\' || buf[n - 1] == L'/')) buf[--n] = 0;
+      dir = from_wide(buf);
+    }
+    if (dir.size() == 0) dir = Str("C:\\Temp");
+  }
+  return dir.c_str();
 #else
   const char* t = getenv("TMPDIR"); return t ? t : "/tmp";
 #endif
@@ -251,9 +464,118 @@ const char* o_temp_dir() {
 // 文字列を並べてシェルに渡すと、引数の中身がそのまま命令として動いてしまうため。
 bool o_run(const char* cmd, const Vec<Str>& args, int* code, Str* out, Str* err) {
 #if defined(_WIN32)
-  (void)cmd; (void)args; (void)code; (void)out;
-  *err = Str("この移植層は外のプログラムを呼べません");
-  return false;
+  // Windows は引数を1本の文字列で渡すので、こちらで組み立てる。
+  // 空白や " が入っていても1つの引数のままになるよう、決まった形で囲う
+  // （CommandLineToArgvW が読み解く形）
+  Str line;
+  for (int i = -1; i < args.size(); i++) {
+    const char* s = (i < 0) ? cmd : args[i].c_str();
+    if (line.size()) line += " ";
+    bool need = (s[0] == 0);
+    for (int k = 0; s[k]; k++) if (s[k] == ' ' || s[k] == '\t' || s[k] == '"') need = true;
+    if (!need) { line += s; continue; }
+    line += "\"";
+    for (int k = 0; s[k]; k++) {
+      int bs = 0;
+      while (s[k] == '\\') { bs++; k++; }
+      if (s[k] == 0) {                                  // 閉じの " の直前の \ は2倍にする
+        for (int t = 0; t < bs * 2; t++) line += "\\";
+        break;
+      }
+      if (s[k] == '"') {                                // " の前の \ も2倍にして、\" と書く
+        for (int t = 0; t < bs * 2 + 1; t++) line += "\\";
+      } else {
+        for (int t = 0; t < bs; t++) line += "\\";
+      }
+      line += s[k];
+    }
+    line += "\"";
+  }
+
+  SECURITY_ATTRIBUTES sa;
+  sa.nLength = sizeof sa;
+  sa.lpSecurityDescriptor = 0;
+  sa.bInheritHandle = TRUE;
+  HANDLE or_ = 0, ow = 0, er = 0, ew = 0;
+  if (!CreatePipe(&or_, &ow, &sa, 0)) { *err = Str("通り道を作れません"); return false; }
+  if (!CreatePipe(&er, &ew, &sa, 0)) {
+    CloseHandle(or_); CloseHandle(ow);
+    *err = Str("通り道を作れません"); return false;
+  }
+  // 読む側は子に渡さない（渡すと、子が終わっても通り道が閉じず、読み続けて止まる）
+  SetHandleInformation(or_, HANDLE_FLAG_INHERIT, 0);
+  SetHandleInformation(er, HANDLE_FLAG_INHERIT, 0);
+
+  STARTUPINFOW si;
+  memset(&si, 0, sizeof si);
+  si.cb = sizeof si;
+  si.dwFlags = STARTF_USESTDHANDLES;
+  si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+  si.hStdOutput = ow;
+  si.hStdError = ew;
+  PROCESS_INFORMATION pi;
+  memset(&pi, 0, sizeof pi);
+
+  Wide wline(line.c_str());
+  // CreateProcessW は渡した文字列を書き換えることがあるので、写しを渡す
+  int wn = (int)wcslen(wline.get()) + 1;
+  wchar_t* mut = (wchar_t*)malloc((size_t)wn * sizeof(wchar_t));
+  if (!mut) {
+    CloseHandle(or_); CloseHandle(ow); CloseHandle(er); CloseHandle(ew);
+    *err = Str("起動できません: ") + cmd; return false;
+  }
+  for (int i = 0; i < wn; i++) mut[i] = wline.get()[i];
+  BOOL started = CreateProcessW(0, mut, 0, 0, TRUE, CREATE_NO_WINDOW, 0, 0, &si, &pi);
+  free(mut);
+  CloseHandle(ow);   // 書く側はこちらでは使わない。閉じておかないと終端が来ない
+  CloseHandle(ew);
+  if (!started) {
+    CloseHandle(or_); CloseHandle(er);
+    *err = Str("起動できません: ") + cmd;
+    return false;
+  }
+
+  // 片方だけ読んでいると、もう片方が詰まって止まるので、両方を代わるがわる見る
+  bool o_open = true, e_open = true;
+  char buf[4096];
+  while (o_open || e_open) {
+    bool got_any = false;
+    HANDLE hs[2] = {or_, er};
+    bool* opens[2] = {&o_open, &e_open};
+    Str* dsts[2] = {out, err};
+    for (int i = 0; i < 2; i++) {
+      if (!*opens[i]) continue;
+      DWORD avail = 0;
+      if (!PeekNamedPipe(hs[i], 0, 0, 0, &avail, 0)) { *opens[i] = false; continue; }
+      if (avail == 0) continue;
+      DWORD want = avail < sizeof buf ? avail : (DWORD)sizeof buf;
+      DWORD got = 0;
+      if (!ReadFile(hs[i], buf, want, &got, 0) || got == 0) { *opens[i] = false; continue; }
+      dsts[i]->append(buf, (int)got);
+      got_any = true;
+    }
+    if (!got_any) {
+      // まだ何も来ていない。相手が終わっていて、通り道も空なら終わり
+      if (WaitForSingleObject(pi.hProcess, 1) == WAIT_OBJECT_0) {
+        DWORD left = 0;
+        bool more = (o_open && PeekNamedPipe(or_, 0, 0, 0, &left, 0) && left > 0) ||
+                    (e_open && PeekNamedPipe(er, 0, 0, 0, &left, 0) && left > 0);
+        if (!more) break;
+      }
+    }
+  }
+  CloseHandle(or_);
+  CloseHandle(er);
+
+  adopt_utf8(out);   // 相手が機械の符号で書いていたら、UTF-8 に直す
+  adopt_utf8(err);
+
+  WaitForSingleObject(pi.hProcess, INFINITE);
+  DWORD ec = 0;
+  *code = GetExitCodeProcess(pi.hProcess, &ec) ? (int)ec : -1;
+  CloseHandle(pi.hProcess);
+  CloseHandle(pi.hThread);
+  return true;
 #else
   int op[2], ep[2];
   if (pipe(op) != 0) { *err = Str("通り道を作れません"); return false; }
@@ -400,11 +722,13 @@ const PlatformRandom kRandom = {r_true, r_secure};
 
 // --- 任意機能：画面 -------------------------------------------------------
 //
-// 窓を開く（macOS は AppKit、Linux などは X11。どちらも実行時に取りに行く）。
+// 窓を開く（macOS は AppKit、Windows は user32、Linux などは X11。
+// どれも実行時に取りに行く）。
 // 開けなければ画面なしになり、std.ui は見えない面に描く。
 //
 // 環境変数 SHARK_UI に off を入れると、窓を試さずに画面なしにできる。
 #include "screen_mac.inc"
+#include "screen_win.inc"
 #include "screen_x11.inc"
 
 const PlatformScreen* g_active = 0;
@@ -425,15 +749,17 @@ void s_text_select(int start, int len) {
 void s_text_replace(const char* s) {
   if (g_active && g_active->text_replace) g_active->text_replace(s);
 }
-// 切り貼りの置き場は、窓を開いていなくても使えることがある（macOS はそう）
+// 切り貼りの置き場は、窓を開いていなくても使えることがある（macOS と Windows はそう）
 bool s_clipboard_get(Str* out) {
   if (g_active && g_active->clipboard_get) return g_active->clipboard_get(out);
   if (const PlatformScreen* m = mac_screen()) if (m->clipboard_get) return m->clipboard_get(out);
+  if (const PlatformScreen* w = win_screen()) if (w->clipboard_get) return w->clipboard_get(out);
   return false;
 }
 void s_clipboard_set(const char* s) {
   if (g_active && g_active->clipboard_set) { g_active->clipboard_set(s); return; }
-  if (const PlatformScreen* m = mac_screen()) if (m->clipboard_set) m->clipboard_set(s);
+  if (const PlatformScreen* m = mac_screen()) if (m->clipboard_set) { m->clipboard_set(s); return; }
+  if (const PlatformScreen* w = win_screen()) if (w->clipboard_set) w->clipboard_set(s);
 }
 
 // SHARK_UI=off（none も同じ）なら窓を開かない。screen_canvas.inc と同じ見方
@@ -446,9 +772,10 @@ bool ui_off() {
 bool s_open(const char* title, int w, int h) {
   g_active = 0;
   if (ui_off()) return false;
-  const PlatformScreen* order[2];
+  const PlatformScreen* order[3];
   int n = 0;
   if (const PlatformScreen* m = mac_screen()) order[n++] = m;
+  if (const PlatformScreen* w2 = win_screen()) order[n++] = w2;
   if (const PlatformScreen* x = x11_screen()) order[n++] = x;
   for (int i = 0; i < n; i++) {
     if (order[i]->open(title, w, h)) {
@@ -489,6 +816,7 @@ int s_scale() {
   if (g_active) return g_active->scale ? g_active->scale() : 1;
   if (ui_off()) return 1;
   if (const PlatformScreen* m = mac_screen()) if (m->scale) return m->scale();
+  if (const PlatformScreen* w = win_screen()) if (w->scale) return w->scale();
   if (const PlatformScreen* x = x11_screen()) if (x->scale) return x->scale();
   return 1;
 }
