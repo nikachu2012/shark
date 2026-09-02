@@ -1718,6 +1718,33 @@ static const char* const kFontPaths[] = {
 #endif
     0};
 
+// 控えのフォント。**本命に無い字**が来たときだけ、上から順に読む。
+// 絵文字・ハングル・記号など、1つのフォントには入りきらないものがここに来る。
+//
+// 並びは「軽くて広く持っているもの」から。読んだぶんはそのまま抱えるので、
+// 重いもの（CJK やハングルは 10 MB 近い）を後ろに置くと、
+// よくある字はわずかな出費で済む（→ core/lib/font_ft.inc の「控え」）。
+// 数を絞ってあるのも同じ理由で、似たものを何本も抱えても得にならない
+static const char* const kFallbackPaths[] = {
+#if defined(__APPLE__)
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",   // 記号を広く持っている
+    "/System/Library/Fonts/Apple Color Emoji.ttc",            // 絵文字
+    "/System/Library/Fonts/AppleSDGothicNeo.ttc",             // ハングル
+    "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc",         // 日本語（本命が英字のとき）
+#elif defined(_WIN32)
+    "C:\\Windows\\Fonts\\segoeui.ttf",      // 英数字・記号・キリル文字など（1 MB ほど）
+    "C:\\Windows\\Fonts\\seguiemj.ttf",     // 絵文字（Windows 8.1 以降）
+    "C:\\Windows\\Fonts\\malgun.ttf",       // ハングル
+    "C:\\Windows\\Fonts\\YuGothR.ttc",      // 日本語（本命が英字のとき）
+#else
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",      // 絵文字
+    "/usr/share/fonts/noto/NotoColorEmoji.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", // 日本語（本命が英字のとき）
+#endif
+    0};
+
 // フォントの中身を読む。コアはファイルを開かないので、移植層に頼む
 // （spec/runtime/embedding.md）。日本語のフォントは数 MB あるので、
 // プログラムのメモリ（--memory）には数えない malloc に置く
@@ -1752,12 +1779,53 @@ static bool read_font_file(const char* path, char** out, size_t* out_n) {
   return true;
 }
 
+// 控えの候補を、番号で1つずつ返す。
+//   0 番から  環境変数 SHARK_FONT_FALLBACK（; 区切り。使う人が決めたものが勝つ）
+//   そのあと  kFallbackPaths（機種にありそうなもの）
+// 一覧を先に作らないのは、控えが要るとは限らないから（たいていは要らない）
+static bool fallback_path_at(int index, Str* out) {
+  const PlatformOS* os = platform().os;
+  Str want;
+  if (os && os->env && os->env("SHARK_FONT_FALLBACK", &want) && want.size() > 0) {
+    int seen = 0;
+    Str cur;
+    for (int i = 0; i <= want.size(); i++) {
+      if (i == want.size() || want[i] == ';') {
+        if (cur.size()) {
+          if (seen == index) { *out = cur; return true; }
+          seen++;
+        }
+        cur.clear();
+        continue;
+      }
+      cur.push(want[i]);
+    }
+    index -= seen;
+  }
+  for (int i = 0; kFallbackPaths[i]; i++) {
+    if (index == 0) { *out = Str(kFallbackPaths[i]); return true; }
+    index--;
+  }
+  return false;
+}
+
+// font_ft.inc から呼ばれる。コアはファイルを開かないので、読むのはこちら。
+// 候補はあるが読めなかったときは data に 0 を入れて true（次の候補へ）
+static bool fallback_font_src(int index, char** data, size_t* n, Str* name) {
+  Str path;
+  if (!fallback_path_at(index, &path)) return false;
+  *name = path;
+  if (!read_font_file(path.c_str(), data, n)) { *data = 0; *n = 0; }
+  return true;
+}
+
 static bool load_font_path(const char* path, int px) {
   char* data = 0;
   size_t n = 0;
   if (!read_font_file(path, &data, &n)) return false;
   bool ok = ft::load(data, n, px, Str(path));
   free(data);
+  if (ok) ft::set_fallback_source(fallback_font_src);
   return ok;
 }
 
@@ -1820,7 +1888,9 @@ static NativeStatus u_font_bytes(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)n;
 #if defined(SHARK_FREETYPE)
   const Str& d = as_str(*A(a, 0))->s;
-  out = mk_bool(ft::load(d.data(), (size_t)d.size(), (int)A(a, 1)->i, Str("(bytes)")));
+  bool ok = ft::load(d.data(), (size_t)d.size(), (int)A(a, 1)->i, Str("(bytes)"));
+  if (ok) ft::set_fallback_source(fallback_font_src);   // 控えは、こちらでも効く
+  out = mk_bool(ok);
 #else
   (void)a;
   out = mk_bool(false);
