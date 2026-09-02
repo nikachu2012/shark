@@ -20,10 +20,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
-#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <termios.h>
 #include <unistd.h>
 #endif
 
@@ -402,16 +400,12 @@ const PlatformRandom kRandom = {r_true, r_secure};
 
 // --- 任意機能：画面 -------------------------------------------------------
 //
-// 出せるところに出す。順に試して、最初に開けたものを使う。
+// 窓を開く（macOS は AppKit、Linux などは X11。どちらも実行時に取りに行く）。
+// 開けなければ画面なしになり、std.ui は見えない面に描く。
 //
-//   1. 窓（macOS は AppKit、Linux などは X11。どちらも実行時に取りに行く）
-//   2. 端末（升目1つに上下2画素）
-//   3. どちらも駄目なら、画面なし（std.ui は見えない面に描く）
-//
-// 環境変数 SHARK_UI で選べる。window / terminal / off
+// 環境変数 SHARK_UI に off を入れると、窓を試さずに画面なしにできる。
 #include "screen_mac.inc"
 #include "screen_x11.inc"
-#include "screen_term.inc"
 
 const PlatformScreen* g_active = 0;
 PlatformScreen kScreen;   // 中身は開いたときに、選んだものへ差し替える
@@ -442,23 +436,20 @@ void s_clipboard_set(const char* s) {
   if (const PlatformScreen* m = mac_screen()) if (m->clipboard_set) m->clipboard_set(s);
 }
 
+// SHARK_UI=off（none も同じ）なら窓を開かない。screen_canvas.inc と同じ見方
+bool ui_off() {
+  const char* p = getenv("SHARK_UI");
+  if (!p || !p[0]) return false;
+  return strcmp(p, "off") == 0 || strcmp(p, "none") == 0;
+}
+
 bool s_open(const char* title, int w, int h) {
-  const char* pick = getenv("SHARK_UI");
-  bool want_win = true, want_term = true;
-  if (pick) {
-    if (strcmp(pick, "window") == 0) want_term = false;
-    else if (strcmp(pick, "terminal") == 0 || strcmp(pick, "term") == 0) want_win = false;
-    else if (strcmp(pick, "off") == 0 || strcmp(pick, "none") == 0) want_win = want_term = false;
-  }
-  const PlatformScreen* order[3];
+  g_active = 0;
+  if (ui_off()) return false;
+  const PlatformScreen* order[2];
   int n = 0;
-  if (want_win) {
-    if (const PlatformScreen* m = mac_screen()) order[n++] = m;
-    if (const PlatformScreen* x = x11_screen()) order[n++] = x;
-  }
-  if (want_term) {
-    if (const PlatformScreen* t = term_screen()) order[n++] = t;
-  }
+  if (const PlatformScreen* m = mac_screen()) order[n++] = m;
+  if (const PlatformScreen* x = x11_screen()) order[n++] = x;
   for (int i = 0; i < n; i++) {
     if (order[i]->open(title, w, h)) {
       g_active = order[i];
@@ -472,7 +463,6 @@ bool s_open(const char* title, int w, int h) {
       return true;
     }
   }
-  g_active = 0;
   return false;
 }
 void s_close() {
@@ -493,12 +483,11 @@ void s_set_cursor(int kind) {
   if (g_active && g_active->set_cursor) g_active->set_cursor(kind);
 }
 
-// 画面の細かさ。**開く前にも呼べる**ので、まだ選んでいなければ出せそうな順に尋ねる。
-// 窓を使わないと決まっているとき（SHARK_UI）は 1。端末にも見えない面にも細かさは無い
+// 画面の細かさ。**開く前にも呼べる**ので、まだ選んでいなければ開けそうな順に尋ねる。
+// 窓を開かないと決まっているとき（SHARK_UI=off）は 1。見えない面に細かさは無い
 int s_scale() {
   if (g_active) return g_active->scale ? g_active->scale() : 1;
-  const char* pick = getenv("SHARK_UI");
-  if (pick && pick[0] && strcmp(pick, "window") != 0) return 1;
+  if (ui_off()) return 1;
   if (const PlatformScreen* m = mac_screen()) if (m->scale) return m->scale();
   if (const PlatformScreen* x = x11_screen()) if (x->scale) return x->scale();
   return 1;

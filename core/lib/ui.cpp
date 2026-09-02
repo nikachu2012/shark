@@ -81,7 +81,7 @@ static void drop_surface() {
 }
 
 // 処理系を捨てるときに呼ばれる（registry.h）。
-// 画面を開いたまま終わっても、端末が元に戻るようにしておく
+// 画面を開いたまま終わっても、面と字形は返しておく
 void ui_shutdown() {
   drop_surface();
   font_close();   // 読んだフォントと、字形の覚え書きも返す
@@ -224,8 +224,8 @@ static NativeStatus u_open(VM& vm, Value* a, int n, Value& out) {
   g_open = true;
 
   const PlatformScreen* s = platform().screen;
-  // 画面が無い機種、端末でないところ（出力を | や > で受けているとき）では
-  // false が返る。そのときは見えない面に描くだけになる
+  // 画面が無い機種や、窓を開けないところでは false が返る。
+  // そのときは見えない面に描くだけになる
   g_visible = s && s->open(title.c_str(), g_w, g_h);
   // 窓の縁を引いている間もこちらで描き直せるように、口があれば渡しておく
   if (g_visible && s->set_redraw) s->set_redraw(ui_live_redraw);
@@ -963,8 +963,8 @@ static void input_frame(int x, int y, int h, const Str& value, Str* conf, Str* m
     g_input_seed = value;
     return;
   }
-  // 変換を持たない出し先（端末など）。ここで数えて動かす。
-  // 端末では、変換はその端末のソフトがやって、確定した文字だけが ui.typed() に届く
+  // 変換を持たない出し先。確定した文字だけが ui.typed() に届くので、
+  // 入力の位置（キャレット）はここで数えて動かす
   Str next = value;
   int n = utf8_len(next);
   if (g_caret > n) g_caret = n;
@@ -1032,7 +1032,7 @@ static NativeStatus u_poll(VM& vm, Value* a, int n, Value& out) {
         resize_surface(e.x, e.y);   // 窓に合わせて、面を同じ大きさに作り直す
       }
     }
-    // 離した合図が来ない機種（端末）では、押された刻みだけ押されているとみなす
+    // 離した合図が来ない機種では、押された刻みだけ押されているとみなす
     if (!s->has_key_up) {
       for (int i = 0; i < SKEY_Max; i++)
         if (g_key[i] && !g_hit[i]) { g_key[i] = false; g_rel[i] = true; }

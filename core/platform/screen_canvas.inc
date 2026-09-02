@@ -696,12 +696,11 @@ bool same(const char* a, const char* b) {
   return a[i] == b[i];
 }
 
-// SHARK_UI で画面を切れるようにしておく（desktop.cpp と同じ見方）。
-// ブラウザに端末は無いので、terminal も「画面なし」と同じに扱う
+// SHARK_UI で画面を切れるようにしておく（desktop.cpp と同じ見方）
 bool ui_off() {
   const char* p = getenv("SHARK_UI");
   if (!p || !p[0]) return false;
-  return same(p, "off") || same(p, "none") || same(p, "terminal") || same(p, "term");
+  return same(p, "off") || same(p, "none");
 }
 
 int screen_scale() {

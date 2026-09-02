@@ -5,7 +5,7 @@
 //
 //   ・libX11 は dlopen で開き、要る関数だけ dlsym で引く
 //   ・Xlib の構造体は、ここで必要なぶんだけ書き写す（並びは昔から変わっていない）
-//   ・開けなければ false。そのとき desktop.cpp は端末に落とす
+//   ・開けなければ false。そのとき std.ui は見えない面に描く
 #if defined(_WIN32) || defined(__EMSCRIPTEN__)
 
 const PlatformScreen* x11_screen() { return 0; }

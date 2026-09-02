@@ -7,7 +7,7 @@
 //   ・呼び出しは objc_msgSend を、そのつど正しい形に見立てて呼ぶ
 //   ・画素は CGImage にして、窓の層（CALayer）に貼る。拡大は補間しない
 //
-// 開けなければ false を返すだけ。そのとき desktop.cpp は端末に落とす。
+// 開けなければ false を返すだけ。そのとき desktop.cpp は次の出し先を試す。
 #if !defined(__APPLE__)
 
 const PlatformScreen* mac_screen() { return 0; }
@@ -106,7 +106,7 @@ State g;
 Obj g_sink = 0;
 bool g_text_on = false;
 
-// 出来事の待ち行列（端末側と同じ形）
+// 出来事の待ち行列
 ScreenEvent q[128];
 int qh = 0, qn = 0;
 void push(const ScreenEvent& e) {
