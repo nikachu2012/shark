@@ -180,7 +180,7 @@ int screen_scale() {
 // 大きい面はそのまま**画面の画素と1対1**にする。HiDPI ではこれで細かく出る
 int pick_scale(int w, int h) {
   int s = 1;
-  while (s < 6 && w * (s + 1) <= 640 && h * (s + 1) <= 480) s++;
+  while (s < 6 && w * (s + 1) <= 320 && h * (s + 1) <= 240) s++;
   return s;
 }
 
