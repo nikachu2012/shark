@@ -1,13 +1,21 @@
 # ビルドでできるもの
 *.o
+*.obj
 /shark
 /sharkvm
+/shark.exe
+/sharkvm.exe
+/build/
+# FreeType は build/ の中に取ってきて作る（tools/build_win.bat freetype）
 /examples/embed/game
 /examples/embed/build_stage
 /examples/embed/play_stage
+/examples/embed/*.exe
 /examples/embed/stage_bytecode.h
 /tests/memcheck
 /tests/bytecheck
+/tests/memcheck.exe
+/tests/bytecheck.exe
 /bench/build/
 /docs/reference/
 /web/dist/

@@ -8,6 +8,10 @@
 #   make web-serve  作ってから、その場で配る（http://localhost:8000/）
 #   make clean
 #
+# Windows で Visual Studio を使うときは、この Makefile ではなく
+# tools\build_win.bat を使う（make も MinGW も要らない）。README の
+# 「Windows で作る」を見ること。MSYS2 / MinGW の make なら、これがそのまま動く。
+#
 # 例外と RTTI は使わない（spec/skeleton.md）。外部ライブラリには依存しない。
 
 CXX      ?= c++
@@ -15,9 +19,18 @@ CXXSTD   ?= -std=c++17
 CXXFLAGS ?= -O2 -Wall -Wextra -Wno-unused-parameter
 CORE_FLAGS = $(CXXSTD) $(CXXFLAGS) -fno-exceptions -fno-rtti
 
-# 窓（std.ui）は OS の道具を**実行時に**取りに行く（dlopen）。
+UNAME_S := $(shell uname -s)
+
+# Windows の実行ファイルには .exe が付く（付けないと、毎回作り直しになる）
+ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)))
+EXE := .exe
+else
+EXE :=
+endif
+
+# 窓（std.ui）は OS の道具を**実行時に**取りに行く（dlopen / LoadLibrary）。
 # そのため作るときに要るライブラリは無い。古い glibc だけ dlopen が -ldl にある
-ifeq ($(shell uname -s),Linux)
+ifeq ($(UNAME_S),Linux)
 LDLIBS += -ldl
 endif
 
@@ -58,7 +71,7 @@ OBJ = $(CORE_SRC:.cpp=.o) $(FRONT_SRC:.cpp=.o)
 VM_OBJ = $(RT_SRC:.cpp=.o) $(VM_FRONT_SRC:.cpp=.o)
 HDR = $(wildcard core/*.h core/platform/*.h core/platform/*.inc core/lib/*.inc frontend/*.h)
 
-all: shark sharkvm
+all: shark$(EXE) sharkvm$(EXE)
 
 # Shark 自身で書いた部分（並べ替えと、宣言的 UI の入り口）。
 # コアはファイルを読まないので埋め込む
@@ -68,46 +81,46 @@ core/prelude.h: stdlib/prelude.shk stdlib/prelude_ui.shk tools/prelude.py
 # ゲームに組み込む例（spec/runtime/embedding.md）
 #   game        プレイヤーが書いたコードを、その場で読んで動かす
 #   play_stage  作者のステージを、バイトコードにして焼き込んだもの
-embed: examples/embed/game examples/embed/play_stage
-examples/embed/game: examples/embed/game.o $(CORE_SRC:.cpp=.o)
+embed: examples/embed/game$(EXE) examples/embed/play_stage$(EXE)
+examples/embed/game$(EXE): examples/embed/game.o $(CORE_SRC:.cpp=.o)
 	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
 
 # バイトコードを焼き込む例（spec/runtime/bytecode.md）。
 #   build_stage  開発機で動かす道具。stage.shk → C の配列
 #   play_stage   ゲーム機に載る側。実行装置（RT_SRC）だけをリンクする
-examples/embed/build_stage: examples/embed/build_stage.o $(CORE_SRC:.cpp=.o)
+examples/embed/build_stage$(EXE): examples/embed/build_stage.o $(CORE_SRC:.cpp=.o)
 	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
 # ホストの表を変えたら焼き直す（指紋が変わるので、古いままだと読めなくなる）
 examples/embed/game.o examples/embed/build_stage.o examples/embed/play_stage.o: \
   examples/embed/game_hosts.h
-examples/embed/stage_bytecode.h: examples/embed/build_stage examples/embed/stage.shk \
+examples/embed/stage_bytecode.h: examples/embed/build_stage$(EXE) examples/embed/stage.shk \
   examples/embed/game_hosts.h
-	@./examples/embed/build_stage examples/embed/stage.shk $@
+	@./examples/embed/build_stage$(EXE) examples/embed/stage.shk $@
 examples/embed/play_stage.o: examples/embed/stage_bytecode.h
-examples/embed/play_stage: examples/embed/play_stage.o $(RT_SRC:.cpp=.o)
+examples/embed/play_stage$(EXE): examples/embed/play_stage.o $(RT_SRC:.cpp=.o)
 	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
 
-shark: $(OBJ)
+shark$(EXE): $(OBJ)
 	$(CXX) $(CORE_FLAGS) -o $@ $(OBJ) $(LDLIBS)
 
 # バイトコードだけを動かす実行装置（spec/runtime/bytecode.md）。
 # shark build がこれを土台にして単一バイナリを作るので、shark と一緒に作る
-sharkvm: $(VM_OBJ)
+sharkvm$(EXE): $(VM_OBJ)
 	$(CXX) $(CORE_FLAGS) -o $@ $(VM_OBJ) $(LDLIBS)
 
 # ヘッダを直したら全部を作り直す（型の並びが変わるため）
 %.o: %.cpp $(HDR)
 	$(CXX) $(CORE_FLAGS) -c $< -o $@
 
-test: shark sharkvm tests/memcheck tests/bytecheck
+test: shark$(EXE) sharkvm$(EXE) tests/memcheck$(EXE) tests/bytecheck$(EXE)
 	@sh tests/run.sh
 
 # メモリの後始末と上限を見る（tests/run.sh から呼ばれる）
-tests/memcheck: tests/memcheck.o $(CORE_SRC:.cpp=.o)
+tests/memcheck$(EXE): tests/memcheck.o $(CORE_SRC:.cpp=.o)
 	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
 
 # 壊れたバイトコードを断るか見る（tests/run.sh から呼ばれる）
-tests/bytecheck: tests/bytecheck.o $(CORE_SRC:.cpp=.o)
+tests/bytecheck$(EXE): tests/bytecheck.o $(CORE_SRC:.cpp=.o)
 	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
 
 # コアのソース一覧を出す（web/build.sh が使う）。
@@ -116,7 +129,7 @@ print-core-src:
 	@echo $(CORE_SRC)
 
 # C・Python・Shark の速さ比べ
-bench: shark
+bench: shark$(EXE)
 	@python3 bench/run.py
 
 # リファレンス（docs/reference/）。中身は stdlib/*.shk の宣言ファイルが正で、
@@ -125,7 +138,7 @@ docs:
 	@python3 docs/gen.py
 
 # 宣言に書いた例を、ぜんぶ動かして確かめる
-docs-check: shark
+docs-check: shark$(EXE)
 	@python3 tools/runex.py
 
 # ブラウザで動かす（web/README.md）。移植層は core/platform/web.cpp
@@ -143,10 +156,10 @@ web-test: web
 	@node web/test.js
 
 clean:
-	rm -f $(OBJ) $(VM_OBJ) examples/embed/game.o examples/embed/game tests/memcheck.o tests/memcheck shark sharkvm
-	rm -f tests/bytecheck.o tests/bytecheck
-	rm -f examples/embed/build_stage.o examples/embed/build_stage examples/embed/play_stage.o \
-	      examples/embed/play_stage examples/embed/stage_bytecode.h
+	rm -f $(OBJ) $(VM_OBJ) examples/embed/game.o examples/embed/game$(EXE) tests/memcheck.o tests/memcheck$(EXE) shark$(EXE) sharkvm$(EXE)
+	rm -f tests/bytecheck.o tests/bytecheck$(EXE)
+	rm -f examples/embed/build_stage.o examples/embed/build_stage$(EXE) examples/embed/play_stage.o \
+	      examples/embed/play_stage$(EXE) examples/embed/stage_bytecode.h
 	rm -rf docs/reference
 	rm -rf bench/build web/dist
 
