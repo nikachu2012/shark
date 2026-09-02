@@ -182,7 +182,11 @@ static Str strip_ext(const Str& p) {
 static Str run_path(const Str& p) {
   if (p.size() && p[0] == '/') return p;
   for (int i = 0; i < p.size(); i++) if (p[i] == '/' || p[i] == '\\') return p;
+#if defined(_WIN32)
+  return Str(".\\") + p;
+#else
   return Str("./") + p;
+#endif
 }
 
 // 単一バイナリの土台になる実行装置（sharkvm）を探す。
@@ -327,6 +331,10 @@ static int cmd_build(const Str& file, const Str& out_given, bool bytecode_only,
 
   // 既定の置き場所は --bytecode と同じ「もとのソースの隣」にそろえる
   Str out = out_given.size() ? out_given : strip_ext(file);
+#if defined(_WIN32)
+  // Windows は .exe が付いていないと実行ファイルとして動かせない
+  if (!(out.size() > 4 && out.sub(out.size() - 4, 4) == ".exe")) out += ".exe";
+#endif
   if (same_file(out, file)) {
     fprintf(stderr,
             "書き出す先が、もとのソースと同じです: %s\n"
@@ -488,6 +496,7 @@ static void usage() {
 
 int main_impl(int argc, char** argv) {
   platform_set(platform_desktop());
+  host_use_bundled_font();   // 隣に置いた Noto Sans を既定にする
   Lang lang = LANG_JA;
   bool strict = false;
   bool color = color_default();
@@ -572,4 +581,7 @@ int main_impl(int argc, char** argv) {
 
 }  // namespace shark
 
-int main(int argc, char** argv) { return shark::main_impl(argc, argv); }
+int main(int argc, char** argv) {
+  shark::host_boot(&argc, &argv);   // Windows のときだけ、端末と引数を UTF-8 にそろえる
+  return shark::main_impl(argc, argv);
+}

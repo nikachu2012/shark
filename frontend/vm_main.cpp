@@ -64,6 +64,7 @@ static int run_bytecode(const Str& bytes, const Str& shown_name, int memory_mb, 
 
 int main_impl(int argc, char** argv) {
   platform_set(platform_desktop());
+  host_use_bundled_font();   // 隣に置いた Noto Sans を既定にする
 
   // 自分自身のうしろにバイトコードが埋まっていれば、それを動かす（単一バイナリ）
   Str self;
@@ -121,4 +122,7 @@ int main_impl(int argc, char** argv) {
 
 }  // namespace shark
 
-int main(int argc, char** argv) { return shark::main_impl(argc, argv); }
+int main(int argc, char** argv) {
+  shark::host_boot(&argc, &argv);   // Windows のときだけ、端末と引数を UTF-8 にそろえる
+  return shark::main_impl(argc, argv);
+}
