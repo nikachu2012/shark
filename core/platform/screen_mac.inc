@@ -44,6 +44,12 @@ void sendb(Obj o, const char* s, bool b) {
 }
 long sendl(Obj o, const char* s) { return ((long (*)(Obj, Sel))msgSend)(o, S(s)); }
 bool sendbool(Obj o, const char* s) { return ((signed char (*)(Obj, Sel))msgSend)(o, S(s)) != 0; }
+// その相手がその命令を受けられるか。持っていない呼び名を送ると、OS が例外を投げて
+// プログラムごと落ちる（NSTextView には undo: が無い、など）。機種ごとに増減する
+bool responds(Obj o, const char* sel) {
+  if (!o) return false;
+  return ((signed char (*)(Obj, Sel, Sel))msgSend)(o, S("respondsToSelector:"), S(sel)) != 0;
+}
 
 Obj nsstr(const char* s) {
   Obj a = send(C("NSString"), "alloc");
@@ -475,16 +481,28 @@ void pump() {
         }
         // Cmd の切り貼り。menu bar を持たないので、こちらから受け皿に頼む
         if (down && g_text_on && g_sink && (mods & (1ul << 20))) {
+          if (cp == 'z') {
+            // 取り消しとやり直しは、受け皿ではなく**取り消し帳**（NSUndoManager）が
+            // 持っている。NSTextView に undo: は無いので、送るとそこで落ちる
+            Obj um = responds(g_sink, "undoManager") ? send(g_sink, "undoManager") : 0;
+            if (um) {
+              bool shift = (mods & (1ul << 17)) != 0;   // Shift つきなら、やり直し
+              if (shift) { if (sendbool(um, "canRedo")) sendv(um, "redo"); }
+              else if (sendbool(um, "canUndo")) sendv(um, "undo");
+            }
+            break;
+          }
           const char* act = 0;
           if (cp == 'c') act = "copy:";
           else if (cp == 'v') act = "paste:";
           else if (cp == 'x') act = "cut:";
           else if (cp == 'a') act = "selectAll:";
-          else if (cp == 'z') act = "undo:";
-          if (act) {
+          // 受けられないものは送らない（送ると OS が例外を投げて落ちる）
+          if (act && responds(g_sink, act)) {
             ((void (*)(Obj, Sel, Obj))msgSend)(g_sink, S(act), 0);
             break;
           }
+          if (act) break;   // 受けられなくても、キーはここで使い切る
         }
         // 打たれた文字。修飾キーつきのものと、機能キーは渡さない。
         // 文字入力（IME）の最中は、受け皿が受け取るのでこちらからは渡さない
@@ -755,11 +773,6 @@ const char* cursor_sel(int kind) {
     case SCUR_Move: return "openHandCursor";
     default: return "arrowCursor";
   }
-}
-
-// 持っていない呼び名を送ると落ちるので、先に尋ねる（機種ごとに増減する）
-bool responds(Obj o, const char* sel) {
-  return ((signed char (*)(Obj, Sel, Sel))msgSend)(o, S("respondsToSelector:"), S(sel)) != 0;
 }
 
 void apply_cursor() {

@@ -2326,23 +2326,26 @@ static int mark_gap() {
   int n = ui_unit() / 3;
   return n < 4 ? 4 : n;
 }
+// 高さ h の箱の中に字を置くときの y。put_text は「行の箱」を置くので、
+// (h - line_h) / 2 にすると**字が下に寄って見える**（行の箱は上に行間があく）。
+// 字の見た目のまんなかが箱のまんなかに来るところを返す
+static int text_y_mid(int y, int h, int scale) {
+  return y + h / 2 - text_mid(scale);
+}
+
 static int box_w();   // 下で定義
-// 印と字を並べた1行の高さ。印は字の見た目のまんなかに合わせて置くので、
-// その下端まで入るだけ取る
+// 印と字を並べた1行の高さ。どちらもこの高さの真ん中に置くので、高いほうを取る
 static int mark_row_h() {
-  int h = line_h(1);
-  int bw = box_w();
-  int need = text_mid(1) + (bw + 1) / 2;
-  if (need > h) h = need;
-  if (bw > h) h = bw;
-  return h;
+  int h = line_h(1), bw = box_w();
+  return bw > h ? bw : h;
 }
 // チェックの四角と、ラジオの丸。**字の高さに合わせる**（小さいと押しにくく、
 // 字と並べたときに沈んで見える）
 static int box_w() {
   int h = line_h(1) * 7 / 8;
   if (h < ui_unit()) h = ui_unit();
-  return h < 9 ? 9 : h;
+  if (h < 9) h = 9;
+  return (h & 1) ? h : h + 1;   // 奇数にすると、丸が枠にきっちり収まる
 }
 
 
@@ -2854,7 +2857,7 @@ static void place_button(const Value& v, int x, int y, const Box& b) {
   for (int i = 1; i < b.h - 1; i++) { put(x, y + i, edge); put(x + b.w - 1, y + i, edge); }
   // 決め打ちで広げたときは、ラベルを真ん中に置く
   int tw = text_px_width(w_text(v), 1);
-  put_text(x + (b.w - tw) / 2, y + (b.h - line_h(1)) / 2, w_text(v), 1, w_fg(v));
+  put_text(x + (b.w - tw) / 2, text_y_mid(y, b.h, 1), w_text(v), 1, w_fg(v));
   if (over && g_mpress[0]) hit(v, 1);
 }
 
@@ -2865,10 +2868,8 @@ static void place_checkbox(const Value& v, int x, int y, const Box& b) {
   bool over = inside(x, y, b.w, b.h);
   if (over) g_cursor_want = SCUR_Hand;
   int bw = box_w();
-  int ty = y + (b.h - line_h(1)) / 2;       // 行の箱を、部品の真ん中に
-  int by = ty + text_mid(1) - bw / 2;       // 印は、字の見た目のまんなかに合わせる
-  if (by < y) by = y;
-  if (by + bw > y + b.h) by = y + b.h - bw;
+  int by = y + (b.h - bw) / 2;              // 印も字も、部品のまんなかに合わせる
+  int ty = text_y_mid(y, b.h, 1);
   uint32_t edge = blend(g_bg, g_accent, on ? 1.0 : (over ? 0.85 : 0.5));
   uint32_t face = blend(g_bg, g_accent, over ? 0.25 : 0.12);
   for (int i = 0; i < bw; i++) span(x, by + i, bw, edge);
@@ -3065,7 +3066,7 @@ static void menu_draw() {
     int iy = by + r * ih - off;
     if (inside(x, iy, w, ih))
       for (int k = 1; k < ih - 1; k++) span(x + 1, iy + k, w - 2, blend(g_bg, g_accent, 0.45));
-    put_text(x + pad_x() * 2, iy + pad_y(), g_menu_items[i], 1, g_fg);
+    put_text(x + pad_x() * 2, text_y_mid(iy, ih, 1), g_menu_items[i], 1, g_fg);
   }
   g_cx0 = kx0;
   g_cy0 = ky0;
@@ -3212,7 +3213,7 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
   bool over = inside(x, y, b.w, b.h);
   if (over) g_cursor_want = SCUR_Text;   // 文字を打つところ
   bool focused = g_focus.size() > 0 && g_focus == id;
-  int tx = x + field_pad_x(), ty = y + (b.h - line_h(1)) / 2;
+  int tx = x + field_pad_x(), ty = text_y_mid(y, b.h, 1);
   if (ty < y) ty = y;
   int room = b.w - field_pad_x() * 2;
 
@@ -3863,10 +3864,8 @@ static void place_radio(const Value& v, int x, int y, const Box& b) {
   bool over = inside(x, y, b.w, b.h);
   if (over) g_cursor_want = SCUR_Hand;
   int bw = box_w(), r = bw / 2;
-  int ty = y + (b.h - line_h(1)) / 2;
-  int by = ty + text_mid(1) - bw / 2;            // 丸も、字の見た目のまんなかに合わせる
-  if (by < y) by = y;
-  if (by + bw > y + b.h) by = y + b.h - bw;
+  int by = y + (b.h - bw) / 2;                   // 丸も字も、部品のまんなかに合わせる
+  int ty = text_y_mid(y, b.h, 1);
   int cx = x + r, cy = by + r;
   uint32_t edge = blend(g_bg, g_accent, on ? 1.0 : (over ? 0.85 : 0.5));
   uint32_t face = on ? g_bg : blend(g_bg, g_accent, over ? 0.25 : 0.12);
@@ -3899,7 +3898,7 @@ static void place_combo(const Value& v, int x, int y, const Box& b) {
   span(x + 1, y + b.h - 1, b.w - 2, edge);
   for (int i = 1; i < b.h - 1; i++) { put(x, y + i, edge); put(x + b.w - 1, y + i, edge); }
   if (idx >= 0 && idx < n)
-    put_text(x + pad_x(), y + (b.h - line_h(1)) / 2, opt_at(v, idx), 1, w_fg(v));
+    put_text(x + pad_x(), text_y_mid(y, b.h, 1), opt_at(v, idx), 1, w_fg(v));
   // 「開く」しるしの三角（▼）
   int aw = arrow_w();
   tri_down(x + b.w - pad_x() - aw, y + (b.h - aw / 2) / 2, aw, w_fg(v));
@@ -4054,7 +4053,6 @@ static void place_list(const Value& v, int x, int y, const Box& b) {
 static void place_tabs(const Value& v, int x, int y, const Box& b) {
   int n = opt_count(v);
   int idx = (int)w_a(v);
-  int lh = line_h(1);
   int base = y + b.h - 2;   // 見出しの下に通す線
   span(x, base, b.w, blend(g_bg, g_fg, 0.3));
   int xx = x;
@@ -4067,7 +4065,7 @@ static void place_tabs(const Value& v, int x, int y, const Box& b) {
       uint32_t face = blend(g_bg, g_accent, sel ? 0.3 : 0.15);
       for (int k = 0; k < b.h - 2; k++) span(xx, y + k, tw, face);
     }
-    put_text(xx + pad_x(), y + (b.h - 2 - lh) / 2, opt_at(v, i), 1, w_fg(v));
+    put_text(xx + pad_x(), text_y_mid(y, b.h - 2, 1), opt_at(v, i), 1, w_fg(v));
     if (sel) {   // 選ばれているタブの下だけ、差し色で太く引く
       span(xx, base, tw, g_accent);
       span(xx, base + 1, tw, g_accent);
@@ -4104,8 +4102,7 @@ static void place_number(const Value& v, int x, int y, const Box& b) {
   int sw = step_w();
   int fw = b.w - sw * 2;   // 字を出すところの幅
   if (fw < 1) fw = 1;
-  int lh = line_h(1);
-  int ty = y + (b.h - lh) / 2;
+  int ty = text_y_mid(y, b.h, 1);
 
   // --- 押された ---
   bool over_box = inside(x, y, fw, b.h);
@@ -4189,7 +4186,7 @@ static void place_number(const Value& v, int x, int y, const Box& b) {
     put_text(sx, ty, shown, 1, w_fg(v));
   if (focused) {
     int cw = caret_w();
-    for (int i = ty - 1; i <= ty + lh; i++) span(sx + tw, i, cw, g_accent);
+    for (int i = ty - 1; i <= ty + line_h(1); i++) span(sx + tw, i, cw, g_accent);
   }
   g_cx0 = kx0;
   g_cy0 = ky0;

@@ -23,12 +23,22 @@ static void ignore_out(void* ud, const char* s, int n) { (void)ud; (void)s; (voi
 
 #include "fake_screen.inc"
 
+// 内蔵の 5×7 は 1 字 6 画素。入力欄は (0,0) に置くので、字は x=5 から始まる
+static const int kCellW = 6;
+static const int kTextX = 5;     // field_pad_x()
+static const int kTextY = 3;     // field_pad_y()
+static const int kLineH = 8;
+
 // --- 絵から読み取る -------------------------------------------------------
 // 変換中の字には下線が引かれる（差し色）。その左端の画素を探す。
-// 枠も差し色なので、字の始まる x から右へ見る
-static int underline_x(int row, int from) {
+// 枠も差し色なので、字の始まる x から右へ、枠の上下を外して見る
+// （下線の行そのものは字の大きさで動くので、決め打ちにしない）
+static int underline_x(int from) {
+  // 見るのは字の行のあたりだけ。枠の上下の線も差し色なので、そこまで見ると
+  // いちばん左の枠を拾ってしまう
   for (int x = from; x < fake::pw; x++)
-    if (fake::px[row * fake::pw + x] == fake::kAccent) return x;
+    for (int y = 1; y <= kTextY + kLineH + 1; y++)
+      if (fake::at(x, y) == fake::kAccent) return x;
   return -1;
 }
 
@@ -41,12 +51,6 @@ static void expect(const char* label, int got, int want) {
   g_fail++;
 }
 
-// 内蔵の 5×7 は 1 字 6 画素。入力欄は (0,0) に置くので、字は x=5 から始まる
-static const int kCellW = 6;
-static const int kTextX = 5;     // field_pad_x()
-static const int kTextY = 3;     // field_pad_y()
-static const int kLineH = 8;
-
 // 台本。1こま描くごとに1つ進める
 //   0: "abc" のうしろを押す（3 文字目にカーソルが行く）
 //   1: 離す
@@ -57,7 +61,7 @@ static int g_step = 0;
 static int g_seen[8];
 static void one_frame() {
   // 描き終わったところ。変換中の下線がどこから始まっているかを控える
-  if (g_step >= 3 && g_step <= 6) g_seen[g_step] = underline_x(kTextY + kLineH - 1, kTextX);
+  if (g_step >= 3 && g_step <= 6) g_seen[g_step] = underline_x(kTextX);
   switch (g_step) {
     case 0: fake::mouse(kTextX + kCellW * 3, kTextY + 2, 0, true); break;
     case 1: fake::mouse(kTextX + kCellW * 3, kTextY + 2, 0, false); break;
