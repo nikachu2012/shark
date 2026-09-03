@@ -22,8 +22,9 @@ namespace canvas {
 // EM_JS で書いたものは、C からは普通の関数に見える。持ち物は Module.__shark_screen。
 
 // 出来事の番号とキーの番号は、C の側（platform.h）が正。開く前に一度だけ渡す
-EM_JS(void, cv_kinds, (int close, int key, int text, int mouse, int resize), {
-  Module.__shark_ev = ({ close: close, key: key, text: text, mouse: mouse, resize: resize });
+EM_JS(void, cv_kinds, (int close, int key, int text, int mouse, int resize, int wheel), {
+  Module.__shark_ev =
+      ({ close: close, key: key, text: text, mouse: mouse, resize: resize, wheel: wheel });
 });
 EM_JS(void, cv_key, (const char* name, int code), {
   if (!Module.__shark_keys) Module.__shark_keys = ({});
@@ -286,6 +287,7 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
   S.dpi = dpi;
   S.resizable = true;
   S.textOn = false;
+  S.textMulti = false;
   S.ta = null;       // 文字入力の受け皿（text_input で作る）
   S.comp = null;     // 変換中のようす
   S.held = ({});     // いま押されているキー（焦点が外れたら離したことにする）
@@ -311,8 +313,8 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
     S.q.push(e);
   }
   function ev(kind) { return ({ kind: kind, code: 0, down: false, x: 0, y: 0, text: "" }); }
-  function on(target, kind, fn) {
-    target.addEventListener(kind, fn);
+  function on(target, kind, fn, opt) {
+    target.addEventListener(kind, fn, opt);
     S.listeners.push([target, kind, fn]);
   }
   // --- マウス（指も同じ道を通る） ---
@@ -348,10 +350,29 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
   on(c, 'pointercancel', function (e) { mouse(e, button(e), false); });
   on(c, 'contextmenu', function (e) { e.preventDefault(); });   // 右で押すのは ui.menu のもの
 
+  // 車輪（ホイール）。届く単位は機種と設定でまちまちなので、行の数に直して渡す。
+  // 単位は 1/100 行で、**ためない**（細かいまま渡せるので、ゆっくり動かしたぶんも落ちない）。
+  // passive を切らないと、ページの巻物を止められない
+  on(c, 'wheel', function (e) {
+    var k = e.deltaMode === 1 ? 1 : (e.deltaMode === 2 ? (S.sh / 16) : (1 / 16));
+    var fx = (e.deltaX * k * 100) | 0;   // 0 の方へ落とす
+    var fy = (e.deltaY * k * 100) | 0;
+    if (fx || fy) {
+      var q = ev(EV.wheel);
+      q.x = fx;              // 下と右が正。ブラウザの delta と同じ向き
+      q.y = fy;
+      push(q);
+    }
+    e.preventDefault();
+  }, ({ passive: false }));
+
+
   // --- キー ---
   // 面と受け皿はどちらも入れ物の中にあるので、まとめて入れ物で受ける
   var PREVENT = ({ ArrowLeft: 1, ArrowRight: 1, ArrowUp: 1, ArrowDown: 1, PageUp: 1,
                    PageDown: 1, Home: 1, End: 1, Tab: 1, Enter: 1, Backspace: 1, ' ': 1 });
+  // 複数行の入力欄で、コアが受け持つキー（受け皿の既定の動きは止める）
+  var LINEKEY = ({ ArrowUp: 1, ArrowDown: 1, Home: 1, End: 1, PageUp: 1, PageDown: 1 });
   function keyOf(e) {
     var k = KEYS[e.key];
     if (k !== undefined) return k;
@@ -388,6 +409,12 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
     }
     // 面が受け取ったキーは、ブラウザの既定の動き（巻物・焦点の移動）に渡さない
     if (!S.textOn && !e.ctrlKey && !e.metaKey && !e.altKey && PREVENT[e.key]) e.preventDefault();
+    // 改行はコア（Shark）が入れる。受け皿にも入れさせると二重になる。
+    // 複数行の入力欄では、行にまつわるキーもコアが受け持つ（折り返す幅が違うため）
+    if (S.textOn && !e.ctrlKey && !e.metaKey && !e.altKey &&
+        (e.key === 'Enter' ||
+         (S.textMulti && LINEKEY[e.key])))
+      e.preventDefault();
   }
   function release() {   // 焦点が外れた。押しっぱなしのままにしない
     for (var k in S.held) {
@@ -526,7 +553,7 @@ EM_JS(int, cv_poll, (int* f, char* text), {
 
 // --- 文字入力（IME）------------------------------------------------------
 // 変換は OS とブラウザが持っている。見えない textarea に任せて、結果だけ受け取る
-EM_JS(void, cv_text_input, (int on, const char* initial, int x, int y, int h), {
+EM_JS(void, cv_text_input, (int on, const char* initial, int x, int y, int h, int multi), {
   var S = Module.__shark_screen;
   if (!S) return;
   if (!on) {
@@ -536,6 +563,7 @@ EM_JS(void, cv_text_input, (int on, const char* initial, int x, int y, int h), {
       S.ta.style.display = 'none';
     }
     S.textOn = false;
+    S.textMulti = false;
     S.comp = null;
     return;
   }
@@ -581,6 +609,7 @@ EM_JS(void, cv_text_input, (int on, const char* initial, int x, int y, int h), {
     }
   }
   S.textOn = true;
+  S.textMulti = !!multi;
   // 焦点を取り戻すのは、面か、どこにも無いときだけ。ページの他のところからは奪わない
   var ae = document.activeElement;
   if (ae !== S.ta && (ae === S.canvas || ae === document.body || !ae)) S.ta.focus();
@@ -596,7 +625,8 @@ EM_JS(int, cv_text_state, (char* conf, int conf_cap, char* mark, int mark_cap), 
     m = v.substr(S.comp.start, S.comp.len);
     v = v.slice(0, S.comp.start) + v.slice(S.comp.start + S.comp.len);
   }
-  var clean = function (s) { return s.split('\n').join("").split('\r').join(""); };
+  // 改行は '\n' に揃えて残す。1行の入力欄で落とすのはコアの側（input_frame）
+  var clean = function (s) { return s.split('\r\n').join('\n').split('\r').join('\n'); };
   var put = function (s, ptr, cap) {
     s = clean(s);
     while (s.length && lengthBytesUTF8(s) >= cap) s = s.slice(0, -1);   // 入る分だけ
@@ -722,7 +752,7 @@ void init_js() {
   static bool done = false;
   if (done) return;
   done = true;
-  cv_kinds(SEV_Close, SEV_Key, SEV_Text, SEV_Mouse, SEV_Resize);
+  cv_kinds(SEV_Close, SEV_Key, SEV_Text, SEV_Mouse, SEV_Resize, SEV_Wheel);
   // DOM の KeyboardEvent.key から、こちらのキーの番号にする表。
   // 印字できる文字は、その ASCII をそのまま使う（JavaScript の側で数える）
   struct { const char* name; int code; } m[] = {
@@ -793,14 +823,16 @@ bool poll(ScreenEvent* out) {
   return true;
 }
 
-void text_input(bool on, const char* initial, int x, int y, int h) {
+void text_input(bool on, const char* initial, int x, int y, int h, bool multi) {
   if (!g.open) return;
-  cv_text_input(on ? 1 : 0, initial, x, y, h);
+  cv_text_input(on ? 1 : 0, initial, x, y, h, multi ? 1 : 0);
 }
 
 bool text_state(Str* confirmed, Str* marked) {
   if (!g.open) return false;
-  char conf[4096], mark[512];
+  // 複数行の入力欄（ui.textarea）の中身も、ここを通って返る。
+  // 入りきらないぶんは末尾から落ちるので、置き場は広めに取る（積まずに持つ）
+  static char conf[16384], mark[512];
   conf[0] = 0;
   mark[0] = 0;
   if (!cv_text_state(conf, (int)sizeof conf, mark, (int)sizeof mark)) return false;

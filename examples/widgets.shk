@@ -1,0 +1,197 @@
+// widgets.shk — 宣言的な層の部品を、ぜんぶ1つの画面に出す見本
+//
+//   ./shark run examples/widgets.shk
+//
+// 出てくる部品:
+//   ui.label / ui.button / ui.checkbox / ui.radio / ui.slider / ui.number /
+//   ui.field / ui.password / ui.textarea / ui.combo / ui.listbox / ui.tabs /
+//   ui.space / ui.divider / ui.col / ui.row / ui.grid / ui.center
+// 見た目を変える鎖:
+//   .color / .background / .padding / .width / .height / .align /
+//   .tooltip / .placeholder
+//
+// 一覧（ui.listbox）と選ぶ（ui.combo）とメモ（ui.textarea）は、カーソルを乗せて
+// 車輪（ホイール）を回しても送れる。一覧の右の帯は、つまんで動かせる。
+//
+// 押されたときの受け取り方も、両方とも出てくる。
+//   ・部品に**関数を持たせる**（動きを、その場に書く）
+//   ・部品に**名札を付ける**（update() で振り分ける）
+// 入力欄も、両方とも出てくる（ref で変数を渡す形と、名札で受ける形）。
+//
+// 日本語は ui.run() が機種のフォントを読むので、そのまま出る（ブラウザでは
+// ブラウザが描くので、かな漢字変換もそのまま使える）。窓で FreeType を入れずに
+// 作ったときだけ □ になる（README の「日本語の字を出す」）。
+import std.ui;
+import std.file;
+
+// 状態はふつうの変数。処理系は覚えない。
+// 入力欄に ref で渡すものは、ここ（一番外側）に置く
+var count = 0;
+var sound = true;
+var volume = 60;
+var size = 1;
+var age = 12;
+var name = "さめ";
+var word = "aiueo";
+var memo = "ここは複数行の入力欄です。\n改行は enter。\n上下の矢印で行を行き来し、置ける幅に入らない行はひとりでに折り返します。";
+var page = 0;
+var iro = 4;
+var sakana = 0;
+var last = "なし";
+
+var iro_na = ["あか", "だいだい", "きいろ", "みどり", "あお", "むらさき"];
+var iro_ne = [ui.rgb(232, 92, 92), ui.rgb(232, 168, 76), ui.rgb(224, 216, 96),
+              ui.rgb(108, 204, 128), ui.rgb(76, 155, 232), ui.rgb(176, 128, 232)];
+var sakana_na = ["さめ", "しゃち", "いるか", "くじら", "まぐろ", "まんぼう",
+                 "たい", "ひらめ", "うなぎ", "さんま", "あじ", "ふぐ"];
+
+// 升ごとの関数から作る格子（ui.grid(行, 列, cell)）。
+// その場に書いた関数からは外側の変数が見えないので、ここは名札で受ける
+func cell(r: int, c: int) -> Widget {
+  var i = r * 3 + c;
+  return ui.button(iro_na[i], f"c{i}").background(iro_ne[i]).width(1.0)
+      .tooltip(f"{iro_na[i]} にします");
+}
+
+func onoff(on: bool) -> string {
+  if on { return "出す"; }
+  return "出さない";
+}
+
+// タブで開いているものの中身。**見出し（ui.tabs）と中身は別々**なので、
+// どれを出すかはここで決められる
+func body() -> Widget {
+  if page == 1 {
+    return ui.col([
+      ui.grid(2, 3, cell),
+      ui.row([
+        ui.label("えらんだの"),
+        ui.label(" ").background(iro_ne[iro]).width(40).height(12),
+        ui.label(iro_na[iro]),
+      ]),
+    ]);
+  }
+  if page == 2 {
+    return ui.col([
+      ui.listbox("sakana", sakana_na, sakana, 5),
+      ui.label(f"えらんだの: {sakana_na[sakana]}"),
+    ]);
+  }
+  var lines = memo.split("\n").len();
+  return ui.col([
+    ui.textarea(ref memo, 5).placeholder("ここに おもったことを 書きます"),
+    ui.label(f"{memo.len()} 文字 / {lines} 行").align("right"),
+  ]);
+}
+
+// いまどうあるべきか。部品を組んで、1つ返すだけ
+func view() -> Widget {
+  return ui.col([
+    // 見出し。ui.center は「置ける幅の真ん中に置く」
+    ui.center([ui.label("ぜんぶの部品").color(ui.rgb(120, 200, 255))]),
+    ui.divider(),
+
+    ui.row([
+      // ---------------------------------------------------------- 左がわ
+      ui.col([
+        ui.label(f"{count} 回おした"),
+        ui.row([
+          // 関数を持たせる形と、名札を付ける形。混ぜてよい
+          ui.button("ふやす", func() -> void { count += 1; }),
+          ui.button("へらす", "dec"),
+          ui.button("もどす", "reset").tooltip("0 にもどします"),
+        ]),
+        ui.space(4),
+
+        ui.checkbox("音を出す", func() -> void { sound = ui.value() == 1; }, sound),
+        ui.row([
+          ui.label("おおきさ"),
+          ui.slider("vol", volume, 0, 100),
+          ui.label(f"{volume}").width(28).align("right"),
+        ]),
+        ui.row([
+          ui.label("とし"),
+          // 0 から 120 の外には出られない。− と ＋ でも動かせる
+          ui.number("age", age, 0, 120).tooltip("0 から 120 まで。打っても外には出ません"),
+        ]),
+        ui.space(4),
+
+        ui.label("いくつかから1つ選ぶ"),
+        ui.row([
+          ui.radio("小", "s0", size == 0),
+          ui.radio("中", "s1", size == 1),
+          ui.radio("大", "s2", size == 2),
+        ]),
+        ui.row([
+          ui.label("すきないろ"),
+          ui.combo("iro", iro_na, iro),      // 押すと一覧が出る
+        ]),
+        ui.space(4),
+
+        ui.label("なまえ（押してから打つ。右で押すと切り貼り）"),
+        // 空のあいだは、うすい字で「何を入れるところか」を出しておく
+        ui.field(ref name).placeholder("なまえ"),   // 打たれるたびに name が書き換わる
+        ui.password("word", word).placeholder("あいことば")
+            .tooltip("打った字は * になります"),
+        ui.label(f"こんにちは、{name} さん").color(ui.rgb(150, 220, 150)),
+      ]).width(1.0),
+
+      // ---------------------------------------------------------- 右がわ
+      ui.col([
+        // 見出しだけを出して、中身は body() が返す
+        ui.tabs("page", ["メモ", "いろ", "さかな"], page),
+        body().height(float.infinity()),     // 余ったところまで伸びる
+        ui.divider(),
+
+        // 升を並べて渡す格子。列の幅はその列でいちばん広い升に揃う
+        ui.grid(2, [
+          ui.label("音"), ui.label(onoff(sound)),
+          ui.label("おおきさ"), ui.label(f"{volume}"),
+          ui.label("とし"), ui.label(f"{age}"),
+        ]),
+      ]).width(1.0),
+    ]),
+
+    ui.divider(),
+    ui.row([
+      ui.label(f"さいごに動いたもの: {last}").padding(2)
+          .background(ui.rgb(30, 30, 40)).width(float.infinity()),
+      ui.button("おわる", func() -> void { ui.quit(); }),
+    ]),
+  ]);
+}
+
+// 名札の付いた部品が動いたとき。新しい値は ui.value() / ui.text_value() で取る
+func update(hit: string) -> void {
+  if hit != "" { last = hit; }
+  if hit == "dec" { count -= 1; }
+  if hit == "reset" { count = 0; }
+  if hit == "vol" { volume = ui.value(); }
+  if hit == "age" { age = ui.value(); }
+  if hit == "word" { word = ui.text_value(); }
+  if hit == "page" { page = ui.value(); }
+  if hit == "iro" { iro = ui.value(); }
+  if hit == "sakana" { sakana = ui.value(); }
+  for var i in range(3) {
+    if hit == f"s{i}" { size = i; }
+  }
+  for var i in range(iro_ne.len()) {
+    if hit == f"c{i}" { iro = i; }
+  }
+}
+
+func main() -> int {
+  ui.theme(ui.rgb(18, 18, 26), ui.rgb(232, 232, 236), ui.rgb(76, 155, 232));
+
+  ui.run("ぜんぶの部品", 700, 540, view, update);
+
+  // 画面が無いときは、ui.run が1回だけ描いて返り、面はそのまま残る
+  if ui.width() > 0 {
+    _ = file.write_bytes("widgets.png", ui.to_png());
+    print("画面がないので widgets.png に保存しました");
+    ui.close();
+    return 0;
+  }
+  print(f"{count} 回おしました");
+  return 0;
+}

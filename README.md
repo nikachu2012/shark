@@ -106,6 +106,7 @@ make web-test       # 作ったものを node で確かめる
 ```
 ./shark run examples/paint.shk      # 下の層。マウスで描く
 ./shark run examples/counter.shk    # 上の層。部品を組んで返す
+./shark run examples/widgets.shk    # 上の層。部品をぜんぶ1つの画面に出す
 ./shark run examples/breakout.shk   # ブロック崩し。絵（Canvas）と透明を使う
 ./shark run examples/cube3d.shk     # 回る立方体。三角形と奥行き（z バッファ）を使う
 ```

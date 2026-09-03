@@ -97,6 +97,7 @@ enum ScreenEventKind {
   SEV_Text,    // 文字が打たれた（text に UTF-8）
   SEV_Mouse,   // 押された・離された・動いた（code はボタン、-1 は移動）
   SEV_Resize,  // 窓の大きさが変わった（x, y に新しい面の大きさ。画素）
+  SEV_Wheel,   // 車輪（ホイール）が回された（x, y に送りぶん。下と右が正）
 };
 
 // キーの番号。印字できる文字はその ASCII（英字は小文字）をそのまま使い、
@@ -129,7 +130,14 @@ struct ScreenEvent {
   int kind;      // ScreenEventKind
   int code;      // SEV_Key: ScreenKey / SEV_Mouse: 0=左 1=中 2=右、-1 は移動
   bool down;     // SEV_Key / SEV_Mouse: 押されたなら true
+  // SEV_Wheel の x, y は**送りぶん（1/100 行）**で、下と右が正。
+  // 1段ぶん回すと 100。**行より細かく取れるようにしてある**ので、
+  // トラックパッドをゆっくり動かしたぶんも落ちない（行の数で渡すと、
+  // 1行たまるまで何も動かず、動き出すと1行飛ぶ）。
+  // 段でしか送れない機種（車輪だけのマウス）は、100 の倍数で渡せばよい。
+  // 位置は直前の SEV_Mouse のものを使う
   int x, y;      // SEV_Mouse: 面の中の位置（画素） / SEV_Resize: 新しい面の大きさ
+                 // SEV_Wheel: 送りぶん（1/100 行。下と右が正）
   char text[8];  // SEV_Text: 打たれた文字（UTF-8。0 で終わる）
   ScreenEvent() : kind(SEV_None), code(0), down(false), x(0), y(0) { text[0] = 0; }
 };
@@ -159,13 +167,24 @@ struct PlatformScreen {
   // ふつうの出来事（SEV_Key / SEV_Text）として届く。
   //   initial  受け付け始めるときの中身。0 なら今の中身のまま（置き場所だけ変える）
   //   x, y, h  面の中の位置。変換中の候補をこのあたりに出す
-  void (*text_input)(bool on, const char* initial, int x, int y, int h);
+  //   multiline  複数行の入力欄か。true のあいだは**改行を落とさずに持つ**。
+  //              行にまつわるキー（enter・上下・home・end）はコアが受け持つので、
+  //              受け皿には渡さない（渡すと二重に効く）
+  void (*text_input)(bool on, const char* initial, int x, int y, int h, bool multiline);
   // いまの中身。confirmed に確定した文字列、marked に変換中の文字列。
   // text_input(on) のあいだだけ意味がある。取れなければ false
   bool (*text_state)(Str* confirmed, Str* marked);
 
   // 選んでいるところ。単位は**文字の数**（先頭から数えて start から len 文字）。
-  // 持っている機種では、矢印・shift・二度押しでの選択も OS がやってくれる
+  // 持っている機種では、矢印・shift・二度押しでの選択も OS がやってくれる。
+  //
+  // **数え方の注意。**受け皿が変換中の字も1つの文字列として持っている機種
+  // （macOS の NSTextView、ブラウザの <textarea>）では、ここが返す位置は
+  // **変換中の字も数に入れた**ものになる。いっぽう text_state の confirmed は
+  // 変換中の字を抜いたものなので、**変換中は2つの物差しが食い違う**。
+  // コアはそれを承知していて、変換のあいだはここを見ずに、変換を始めた
+  // ところにカーソルを置いたままにする（core/lib/ui.cpp、tests/imecheck.cpp）。
+  // 移植層は、どちらの数え方でもよいが**変換中に位置を作り直さない**こと
   bool (*text_selection)(int* start, int* len);
   void (*text_select)(int start, int len);
   // 選んでいるところを、この文字列で置き換える（貼り付けと切り取りに使う）

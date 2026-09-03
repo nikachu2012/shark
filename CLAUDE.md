@@ -12,7 +12,7 @@ Shark🦈 — ゲーム機で動くプログラミング学習用ゲームの中
 
 ```
 make                # shark と sharkvm を作る（外部依存なし。FreeType だけ任意で自動検出）
-make test           # tests/ を走らせる（sh tests/run.sh。memcheck / bytecheck も含む）
+make test           # tests/ を走らせる（sh tests/run.sh。memcheck / bytecheck / imecheck / uicheck も含む）
 make docs           # stdlib/ の宣言から docs/reference/ に HTML を作り、実装と突き合わせる
 make docs-check     # 宣言ファイルの例をぜんぶ本物の shark で動かす（python3 tools/runex.py）
 make embed          # ゲームに組み込む例（examples/embed/game と play_stage）
@@ -67,7 +67,7 @@ frontend/   shark コマンド（main.cpp）と sharkvm（vm_main.cpp）。コ�
 web/        同じコアを WebAssembly にした一式（移植層は core/platform/web.cpp）
 stdlib/     標準ライブラリの宣言ファイル（*.shk）← 名前・型・説明・例はここが正
 spec/       仕様（syntax / types/ / runtime/ / library/）。思想は spec/README.md
-tests/      .shk と .expected の組 + memcheck / bytecheck（C++ 側の検査）
+tests/      .shk と .expected の組 + memcheck / bytecheck / imecheck / uicheck（C++ 側の検査）
 assets/     同梱するもの。fonts/ に Noto Sans JP（OFL 1.1）。
             探すのはコアではなくフロントエンド（host_use_bundled_font → SHARK_FONT）
 ```

@@ -73,6 +73,26 @@ if [ -x "$root/tests/bytecheck" ] || [ -x "$root/tests/bytecheck.exe" ]; then
   fi
 fi
 
+# 変換つきの文字入力（IME）。偽の出し先で入力欄を動かして見る（C++ 側）
+if [ -x "$root/tests/imecheck" ] || [ -x "$root/tests/imecheck.exe" ]; then
+  if "$root/tests/imecheck" > /tmp/shark_imecheck.txt 2>&1; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    cat /tmp/shark_imecheck.txt
+  fi
+fi
+
+# 部品を押した・合わせたときの動き。偽の出し先で見る（C++ 側）
+if [ -x "$root/tests/uicheck" ] || [ -x "$root/tests/uicheck.exe" ]; then
+  if "$root/tests/uicheck" > /tmp/shark_uicheck.txt 2>&1; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    cat /tmp/shark_uicheck.txt
+  fi
+fi
+
 # 単一バイナリと、保存したバイトコード（spec/runtime/bytecode.md）。
 # tests/cases を build して、ソースから動かしたときと同じ出力になることを見る
 sharkvm="$root/sharkvm"

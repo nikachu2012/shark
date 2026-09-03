@@ -972,14 +972,21 @@ func update(hit: string) -> void {
 ui.run("かうんた", 420, 300, view, update);
 ```
 
-入力欄（`ui.field`）だけは、関数ではなく **`ref` で変数を渡します**。
+入力欄（`ui.field` と `ui.textarea`）だけは、関数ではなく **`ref` で変数を渡します**。
 打たれるたびに、その変数が書き換わります。
 
 ```shark
 var name = "さめ";                    // 一番外側の var に置きます
+var memo = "1行目\n2行目";
 
 ui.field(ref name),                   // 打つと name が変わる
+ui.textarea(ref memo, 5),             // 複数行。5 行ぶんの高さで出す
 ```
+
+`ui.textarea` は **`enter` で改行が入ります**（`ui.field` は入力欄から離れます）。
+離れるのは、外を押すか `esc` です。置ける幅に入らない行はひとりでに折り返し、
+上下の矢印で行を行き来できます。中身は改行を持つ**1つの文字列**なので、
+行に分けたいときは `memo.split("\n")` のように自分で分けます。
 
 `ref` で渡せるのは**一番外側の `var`** だけです（誤り `E0307`）。
 覚えているのは借用ではなく「どの `var` か」で、書き戻しはその `var` への代入と同じだからです。
@@ -992,6 +999,56 @@ ui.field(ref name),                   // 打つと name が変わる
 ui.checkbox("音を出す", "sound", sound),   // 押されると "sound" が返る
 ui.slider("volume", volume, 0, 100),       // つまむと "volume" が返る
 ui.field("name", name),                    // 打つと "name" が返る（ref を使わない書き方）
+ui.textarea("memo", memo),                 // 複数行の入力欄も同じ
+```
+
+いくつかの中から1つ選ぶ部品は3つあります。どれも並べるものを `list<string>` で渡し、
+**選ばれた番号**（0 から）が `ui.value()` で返ります。
+
+```shark
+ui.radio("小", "s0", size == 0),           // 丸を並べる。2〜4 個くらいのとき
+ui.combo("iro", iro_na, iro),              // 押すと一覧が出る。数が多いとき
+ui.listbox("sakana", sakana_na, sel, 5),   // 一覧が出たまま。見比べたいとき
+```
+
+`ui.combo` は、押して離してからもう一度押しても、**押したまま動かして離しても**選べます。
+一覧が画面に入りきらないときは上と下に ▲▼ が出て、そこに合わせているあいだ送れます。
+
+`ui.listbox` も入りきらないときに右へ帯が出ます。**帯はつまんで動かせます。**
+
+巻物を持つ部品（`ui.listbox`・`ui.textarea`・`ui.combo` の一覧）は、
+**カーソルを乗せて車輪（ホイール）を回しても送れます**。押さなくてもかまいません。
+送りは行ごとに飛ばず、**なめらかに動きます**（上と下に半端に切れた行が出ます）。
+自分で巻物を書くときは `ui.wheel()`（下が正）と `ui.wheel_x()`（右が正）で受け取ります。
+部品が使ったぶんは 0 になるので、二重に動くことはありません。
+
+タブは**見出しだけ**を出します。中身は自分で選んで返します。
+
+```shark
+ui.col([
+  ui.tabs("tab", ["メモ", "いろ"], tab),
+  body(),        // tab を見て、いまの中身を組みます
+])
+```
+
+数を打つ入力欄は、**上と下の限りから外に出られません**。
+限りから出る数は打っても入らないので、範囲の外の値になることがありません。
+右の − と ＋、上下の矢印でも 1 ずつ動きます。
+
+```shark
+ui.number("age", age, 0, 120),             // 0 から 120 まで
+```
+
+あいことばは `ui.password` です。中身の持ち方は `ui.field` と同じで、
+**出すときだけ** 1 字が 1 つの `*` になります。
+
+どの部品にも `.tooltip("説明")` を付けられます。カーソルを合わせて少し待つと出ます。
+
+入力欄には `.placeholder("なまえ")` を付けられます。空のあいだだけ、うすく出ます。
+出しているだけなので中身にはなりません。
+
+```shark
+ui.field("name", name).placeholder("なまえ"),
 ```
 
 ```shark
@@ -1057,7 +1114,7 @@ ui.text(8, 8, "こんにちは", ui.rgb(255, 255, 255));
 
 ### 日本語を打つ
 
-`ui.field` は日本語も打てます。変換は**出し先に任せます**。
+`ui.field` と `ui.textarea` は日本語も打てます。変換は**出し先に任せます**。
 
 | 出し先 | どうなるか |
 |---|---|
@@ -1084,6 +1141,7 @@ ui.text(8, 8, "こんにちは", ui.rgb(255, 255, 255));
 
 動く例が [examples/paint.shk](../examples/paint.shk)（下の層）と
 [examples/counter.shk](../examples/counter.shk)（上の層）、
+[examples/widgets.shk](../examples/widgets.shk)（部品をぜんぶ出したもの）、
 [examples/breakout.shk](../examples/breakout.shk)（絵と透明を使ったブロック崩し）、
 [examples/cube3d.shk](../examples/cube3d.shk)（三角形と奥行きで描く 3D）
 にあります。

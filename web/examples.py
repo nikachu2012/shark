@@ -17,6 +17,7 @@ ITEMS = [
     ("examples/config.shk", "失敗するかもしれない処理"),
     ("tests/unit_test.shk", "テストを書く"),
     ("web/examples/ui.shk", "画面に出す（std.ui）"),
+    ("examples/widgets.shk", "部品をぜんぶ出す（std.ui）"),
     ("examples/breakout.shk", "2D のゲーム（ブロック崩し）"),
     ("examples/cube3d.shk", "3D を描く（回る立方体）"),
     ("web/examples/forever.shk", "止まらない繰り返し"),

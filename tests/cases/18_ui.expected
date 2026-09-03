@@ -77,6 +77,26 @@ false 0
 true true 0
 true true 0
 true true
+[] [ab
+cd] false
+true false true
+true true 0
+[] [] true false
+true true
+true true
+false
+true false
+true true 0
+true true false
+true true false
+true false true false
+true true false
+true
+0
+false true
+true
+true
+0 0
 cursor ok
 frame true true
 frame ok

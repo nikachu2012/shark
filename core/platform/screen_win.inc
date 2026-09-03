@@ -18,6 +18,11 @@ const PlatformScreen* win_screen() { return 0; }
 
 namespace win {
 
+// 横の車輪は新しめの SDK にしか無い。無ければ番号を直に置く
+#ifndef WM_MOUSEHWHEEL
+#define WM_MOUSEHWHEEL 0x020E
+#endif
+
 // --- 引いてくる関数 -------------------------------------------------------
 // 形は <windows.h> のものをそのまま使う。ヘッダはどの Windows にも入っていて、
 // 足りないのは「作るときに繋ぐ .lib」の方なので、そこだけ実行時に引く
@@ -82,8 +87,9 @@ struct State {
   bool sizing;     // 窓の縁を引いている最中（この間 OS はこちらを止める）
   bool (*redraw)(int, int);
   wchar_t hi;      // 前に来た上位のかけら（絵文字などは2つに分かれて届く）
+  int wheel_ax, wheel_ay;   // 車輪の、1行に満たないぶんのため置き
   State() : open(false), win(0), buf(0), sw(0), sh(0), rw(0), rh(0), scale(1),
-            sizing(false), redraw(0), hi(0) {}
+            sizing(false), redraw(0), hi(0), wheel_ax(0), wheel_ay(0) {}
 };
 State g;
 
@@ -258,8 +264,9 @@ struct Input {
   int caret, anchor;  // 文字の数。選んでいるのは、この2つの間
   Str marked;         // 変換中の文字列（UTF-8）。コアが下線を引いて出す
   bool composing;
+  bool multi;         // 複数行の入力欄か。行にまつわるキーはコアが受け持つ
   int x, y, h;        // 入力欄の位置（面の座標）。候補をこのあたりに出してもらう
-  Input() : on(false), caret(0), anchor(0), composing(false), x(0), y(0), h(0) {}
+  Input() : on(false), caret(0), anchor(0), composing(false), multi(false), x(0), y(0), h(0) {}
 };
 Input in;
 
@@ -426,10 +433,12 @@ bool edit_key(WPARAM vk) {
         if (!shift) in.anchor = in.caret;
         return true;
       case VK_HOME:
+        if (in.multi) return false;   // 行の頭はコアが数える（折り返しを知っているのは向こう）
         in.caret = 0;
         if (!shift) in.anchor = 0;
         return true;
       case VK_END:
+        if (in.multi) return false;
         in.caret = n;
         if (!shift) in.anchor = n;
         return true;
@@ -466,9 +475,15 @@ bool edit_key(WPARAM vk) {
       if (!clipboard_get(&s)) return true;
       Vec<int> cps, flat;
       cps_of_utf8(s.c_str(), &cps);
-      // 1行の入力欄なので、改行は落とす
-      for (int i = 0; i < cps.size(); i++)
-        if (cps[i] != '\n' && cps[i] != '\r') flat.push(cps[i]);
+      // 改行は '\n' に揃える。1行の入力欄で落とすのはコアの側（input_frame）
+      for (int i = 0; i < cps.size(); i++) {
+        if (cps[i] == '\r') {
+          if (i + 1 < cps.size() && cps[i + 1] == '\n') continue;
+          flat.push('\n');
+          continue;
+        }
+        flat.push(cps[i]);
+      }
       replace_sel(flat);
       return true;
     }
@@ -668,6 +683,26 @@ LRESULT CALLBACK wndproc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_RBUTTONDOWN: mouse_ev(lp, 2, true); return 0;
     case WM_RBUTTONUP:   mouse_ev(lp, 2, false); return 0;
     case WM_MOUSEMOVE:   mouse_ev(lp, -1, false); return 0;
+    // 車輪（ホイール）。届くのは WHEEL_DELTA（120）の倍数なので、
+    // 1行に満たないぶんはためておく
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL: {
+      int d = (int)(short)HIWORD(wp);
+      bool horiz = (msg == WM_MOUSEHWHEEL);
+      int* acc = horiz ? &g.wheel_ax : &g.wheel_ay;
+      *acc += d;
+      int lines = *acc / 120;
+      if (lines == 0) return 0;
+      *acc -= lines * 120;
+      ScreenEvent e;
+      e.kind = SEV_Wheel;
+      // 渡すのは 1/100 行。こちらは**行きっかりでしか送らない**ので 100 の倍数。
+      // 前に回すと正で届く。縦は「先へ送る」を正にしたいので裏返す。横はそのまま
+      e.x = horiz ? lines * 100 : 0;
+      e.y = horiz ? 0 : -lines * 100;
+      push(e);
+      return 0;
+    }
     case WM_SETCURSOR:
       if (LOWORD(lp) == HTCLIENT) { apply_cursor(); return TRUE; }
       break;
@@ -774,8 +809,9 @@ void set_redraw(bool (*fn)(int, int)) { g.redraw = fn; }
 // コアは入力欄を描くたびに text_input(true, ...) を呼び、そのあと text_state で
 // 中身を読み直す。初めてのときと、呼んだ側が中身を変えたときだけ initial が来る
 // （それ以外は 0 で、位置を伝えるだけ）。
-void text_input(bool on, const char* initial, int x, int y, int h) {
+void text_input(bool on, const char* initial, int x, int y, int h, bool multi) {
   if (!g.open) return;
+  in.multi = multi;
   if (!on) {
     if (in.on) {
       cancel_composition();

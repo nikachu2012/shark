@@ -8,8 +8,9 @@
 return ui.col([ui.label(f"{count} 回"), ui.button("押す", "inc")]);   // ← いま動く形
 ```
 
-入力欄に `ref` で変数を渡す形（下の `ui.text_field(ref value)`）だけは、
-いま動く方にも入っている（`ui.field(ref name)`。[ui.md](ui.md)）。
+入力欄に `ref` で変数を渡す形（下の `ui.text_field(ref value)` と
+`ui.text_area(ref value)`）だけは、いま動く方にも入っている
+（`ui.field(ref name)` と `ui.textarea(ref memo)`。[ui.md](ui.md)）。
 
 ここに書いてあるのは、それとは別の書き方——**呼び出しに続けてブロックを書く形**の
 下書き。こちらを実現するには、言語の側に記法（`ui.button("押す") { ... }`）と、

@@ -112,7 +112,8 @@ sharkvm$(EXE): $(VM_OBJ)
 %.o: %.cpp $(HDR)
 	$(CXX) $(CORE_FLAGS) -c $< -o $@
 
-test: shark$(EXE) sharkvm$(EXE) tests/memcheck$(EXE) tests/bytecheck$(EXE)
+test: shark$(EXE) sharkvm$(EXE) tests/memcheck$(EXE) tests/bytecheck$(EXE) tests/imecheck$(EXE) \
+      tests/uicheck$(EXE)
 	@sh tests/run.sh
 
 # メモリの後始末と上限を見る（tests/run.sh から呼ばれる）
@@ -121,6 +122,14 @@ tests/memcheck$(EXE): tests/memcheck.o $(CORE_SRC:.cpp=.o)
 
 # 壊れたバイトコードを断るか見る（tests/run.sh から呼ばれる）
 tests/bytecheck$(EXE): tests/bytecheck.o $(CORE_SRC:.cpp=.o)
+	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
+
+# 変換つきの文字入力（IME）を、偽の出し先で動かして見る（tests/run.sh から呼ばれる）
+tests/imecheck$(EXE): tests/imecheck.o $(CORE_SRC:.cpp=.o)
+	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
+
+# 部品を押した・合わせたときの動きを、偽の出し先で見る（tests/run.sh から呼ばれる）
+tests/uicheck$(EXE): tests/uicheck.o $(CORE_SRC:.cpp=.o)
 	$(CXX) $(CORE_FLAGS) -o $@ $^ $(LDLIBS)
 
 # コアのソース一覧を出す（web/build.sh が使う）。
@@ -158,6 +167,8 @@ web-test: web
 clean:
 	rm -f $(OBJ) $(VM_OBJ) examples/embed/game.o examples/embed/game$(EXE) tests/memcheck.o tests/memcheck$(EXE) shark$(EXE) sharkvm$(EXE)
 	rm -f tests/bytecheck.o tests/bytecheck$(EXE)
+	rm -f tests/imecheck.o tests/imecheck$(EXE)
+	rm -f tests/uicheck.o tests/uicheck$(EXE)
 	rm -f examples/embed/build_stage.o examples/embed/build_stage$(EXE) examples/embed/play_stage.o \
 	      examples/embed/play_stage$(EXE) examples/embed/stage_bytecode.h
 	rm -rf docs/reference

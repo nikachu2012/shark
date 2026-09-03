@@ -105,6 +105,7 @@ State g;
 // 文字入力（IME）の受け皿。中身は下の text_input で作る
 Obj g_sink = 0;
 bool g_text_on = false;
+bool g_text_multi = false;   // 複数行の入力欄か（改行を落とさず、行のキーはコアに任せる）
 
 // 出来事の待ち行列
 ScreenEvent q[128];
@@ -261,13 +262,13 @@ bool open(const char* title, int w, int h) {
   return true;
 }
 
-void text_input(bool on, const char* initial, int x, int y, int h);   // 下で定義
+void text_input(bool on, const char* initial, int x, int y, int h, bool multi);   // 下で定義
 
 void set_cursor(int kind);   // 下で定義
 
 void close() {
   if (!g.open) return;
-  text_input(false, 0, 0, 0, 0);
+  text_input(false, 0, 0, 0, 0, false);
   set_cursor(SCUR_Arrow);   // 隠したままにしない
   g.open = false;
   if (g.timer) {
@@ -503,6 +504,33 @@ void pump() {
         // 側にすることは無い（Cmd-Q も上で自分で見ている）。
         // 文字入力の最中だけは、変換を進めるために受け皿へ渡す
         eaten = !(g_text_on && g_sink);
+        // 改行はコアが入れる（受け皿に渡すと二重に入る）。複数行の入力欄では、
+        // 行にまつわるキーもコアが受け持つ。折り返す幅が受け皿とこちらで違うため
+        if (!eaten && !composing &&
+            (k == SKEY_Enter ||
+             (g_text_multi && (k == SKEY_Up || k == SKEY_Down || k == SKEY_Home ||
+                               k == SKEY_End || k == SKEY_PageUp || k == SKEY_PageDown))))
+          eaten = true;
+        break;
+      }
+      case 22: {   // ScrollWheel（車輪）
+        double dx = ((double (*)(Obj, Sel))msgSend)(ev, S("scrollingDeltaX"));
+        double dy = ((double (*)(Obj, Sel))msgSend)(ev, S("scrollingDeltaY"));
+        // トラックパッドなどは点で来る。行の大きさで割って、行の数に直す。
+        // 車輪だけのマウスは、はじめから行の数で来る
+        if (sendbool(ev, "hasPreciseScrollingDeltas")) { dx /= 16.0; dy /= 16.0; }
+        // 渡すのは 1/100 行。**ためない**（細かいまま渡せるので、
+        // ゆっくり動かしたぶんも落ちない）
+        int fx = (int)(dx * 100.0), fy = (int)(dy * 100.0);
+        if (fx || fy) {
+          ScreenEvent e;
+          e.kind = SEV_Wheel;
+          // 上（左）へ送ると正で届く。「先へ送る」を正にしたいので裏返す
+          e.x = -fx;
+          e.y = -fy;
+          push(e);
+        }
+        eaten = true;   // 見えない受け皿に渡すと、そちらが巻物を動かしてしまう
         break;
       }
       case 12:   // FlagsChanged
@@ -544,8 +572,9 @@ void pump() {
 // 変換そのものは OS に任せる。見えない NSTextView を1つ置いて、そこに
 // キーを受けさせ、**確定した文字列と変換中の文字列だけ**を取り出す。
 // 候補一覧は OS がその場所に出す（なので置き場所を合わせる）。
-void text_input(bool on, const char* initial, int x, int y, int h) {
+void text_input(bool on, const char* initial, int x, int y, int h, bool multi) {
   if (!g.open) return;
+  g_text_multi = multi;
   if (!on) {
     if (g_text_on) {
       ((signed char (*)(Obj, Sel, Obj))msgSend)(g.win, S("makeFirstResponder:"), 0);
@@ -590,11 +619,17 @@ void text_input(bool on, const char* initial, int x, int y, int h) {
   if (initial) sendv1(g_sink, "setString:", nsstr(initial));
 }
 
-// 改行は入れない（1行の入力欄なので）
+// 改行は '\n' に揃えて残す。1行の入力欄で落とすのはコアの側（input_frame）
 void append_clean(Str* out, const char* s) {
   if (!s) return;
-  for (int i = 0; s[i]; i++)
-    if (s[i] != '\n' && s[i] != '\r') out->push(s[i]);
+  for (int i = 0; s[i]; i++) {
+    if (s[i] == '\r') {
+      if (s[i + 1] == '\n') continue;   // CRLF は次の '\n' で1つぶん入れる
+      out->push('\n');
+      continue;
+    }
+    out->push(s[i]);
+  }
 }
 
 // UTF-16 の位置（NSString の数え方）と、文字の数（こちらの数え方）を行き来する。

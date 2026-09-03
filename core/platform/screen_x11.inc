@@ -412,7 +412,15 @@ void pump() {
       case ButtonRelease: {
         bool down = (ev.type == ButtonPress);
         unsigned int b = ev.xbutton.button;
-        if (b >= 4 && b <= 7) break;   // 回した合図は渡さない
+        if (b >= 4 && b <= 7) {   // 車輪（ホイール）。押された合図だけを1つぶんとして出す
+          if (!down) break;
+          ScreenEvent e;
+          e.kind = SEV_Wheel;
+          e.x = b == 6 ? -100 : (b == 7 ? 100 : 0);   // 1/100 行。1段で1行ぶん
+          e.y = b == 4 ? -100 : (b == 5 ? 100 : 0);
+          push(e);
+          break;
+        }
         int code = b == 1 ? 0 : (b == 2 ? 1 : 2);
         mouse_ev(ev.xbutton.x, ev.xbutton.y, code, down);
         break;

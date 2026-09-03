@@ -14,8 +14,12 @@
 /examples/embed/stage_bytecode.h
 /tests/memcheck
 /tests/bytecheck
+/tests/imecheck
+/tests/uicheck
 /tests/memcheck.exe
 /tests/bytecheck.exe
+/tests/imecheck.exe
+/tests/uicheck.exe
 /bench/build/
 /docs/reference/
 /web/dist/

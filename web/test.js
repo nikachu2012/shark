@@ -540,7 +540,10 @@ createShark().then((M) => {
     const now = dom.ctx.last ? dom.ctx.last.data : null;
     let moved = false;
     if (first && now) for (let i = 0; i < first.length; i++) if (first[i] !== now[i]) { moved = true; break; }
-    const out = { status, presents, moved, err: status === 2 ? api.error() : '',
+    // 最後のこまに、どれだけ描かれているか（部品が組み上がったかの目印）
+    let ink = 0;
+    if (now) for (let i = 0; i < now.length; i += 4) if (now[i] + now[i + 1] + now[i + 2] > 120) ink++;
+    const out = { status, presents, moved, ink, err: status === 2 ? api.error() : '',
                   w: dom.ctx.last ? dom.ctx.last.width : 0,
                   h: dom.ctx.last ? dom.ctx.last.height : 0 };
     api.abort();                                  // 遊びっぱなしにしない
@@ -562,6 +565,14 @@ createShark().then((M) => {
   check('2D のゲーム（breakout.shk）が canvas に出る',
         g2.status === 0 && g2.presents > 5 && g2.moved && g2.w === 640 && g2.h === 480,
         JSON.stringify(g2));
+
+  // 部品をぜんぶ出す見本。ブラウザの道でも、上の層がまるごと組み上がって描かれるか
+  // （押したときの動きは tests/uicheck.cpp が見る。ここは「組み上がって出る」まで）
+  const gw = play('examples/widgets.shk', 900);
+  check('部品をぜんぶ出す見本（widgets.shk）が canvas に出る',
+        gw.status === 0 && gw.presents > 5 && gw.w === 1400 && gw.h === 1080 &&
+            gw.ink > 20000 && !gw.err,
+        JSON.stringify(gw));
 
   // --- こまの速さ（ui.frame と host_paced）--------------------------------
   // app.js と同じく「画面を描く合図ごとに1度だけ pump する」で走らせる。

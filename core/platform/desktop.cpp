@@ -734,8 +734,8 @@ const PlatformRandom kRandom = {r_true, r_secure};
 const PlatformScreen* g_active = 0;
 PlatformScreen kScreen;   // 中身は開いたときに、選んだものへ差し替える
 
-void s_text_input(bool on, const char* initial, int x, int y, int h) {
-  if (g_active && g_active->text_input) g_active->text_input(on, initial, x, y, h);
+void s_text_input(bool on, const char* initial, int x, int y, int h, bool multiline) {
+  if (g_active && g_active->text_input) g_active->text_input(on, initial, x, y, h, multiline);
 }
 bool s_text_state(Str* confirmed, Str* marked) {
   return (g_active && g_active->text_state) ? g_active->text_state(confirmed, marked) : false;

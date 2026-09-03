@@ -13,6 +13,7 @@ func t_update(hit: string) -> void {
 
 // ref で受ける入力欄に渡す変数（一番外側の var でなければならない）
 var t_name = "abc";
+var t_memo = "ab\ncd";
 
 // 部品に関数を持たせる形
 var t_acted = 0;
@@ -322,6 +323,125 @@ func main() -> int {
   ui.clear(0);
   _ = ui.show(ui.col([ui.label("eeee ffff"), ui.label("gg").background(green)]), 0, 0);
   print(f"{ui.get(0, 20) != 0} {hits(0, 0, 30, 16) > 0}");   // 折れたぶん、次は下へ
+
+  // --- 複数行の入力欄（ui.textarea）---
+  // 下地を黒にすると、箱の中で数えられるのは字と帯だけになる
+  var black = ui.rgb(0, 0, 0);
+  ui.open(140, 60);
+  ui.clear(0);
+  var h4 = ui.show(ui.textarea(ref t_memo, 3).background(black), 0, 0);
+  print(f"[{h4}] [{t_memo}] {ui.edited()}");   // 誰も打っていないので、そのまま
+  // 3 行ぶんの高さ（字の高さ 8 が 3 行 ＋ 内の余白 3 が上下）で、幅は 120
+  print(f"{ui.get(0, 29) != 0} {ui.get(0, 30) != 0} {ui.get(119, 0) != 0}");
+  // 改行のところで行が変わる。中身は2行なので、3 行目は空
+  print(f"{hits(1, 3, 119, 11) > 0} {hits(1, 11, 119, 19) > 0} {hits(1, 19, 119, 27)}");
+
+  // 名札で受ける形。行数を省くと 4 行ぶん（8 × 4 ＋ 3 × 2 = 38）
+  ui.clear(0);
+  var h5 = ui.show(ui.textarea("memo", "xy").background(black), 0, 0);
+  print(f"[{h5}] [{ui.text_value()}] {ui.get(0, 37) != 0} {ui.get(0, 38) != 0}");
+
+  // 置ける幅に入らない行は折り返す（空白が無ければ字の手前で）
+  ui.clear(0);
+  _ = ui.show(ui.textarea("w", "aaaaaaaaaaaaaaaaaaaaaaaa", 2).background(black), 0, 0);
+  print(f"{hits(1, 3, 119, 11) > 0} {hits(1, 11, 119, 19) > 0}");
+
+  // 入りきらないときは、右に今どのあたりかの帯が出る（つまみと、その道）
+  ui.clear(0);
+  _ = ui.show(ui.textarea("w", "a\nb\nc", 2).background(black), 0, 0);
+  print(f"{ui.get(117, 4) != 0} {ui.get(117, 15) != 0}");
+  ui.clear(0);
+  _ = ui.show(ui.textarea("w", "a\nb", 2).background(black), 0, 0);
+  print(ui.get(117, 4) != 0);   // 入りきるので、帯は出ない
+
+  // --- 伏せ字の入力欄（ui.password）---
+  // 出るのは打った字ではなく * 。中身はそのまま持っている
+  ui.open(140, 40);
+  ui.clear(0);
+  _ = ui.show(ui.password("p", "ab"), 0, 0);
+  var pw_png = ui.to_png().to_hex();
+  ui.clear(0);
+  _ = ui.show(ui.field("p", "**"), 0, 0);
+  var star_png = ui.to_png().to_hex();
+  ui.clear(0);
+  _ = ui.show(ui.field("p", "ab"), 0, 0);
+  var plain_png = ui.to_png().to_hex();
+  print(f"{pw_png == star_png} {pw_png == plain_png}");   // * と同じ絵／打った字とは違う絵
+
+  // --- 丸いチェック（ui.radio）---
+  // 丸（8×8）のうしろに 4 画素あけて字。字は 6 画素ぶん
+  ui.open(160, 40);
+  ui.clear(0);
+  _ = ui.show(ui.radio("l", "r", true), 0, 0);
+  print(f"{hits(0, 0, 8, 8) > 0} {hits(12, 0, 18, 8) > 0} {hits(18, 0, 160, 8)}");
+
+  // --- タブ（ui.tabs）---
+  // 見出し2つで幅 32（字 6 ＋ 余白 5 が左右）、高さ 16。下に線が通る
+  ui.clear(0);
+  _ = ui.show(ui.tabs("t", ["a", "b"], 0), 0, 0);
+  print(f"{ui.get(0, 14) != 0} {ui.get(31, 14) != 0} {ui.get(32, 14) != 0}");
+
+  // --- 選ぶ（ui.combo）---
+  // 幅は「いちばん長い文字（12）＋余白（15）＋しるし（4）」= 31、高さ 14
+  ui.clear(0);
+  _ = ui.show(ui.combo("c", ["ab", "c"], 0), 0, 0);
+  print(f"{ui.get(0, 0) != 0} {ui.get(30, 13) != 0} {ui.get(31, 0) != 0}");
+
+  // --- 一覧（ui.listbox）---
+  // 幅 19（字 6 ＋ 余白 10 ＋ 帯 3）、高さ 22（字 8 が2行 ＋ 余白 3 が上下）
+  ui.clear(0);
+  _ = ui.show(ui.listbox("l", ["a", "b", "c"], 1, 2), 0, 0);
+  print(f"{ui.get(0, 21) != 0} {ui.get(0, 22) != 0} {ui.get(18, 0) != 0} {ui.get(19, 0) != 0}");
+
+  // --- 数の入力欄（ui.number）---
+  // 幅 70（字のところ 50 ＋ − と ＋ が 10 ずつ）、高さ 14
+  ui.clear(0);
+  _ = ui.show(ui.number("n", 5, 0, 10), 0, 0);
+  print(f"{ui.get(0, 0) != 0} {ui.get(69, 7) != 0} {ui.get(70, 7) != 0}");
+  // 上と下の限りから外の数を渡しても、限りの中に収まる
+  ui.clear(0);
+  print(ui.show(ui.number("n", 999, 0, 10), 0, 0) == "");
+
+  // --- 入力欄は枠からはみ出さない ---
+  // 左を隠して見せているので、枠の外に描かないのは入力欄の側の仕事
+  ui.open(160, 40);
+  ui.clear(0);
+  _ = ui.show(ui.field("f", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), 0, 0);
+  print(hits(120, 0, 160, 14));   // 入力欄の幅は 120。その外に点は無い
+
+  // --- 何も入っていないときに、うすく出す字（.placeholder）---
+  ui.clear(0);
+  _ = ui.show(ui.field("f", "").placeholder("ab"), 0, 0);
+  var ph_empty = ui.to_png().to_hex();
+  ui.clear(0);
+  _ = ui.show(ui.field("f", ""), 0, 0);
+  var no_ph = ui.to_png().to_hex();
+  ui.clear(0);
+  _ = ui.show(ui.field("f", "xy").placeholder("ab"), 0, 0);
+  var ph_filled = ui.to_png().to_hex();
+  ui.clear(0);
+  _ = ui.show(ui.field("f", "xy"), 0, 0);
+  // 空なら出る／何か入っていれば出ない
+  print(f"{ph_empty == no_ph} {ph_filled == ui.to_png().to_hex()}");
+  // 伏せ字の欄でも、うすい字は伏せない（中身ではないため）
+  ui.clear(0);
+  _ = ui.show(ui.password("p", "").placeholder("ab"), 0, 0);
+  print(ui.to_png().to_hex() == ph_empty);
+
+  // --- 説明（.tooltip）---
+  // カーソルが乗っていなければ、絵は変わらない（乗せたときは tests/uicheck.cpp で見る）
+  ui.clear(0);
+  _ = ui.show(ui.label("l"), 20, 20);
+  var plain_tip = ui.to_png().to_hex();
+  ui.clear(0);
+  _ = ui.show(ui.label("l").tooltip("せつめい"), 20, 20);
+  print(ui.to_png().to_hex() == plain_tip);
+
+  // --- 車輪（ホイール）---
+  // 画面が無いところでは回らないので、いつも 0
+  ui.open(20, 10);
+  _ = ui.poll();
+  print(f"{ui.wheel()} {ui.wheel_x()}");
 
   // --- マウスの形 ---
   // 画面の無いところでは何も起きないが、名前は確かめられる（知らない名前は panic）

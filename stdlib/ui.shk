@@ -611,6 +611,32 @@ func mouse(button: int) -> bool;
 ///   if ui.clicked(0) && ui.mouse_x() < 8 { print("左半分が押された"); }
 func clicked(button: int) -> bool;
 
+/// 車輪（ホイール）が、この回に送られたぶん。行の数で、**下へ送るときが正**。
+///
+/// 巻物を持つ部品（ui.listbox・ui.textarea・ui.combo の一覧）は、カーソルが
+/// 乗っていれば**自分で使い切る**。そのときここは 0 になるので、
+/// 部品と、自分で書いた巻物とが二重に動くことはない。
+///
+/// 出し先からは**行より細かく**届く（トラックパッドをゆっくり動かしたぶんも落ちない）。
+/// ここが返すのは行の数なので、1行に満たないぶんは次の回へ持ち越して、
+/// たまったところで返る。車輪を持っていない出し先では、いつも 0。
+///
+/// 例:
+///   ui.open(80, 40);
+///   _ = ui.poll();
+///   print(ui.wheel());   // 0
+func wheel() -> int;
+
+/// 横に送られたぶん。行の数で、**右へ送るときが正**。
+///
+/// トラックパッドや、横にも回る車輪で届く。
+///
+/// 例:
+///   ui.open(80, 40);
+///   _ = ui.poll();
+///   print(ui.wheel_x());   // 0
+func wheel_x() -> int;
+
 /// マウスの形を決める。押せるところに合わせたら手にする、など。
 ///
 /// **その回かぎり**で、次の ui.poll() で `arrow`（ふつう）に戻る。
@@ -733,6 +759,10 @@ func set_clipboard(s: string) -> bool;
 ///
 /// 選ばれるか、外を押されるまで出たまま。押されたところはメニューが先に受け取るので、
 /// 下にある部品は反応しない。番号は ui.menu_pick() で受け取る。
+///
+/// **押したまま動かして、選びたいところで離す**でも選べる。
+/// 面に入りきらないときは、上と下に送るしるし（▲▼）が出て、
+/// そこに合わせているあいだ少しずつ送れる。
 ///
 /// 入力欄（ui.field）は、右で押すと**切り貼りのメニューを自分で出す**ので、
 /// これを書く必要はない。
@@ -956,6 +986,28 @@ func button(label: string, action: func() -> void) -> Widget;
 func checkbox(label: string, id: string, on: bool) -> Widget;
 func checkbox(label: string, action: func() -> void, on: bool) -> Widget;
 
+/// 丸いほうのチェック。**いくつか並べて、そのうち1つを選ぶ**ときに使う。
+///
+/// 受け取り方は ui.checkbox と同じ。押されると ui.show() が `id` を返す。
+/// 「どれが選ばれているか」を持つのは書く人で、部品は覚えない。
+/// だから `on` には「自分が選ばれているか」を、そのつど渡す。
+///
+/// 引数:
+///   label   出す文字
+///   id      名札
+///   on      いま選ばれているか
+///
+/// 例:
+///   ui.open(160, 40);
+///   var mode = 0;
+///   var hit = ui.show(ui.row([ui.radio("小", "m0", mode == 0),
+///                             ui.radio("大", "m1", mode == 1)]));
+///   if hit == "m0" { mode = 0; }
+///   if hit == "m1" { mode = 1; }
+///   print(mode);   // 0
+func radio(label: string, id: string, on: bool) -> Widget;
+func radio(label: string, action: func() -> void, on: bool) -> Widget;
+
 /// つまみ。lo から hi までの数を選ぶ。
 ///
 /// 動かされている間、ui.show() が `id` を返し、ui.value() が今の数を返す。
@@ -974,6 +1026,33 @@ func checkbox(label: string, action: func() -> void, on: bool) -> Widget;
 ///   print(vol);   // 40
 func slider(id: string, value: int, lo: int, hi: int) -> Widget;
 func slider(action: func() -> void, value: int, lo: int, hi: int) -> Widget;
+
+/// 数を打つ入力欄。**lo から hi の外には出られない。**
+///
+/// 打てるのは数字だけ（lo が負のときは、先頭の `-` も打てる）。
+/// 限りから出てしまう数は**打っても入らない**ので、範囲の外の値になることがない。
+/// 右の − と ＋ でも 1 ずつ動かせる（上下の矢印も同じ）。
+///
+/// 動いた回に ui.show() が `id` を返し、新しい数は ui.value() で取れる。
+/// 名札の代わりに関数を渡したときは、その中で ui.value() を読む。
+///
+/// 引数:
+///   id      名札
+///   value   いまの数
+///   lo, hi  下と上（この間しか入らない）
+///
+/// 注意:
+///   打っている途中は「まだ数になっていない形」（空や `-` だけ）も通る。
+///   その間 ui.show() は名札を返さないので、こちらの変数は前のままでよい。
+///   enter か、外を押すと打ち終わり。esc で打つ前に戻る。
+///
+/// 例:
+///   ui.open(160, 40);
+///   var age = 12;
+///   if ui.show(ui.number("age", age, 0, 120)) == "age" { age = ui.value(); }
+///   print(age);   // 12
+func number(id: string, value: int, lo: int, hi: int) -> Widget;
+func number(action: func() -> void, value: int, lo: int, hi: int) -> Widget;
 
 /// 1行の入力欄。
 ///
@@ -1019,6 +1098,147 @@ func slider(action: func() -> void, value: int, lo: int, hi: int) -> Widget;
 ///   print(f"[{hit}] {name} {nick}");   // [] さめ しゃち
 func field(ref value: string) -> Widget;
 func field(id: string, value: string) -> Widget;
+
+/// 複数行の入力欄。長い文やメモを打つところ。
+///
+/// 受け取り方は ui.field と同じ2つ。**変数を ref で渡すと、打たれるたびに
+/// その変数が書き換わる。**名札（`id`）を渡したときは、ui.show() がその名札を
+/// 返すので、ui.text_value() で新しい文字を受け取る。
+///
+/// ```
+/// ui.textarea(ref memo)         // memo が直に書き換わる
+/// ui.textarea(ref memo, 8)      // 8 行ぶんの高さで出す
+/// ui.textarea("memo", memo)     // ui.show() が "memo" を返す
+/// ```
+///
+/// 中身は**改行（`\n`）を持つ1つの文字列**。行に分けたいときは
+/// `memo.split("\n")` のように、書く人の側で分ける。
+///
+/// 引数:
+///   value   いま入っている文字（ref なら、書き換える先の変数）
+///   id      名札（ref の代わりに渡す）
+///   rows    見せる行の数。省くと 4 行
+///
+/// 注意:
+///   置ける幅に入らない行は**折り返して**出る。折り目はその行の空白、無ければ字の手前
+///   （ui.label と同じ）。折り返しても中身の文字列は変わらない。
+///
+///   enter は**改行を入れる**（ui.field は入力欄から離れる）。離れるのは、
+///   外を押すか esc。上下の矢印で行を行き来し、home と end でその行の端に行く。
+///   行が入りきらないときは、右に今どのあたりかの帯が出る。
+///
+///   なぞって選ぶ、右で押して切り貼りのメニュー、日本語などの変換は ui.field と同じ。
+///
+/// 例:
+///   ui.open(200, 140);
+///   var memo = "さめは 海に すんでいます。\n2行目";
+///   var hit = ui.show(ui.col([ui.label("メモ"), ui.textarea(ref memo, 3)]));
+///   var lines = memo.split("\n");
+///   print(f"[{hit}] {lines.len()}");   // [] 2
+func textarea(ref value: string) -> Widget;
+func textarea(ref value: string, rows: int) -> Widget;
+func textarea(id: string, value: string) -> Widget;
+func textarea(id: string, value: string, rows: int) -> Widget;
+
+/// 伏せ字の入力欄。あいことば（パスワード）を打つところ。
+///
+/// 中身の持ち方も受け取り方も ui.field と同じで、**出すときだけ**1字を1つの
+/// `*` に置き換える。ui.text_value() や渡した変数には、打たれた字がそのまま入る。
+///
+/// 引数:
+///   value   いま入っている文字（ref なら、書き換える先の変数）
+///   id      名札（ref の代わりに渡す）
+///
+/// 注意:
+///   右で押したときのメニューに、**コピーと切り取りは出ない**（中身が持ち出せてしまうため）。
+///   貼り付けとすべて選ぶは出る。
+///
+/// 例:
+///   ui.open(160, 40);
+///   var word = "さめ";
+///   _ = ui.show(ui.password(ref word));
+///   print(word);   // さめ
+func password(ref value: string) -> Widget;
+func password(id: string, value: string) -> Widget;
+
+/// 押すと一覧が出て、その中の1つを選ぶ部品。
+///
+/// 選ばれた回に ui.show() が `id` を返し、**選ばれたものの番号**が ui.value() で取れる
+/// （番号は 0 から）。名札の代わりに関数を渡したときは、その中で ui.value() を読む。
+///
+/// 選び方は2つあり、どちらでもよい。
+///
+///   ・押して離すと一覧が出たままになる。そのあともう一度押して選ぶ
+///   ・**押したまま下へ動かし、選びたいところで離す**（プルダウンのふつうの選び方）
+///
+/// 一覧が面に入りきらないときは、上と下に送るしるし（▲▼）が出る。
+/// そこにカーソルを合わせているあいだ、少しずつ送れる（押したままでも送れる）。
+///
+/// 引数:
+///   id        名札
+///   options   並べる文字
+///   index     いま選ばれているものの番号（0 から）
+///
+/// 例:
+///   ui.open(160, 60);
+///   var iro = ["あか", "あお", "みどり"];
+///   var pick = 1;
+///   if ui.show(ui.combo("iro", iro, pick)) == "iro" { pick = ui.value(); }
+///   print(iro[pick]);   // あお
+func combo(id: string, options: list<string>, index: int) -> Widget;
+func combo(action: func() -> void, options: list<string>, index: int) -> Widget;
+
+/// 並べたものが見えていて、その中の1つを選ぶ部品。
+///
+/// 受け取り方は ui.combo と同じ（ui.value() が選ばれた番号）。
+///
+/// 入りきらないときは右に帯が出る。**帯はつまんで動かせる**ので、
+/// 選んでいるものから離れたところも見に行ける。押して焦点が来ているあいだは、
+/// 上下の矢印でも選べる（選んだものが見えるところまで、ひとりでに送る）。
+///
+/// 引数:
+///   id        名札
+///   options   並べる文字
+///   index     いま選ばれているものの番号（0 から）
+///   rows      見せる行の数。省くと 4 行
+///
+/// 例:
+///   ui.open(160, 100);
+///   var sakana = ["さめ", "しゃち", "いるか"];
+///   var sel = 0;
+///   if ui.show(ui.listbox("s", sakana, sel, 3)) == "s" { sel = ui.value(); }
+///   print(sakana[sel]);   // さめ
+func listbox(id: string, options: list<string>, index: int) -> Widget;
+func listbox(id: string, options: list<string>, index: int, rows: int) -> Widget;
+func listbox(action: func() -> void, options: list<string>, index: int) -> Widget;
+func listbox(action: func() -> void, options: list<string>, index: int, rows: int) -> Widget;
+
+/// タブの見出し。**出すのは見出しだけ**で、中身は書く人が選んで返す。
+///
+/// 押された回に ui.show() が `id` を返し、押されたタブの番号が ui.value() で取れる。
+///
+/// ```
+/// ui.col([
+///   ui.tabs("tab", ["せってい", "いろ"], tab),
+///   page(),        // tab の中身は、いまの番号を見て自分で組む
+/// ])
+/// ```
+///
+/// 中身まで抱えないのは、「いまどうあるべきか」を返すという書き方に合わせるため。
+/// 見出しと中身が別々なので、中身をどこに置くかも自由に決められる。
+///
+/// 引数:
+///   id       名札
+///   labels   見出しの文字
+///   index    いま開いているタブの番号（0 から）
+///
+/// 例:
+///   ui.open(200, 60);
+///   var tab = 0;
+///   if ui.show(ui.tabs("tab", ["あ", "い"], tab)) == "tab" { tab = ui.value(); }
+///   print(tab);   // 0
+func tabs(id: string, labels: list<string>, index: int) -> Widget;
+func tabs(action: func() -> void, labels: list<string>, index: int) -> Widget;
 
 /// 縦に空ける。h は画素の数。
 ///
@@ -1496,4 +1716,32 @@ class Widget {
   ///   _ = ui.show(ui.label("l").align("right"), 0, 0);
   ///   print(ui.get(1, 1) != 0);   // false
   func align(a: string) -> Widget;
+
+  /// カーソルを合わせたときに出す説明。
+  ///
+  /// どの部品にも付けられる。少しのあいだ合わせ続けると、カーソルのそばに出る
+  /// （すぐ出すと、通りすがりで点滅して読みにくいため）。長い文は折り返す。
+  ///
+  /// 入れ子にしたときは、**細かいほう**（中身）の説明が出る。
+  ///
+  /// 例:
+  ///   ui.open(120, 40);
+  ///   _ = ui.show(ui.button("消す", "del").tooltip("押すと、ぜんぶ消えます"));
+  ///   print(ui.width());   // 120
+  func tooltip(text: string) -> Widget;
+
+  /// 何も入っていないときに、うすく出しておく字。
+  ///
+  /// 入力欄（ui.field / ui.textarea / ui.password / ui.number）で、
+  /// **そこに何を入れるところか**を出しておくのに使う。1字でも打てば消える。
+  ///
+  /// 出しているだけなので、中身にはならない。ui.text_value() や ref で渡した変数は
+  /// 空のまま。伏せ字の欄（ui.password）でも、この字は伏せない。
+  ///
+  /// 例:
+  ///   ui.open(160, 40);
+  ///   var name = "";
+  ///   _ = ui.show(ui.field("name", name).placeholder("なまえ"));
+  ///   print(f"[{name}]");   // []（うすい字は中身にならない）
+  func placeholder(text: string) -> Widget;
 }
