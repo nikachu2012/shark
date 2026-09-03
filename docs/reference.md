@@ -1021,9 +1021,9 @@ ui.textarea("memo", memo),                 // 複数行の入力欄も同じ
 **選ばれた番号**（0 から）が `ui.value()` で返ります。
 
 ```shark
-ui.radio("小", "s0", size == 0),           // 丸を並べる。2〜4 個くらいのとき
-ui.combo("iro", iro_na, iro),              // 押すと一覧が出る。数が多いとき
-ui.listbox("sakana", sakana_na, sel, 5),   // 一覧が出たまま。見比べたいとき
+ui.radio("小", "s0", size == 0),           // ラジオボタン。2〜4 個くらいのとき
+ui.combo("iro", iro_na, iro),              // プルダウン。数が多いとき
+ui.listbox("sakana", sakana_na, sel, 5),   // リストボックス。見比べたいとき
 ```
 
 `ui.combo` は、押して離してからもう一度押しても、**押したまま動かして離しても**選べます。
@@ -1160,7 +1160,7 @@ ui.text(8, 8, "こんにちは", ui.rgb(255, 255, 255));
 取り消しは **Cmd-Z**（Windows と Linux は Ctrl-Z）、やり直しは **Shift-Cmd-Z**（Ctrl-Y でも同じ）です。
 続けて打った字はまとめて1回ぶんに戻ります。
 
-**右で押すと切り貼りのメニュー**が出ます。
+**右で押すと切り貼りのメニュー**が出ます。キーの押し方も、右にうすく出ます。
 窓（macOS）では Cmd-C / Cmd-V / Cmd-X / Cmd-A も効きます。
 置き場は `ui.clipboard()` と `ui.set_clipboard()` でプログラムからも触れます。
 

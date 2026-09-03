@@ -474,6 +474,22 @@ struct MultiClickCase : Case {
   }
 };
 
+// --- 右で押したときのメニュー ---------------------------------------------
+// キーの書き方を右にうすく出すようにしたので、幅や押す位置がずれていないか
+struct FieldMenuCase : Case {
+  int item_h;
+  FieldMenuCase() : item_h(kLineH + kPadY * 2) {}
+  int steps() { return 6; }
+  void act(int step) {
+    if (step == 0) { fake::mouse(10, 5, 2, true); fake::mouse(10, 5, 2, false); }
+    else if (step == 2) fake::click(20, 5 + item_h * 3 + item_h / 2);   // すべて選ぶ
+  }
+  void done(int step, const Str& line) {
+    if (step == 1) expect_line("右で押すと出る（まだ選んでいない）", line, "[]");
+    if (step == 3) expect_line("「すべて選ぶ」でぜんぶ選ばれる", line, "[abcdef]");
+  }
+};
+
 // --- 取り消しとやり直し ---------------------------------------------------
 // Ctrl-Z（macOS は Cmd-Z）で戻し、Shift を足すとやり直す。
 // 受け皿の取り消し帳ではなくコアが持つので、どの機種でも同じに効く
@@ -756,6 +772,14 @@ int main() {
                  "func shown() -> string { return f\"{sel}\"; }\n")
           .c_str(),
       &ref_list);
+
+  FieldMenuCase fmenu;
+  run("右で押したときのメニュー（ui.field）",
+      program_fn("ui.field(ref name)",
+                 "var name = \"abcdef\";\n"
+                 "func shown() -> string { return f\"[{ui.selected()}]\"; }\n")
+          .c_str(),
+      &fmenu);
 
   UndoCase undo;
   run("取り消しとやり直し（ui.field）",

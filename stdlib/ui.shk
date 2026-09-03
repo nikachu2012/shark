@@ -929,7 +929,7 @@ func run(title: string, width: int, height: int, view: func() -> Widget, update:
 func run(title: string, width: int, height: int, view: func() -> Widget) -> void;
 func run(title: string, width: int, height: int, view: func() -> Widget, resizable: bool) -> void;
 
-/// 文字を出す部品。
+/// ラベル。文字を出す部品。
 ///
 /// 部品は `Widget` という値で、作っただけでは何も起きない。
 /// ui.show() に渡すと、そこで初めて描かれる。並べるときは
@@ -944,7 +944,7 @@ func run(title: string, width: int, height: int, view: func() -> Widget, resizab
 ///   print(ui.get(5, 4) != 0);   // true
 func label(text: string) -> Widget;
 
-/// 押せるボタン。
+/// ボタン。押せる。
 ///
 /// 押されたときの受け取り方は2つ。**関数を渡すと、押されたときに呼ばれる。**
 /// 名札（`id`）を渡すと、ui.show() がその名札を返す。
@@ -968,7 +968,7 @@ func label(text: string) -> Widget;
 func button(label: string, id: string) -> Widget;
 func button(label: string, action: func() -> void) -> Widget;
 
-/// 入切のチェック。
+/// チェックボックス。入切のチェック。
 ///
 /// **変数を ref で渡すのがいちばん短い。**押されるたびに、その変数が
 /// 直に入切します。名札も update() も ui.value() も要りません。
@@ -999,7 +999,7 @@ func checkbox(label: string, id: string, on: bool) -> Widget;
 func checkbox(label: string, action: func() -> void, on: bool) -> Widget;
 func checkbox(label: string, ref on: bool) -> Widget;
 
-/// 丸いほうのチェック。**いくつか並べて、そのうち1つを選ぶ**ときに使う。
+/// ラジオボタン。丸いほうのチェックで、**いくつか並べて、そのうち1つを選ぶ**。
 ///
 /// **同じ変数を ref で渡し、それぞれに「自分の数」を持たせるのがいちばん短い。**
 /// 押されると、その数が変数に入る。選ばれて見えるのは、変数と自分の数が同じとき。
@@ -1029,7 +1029,7 @@ func radio(label: string, id: string, on: bool) -> Widget;
 func radio(label: string, action: func() -> void, on: bool) -> Widget;
 func radio(label: string, ref value: int, mine: int) -> Widget;
 
-/// つまみ。lo から hi までの数を選ぶ。
+/// スライダー（つまみ）。lo から hi までの数を選ぶ。
 ///
 /// **変数を ref で渡すのがいちばん短い。**動かすたびに、その変数が書き換わる。
 ///
@@ -1058,7 +1058,7 @@ func slider(id: string, value: int, lo: int, hi: int) -> Widget;
 func slider(action: func() -> void, value: int, lo: int, hi: int) -> Widget;
 func slider(ref value: int, lo: int, hi: int) -> Widget;
 
-/// 数を打つ入力欄。**lo から hi の外には出られない。**
+/// 数の入力欄（スピンボックス）。**lo から hi の外には出られない。**
 ///
 /// 打てるのは数字だけ（lo が負のときは、先頭の `-` も打てる）。
 /// 限りから出てしまう数は**打っても入らない**ので、範囲の外の値になることがない。
@@ -1092,7 +1092,7 @@ func number(id: string, value: int, lo: int, hi: int) -> Widget;
 func number(action: func() -> void, value: int, lo: int, hi: int) -> Widget;
 func number(ref value: int, lo: int, hi: int) -> Widget;
 
-/// 1行の入力欄。
+/// テキストフィールド。1行の入力欄。
 ///
 /// 押すとそこに文字が入るようになる。受け取り方は2つ。
 ///
@@ -1139,7 +1139,7 @@ func number(ref value: int, lo: int, hi: int) -> Widget;
 func field(ref value: string) -> Widget;
 func field(id: string, value: string) -> Widget;
 
-/// 複数行の入力欄。長い文やメモを打つところ。
+/// テキストエリア。複数行の入力欄で、長い文やメモを打つところ。
 ///
 /// 受け取り方は ui.field と同じ2つ。**変数を ref で渡すと、打たれるたびに
 /// その変数が書き換わる。**名札（`id`）を渡したときは、ui.show() がその名札を
@@ -1180,7 +1180,7 @@ func textarea(ref value: string, rows: int) -> Widget;
 func textarea(id: string, value: string) -> Widget;
 func textarea(id: string, value: string, rows: int) -> Widget;
 
-/// 伏せ字の入力欄。あいことば（パスワード）を打つところ。
+/// パスワード欄。伏せ字の入力欄で、あいことばを打つところ。
 ///
 /// 中身の持ち方も受け取り方も ui.field と同じで、**出すときだけ**1字を1つの
 /// `*` に置き換える。ui.text_value() や渡した変数には、打たれた字がそのまま入る。
@@ -1201,7 +1201,7 @@ func textarea(id: string, value: string, rows: int) -> Widget;
 func password(ref value: string) -> Widget;
 func password(id: string, value: string) -> Widget;
 
-/// 押すと一覧が出て、その中の1つを選ぶ部品。
+/// プルダウン（コンボボックス）。押すと一覧が出て、その中の1つを選ぶ。
 ///
 /// **番号の変数を ref で渡すのがいちばん短い。**選ばれるたびに、その変数が書き換わる
 /// （番号は 0 から）。
@@ -1236,7 +1236,7 @@ func combo(id: string, options: list<string>, index: int) -> Widget;
 func combo(action: func() -> void, options: list<string>, index: int) -> Widget;
 func combo(ref index: int, options: list<string>) -> Widget;
 
-/// 並べたものが見えていて、その中の1つを選ぶ部品。
+/// リストボックス。並べたものが見えていて、その中の1つを選ぶ。
 ///
 /// 受け取り方は ui.combo と同じ（ref で渡すか、名札＋ui.value()）。
 ///
@@ -1268,7 +1268,7 @@ func listbox(action: func() -> void, options: list<string>, index: int, rows: in
 func listbox(ref index: int, options: list<string>) -> Widget;
 func listbox(ref index: int, options: list<string>, rows: int) -> Widget;
 
-/// タブの見出し。**出すのは見出しだけ**で、中身は書く人が選んで返す。
+/// タブ（の見出し）。**出すのは見出しだけ**で、中身は書く人が選んで返す。
 ///
 /// **番号の変数を ref で渡すのがいちばん短い。**押されるたびに、その変数が書き換わる。
 ///
@@ -1309,7 +1309,7 @@ func tabs(ref index: int, labels: list<string>) -> Widget;
 ///   print(ui.height());   // 60
 func space(h: int) -> Widget;
 
-/// 空き場所を取る部品。**並んでいる向き**に空ける。
+/// スペーサー。空き場所を取る部品で、**並んでいる向き**に空ける。
 ///
 /// ui.row の中なら横に、ui.col の中なら縦に場所を取る。
 /// 数を省くと、**余ったところをぜんぶ取る**（伸びる空き）。
@@ -1368,7 +1368,7 @@ func col(children: list<Widget>) -> Widget;
 ///   print(ui.width());   // 160
 func row(children: list<Widget>) -> Widget;
 
-/// 格子。cols 列に、左上から右へ、いっぱいになれば次の行へと升を詰める。
+/// グリッド（格子・表）。cols 列に、左上から右へ、いっぱいになれば次の行へと升を詰める。
 ///
 /// 列の幅はその列でいちばん広い升、行の高さはその行でいちばん高い升に揃う。
 /// だから升の大きさがまちまちでも、縦の線が通る。升の数が列の数で割り切れなくても
@@ -1412,7 +1412,7 @@ func grid(rows: int, cols: int, cell: func(int, int) -> Widget) -> Widget;
 ///   print(ui.width());   // 120
 func center(children: list<Widget>) -> Widget;
 
-/// 区切り線。置ける幅いっぱいに引く。
+/// セパレータ（区切り線）。置ける幅いっぱいに引く。
 ///
 /// 例:
 ///   ui.open(80, 40);
@@ -1806,7 +1806,7 @@ class Widget {
   ///   print(ui.get(1, 1) != 0);   // false
   func align(a: string) -> Widget;
 
-  /// カーソルを合わせたときに出す説明。
+  /// ツールチップ。カーソルを合わせたときに出す説明。
   ///
   /// どの部品にも付けられる。少しのあいだ合わせ続けると、カーソルのそばに出る
   /// （すぐ出すと、通りすがりで点滅して読みにくいため）。長い文は折り返す。
@@ -1819,7 +1819,7 @@ class Widget {
   ///   print(ui.width());   // 120
   func tooltip(text: string) -> Widget;
 
-  /// 何も入っていないときに、うすく出しておく字。
+  /// プレースホルダ。何も入っていないときに、うすく出しておく字。
   ///
   /// 入力欄（ui.field / ui.textarea / ui.password / ui.number）で、
   /// **そこに何を入れるところか**を出しておくのに使う。1字でも打てば消える。

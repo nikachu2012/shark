@@ -913,6 +913,7 @@ static bool g_lang_ja = true;           // 内蔵メニューの言い方
 static bool g_menu_on = false;
 static int g_menu_x = 0, g_menu_y = 0;
 static Vec<Str> g_menu_items;
+static Vec<Str> g_menu_keys;            // 項目ごとの、キーの書き方（無ければ空）
 static int g_menu_pick = -1;            // この回に選ばれた番号
 static Str g_menu_owner;                // 入力欄が出したメニューなら、その名札
 static int g_menu_min_w = 0;            // 最低この幅で出す（ui.combo が押した部品に揃える）
@@ -2496,6 +2497,7 @@ static void ui_reset_widgets() {
   g_vm = 0;
   g_menu_on = false;
   g_menu_items.clear();
+  g_menu_keys.clear();
   g_menu_owner.clear();
   g_menu_pick = -1;
   g_menu_px = g_menu_to = 0;
@@ -2932,11 +2934,25 @@ static void place_slider(const Value& v, int x, int y, const Box& b) {
 
 // --- 右で押したときのメニュー ---------------------------------------------
 // 出すのはこちら（面に描く）。どの出し先でも同じに出る
-static void menu_open_at(int x, int y, const Vec<Str>& items, const Str& owner) {
+// この機種で、取り消しや切り貼りに使う修飾キーの書き方
+static const char* mod_name() {
+  const PlatformOS* os = platform().os;
+  if (os && os->name) {
+    Str n(os->name());
+    if (n == "macos") return "Cmd";
+  }
+  return "Ctrl";
+}
+
+static void menu_open_at(int x, int y, const Vec<Str>& items, const Str& owner,
+                         const Vec<Str>* keys = 0) {
   g_menu_on = items.size() > 0;
   g_menu_x = x;
   g_menu_y = y;
   g_menu_items = items;
+  g_menu_keys.clear();
+  for (int i = 0; i < items.size(); i++)
+    g_menu_keys.push(keys && i < keys->size() ? (*keys)[i] : Str());
   g_menu_owner = owner;
   g_menu_min_w = 0;
   g_menu_px = 0;
@@ -2944,13 +2960,26 @@ static void menu_open_at(int x, int y, const Vec<Str>& items, const Str& owner) 
   g_menu_step_at = 0;
 }
 static int menu_item_h() { return line_h(1) + pad_y() * 2; }
+// キーの書き方をいちばん広く出すのに要る幅（無ければ 0）
+static int menu_key_w() {
+  int w = 0;
+  for (int i = 0; i < g_menu_keys.size(); i++) {
+    int t = text_px_width(g_menu_keys[i], 1);
+    if (t > w) w = t;
+  }
+  return w;
+}
 static int menu_w() {
   int w = 0;
   for (int i = 0; i < g_menu_items.size(); i++) {
     int t = text_px_width(g_menu_items[i], 1);
     if (t > w) w = t;
   }
-  w += pad_x() * 4;
+  int kw = menu_key_w();
+  // キーがあるときは、右の余白を詰めて端っこに寄せる（名前の側は変えない）
+  if (kw > 0) w += pad_x() * 2 + kw + pad_x();   // 名前の後ろの空き＋キー＋右の余白
+  else w += pad_x() * 2;                          // 右の余白（ふつう）
+  w += pad_x() * 2;                               // 左の余白
   return w < g_menu_min_w ? g_menu_min_w : w;
 }
 // 面に入りきらないときは、**上下に送るしるし**（▲▼）をつけて巻物にする。
@@ -3078,6 +3107,12 @@ static void menu_draw() {
     if (inside(x, iy, w, ih))
       for (int k = 1; k < ih - 1; k++) span(x + 1, iy + k, w - 2, blend(g_bg, g_accent, 0.45));
     put_text(x + pad_x() * 2, text_y_mid(iy, ih, 1), g_menu_items[i], 1, g_fg);
+    // キーの書き方は、右に寄せてうすく（読めるが、目立たない）
+    if (i < g_menu_keys.size() && g_menu_keys[i].size() > 0) {
+      int kw = text_px_width(g_menu_keys[i], 1);
+      put_text(x + w - pad_x() - kw, text_y_mid(iy, ih, 1), g_menu_keys[i], 1,
+               blend(g_bg, g_fg, 0.45));
+    }
   }
   g_cx0 = kx0;
   g_cy0 = ky0;
@@ -3261,14 +3296,19 @@ static void click_range(const Str& s, int i, int clicks, int* from, int* len) {
 // 入力欄の中で、右で押したときに出すもの。
 // 伏せ字の欄（ui.password）では、中身を取り出すもの（コピー・切り取り）は出さない
 static void field_menu(int x, int y, const Str& id, bool masked) {
-  Vec<Str> items;
+  Vec<Str> items, keys;
+  Str mod(mod_name());
   if (!masked) {
     items.push(Str(g_lang_ja ? "コピー" : "Copy"));
+    keys.push(mod + "+C");
     items.push(Str(g_lang_ja ? "切り取り" : "Cut"));
+    keys.push(mod + "+X");
   }
   items.push(Str(g_lang_ja ? "貼り付け" : "Paste"));
+  keys.push(mod + "+V");
   items.push(Str(g_lang_ja ? "すべて選ぶ" : "Select All"));
-  menu_open_at(x, y, items, id);
+  keys.push(mod + "+A");
+  menu_open_at(x, y, items, id, &keys);
 }
 
 // 伏せ字にした見た目。1字を1つの * に置き換える（数は変えない）
@@ -4964,6 +5004,7 @@ static NativeStatus u_menu_close(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)a; (void)n;
   g_menu_on = false;
   g_menu_items.clear();
+  g_menu_keys.clear();
   g_menu_owner.clear();
   out = mk_void();
   return N_Ok;
