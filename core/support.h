@@ -106,7 +106,9 @@ class Str {
   Str(const char* s) : d_(0), n_(0), c_(0) { append(s, (int)sk_strlen(s)); }
   Str(const char* s, int n) : d_(0), n_(0), c_(0) { append(s, n); }
   Str(const Str& o) : d_(0), n_(0), c_(0) { append(o.d_, o.n_); }
-  Str& operator=(const Str& o) { if (this != &o) { n_ = 0; append(o.d_, o.n_); } return *this; }
+  // 空を入れ直すときも、終端の 0 を置き直す（clear が置く）。
+  // n_ を 0 にするだけだと、c_str() が前の中身を返してしまう
+  Str& operator=(const Str& o) { if (this != &o) { clear(); append(o.d_, o.n_); } return *this; }
   ~Str() { sk_free(d_); }
 
   int size() const { return n_; }
