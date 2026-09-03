@@ -160,6 +160,7 @@ static Str program_fn(const char* widget, const char* state) {
 
 // 内蔵の 5×7 のときの寸法（core/lib/ui.cpp の ui_unit まわり）
 static const int kUnit = 8;
+static const int kCellW = 6;
 static const int kLineH = 8;
 static const int kPadY = 3;    // pad_y()
 static const int kFPadX = 5;   // field_pad_x()
@@ -451,6 +452,28 @@ struct RefListCase : Case {
   }
 };
 
+// --- 続けて押して選ぶ（2回で語、3回で行、4回でぜんぶ）--------------------
+// 中身は "ab cd\nef gh"。字は 6 画素で、入力欄の字は x=5 から始まる
+struct MultiClickCase : Case {
+  int at;   // "cd" の 1 文字目（4 文字目）のあたり
+  MultiClickCase() : at(kFPadX + kCellW * 4 + 2) {}
+  int steps() { return 12; }
+  void act(int step) {
+    int y = kFPadY + 2;                       // 1 行目
+    if (step == 0) fake::click(at, y);        // 1回目：焦点が来る
+    else if (step == 1) fake::click(at, y);   // 2回目：語
+    else if (step == 3) fake::click(at, y);   // 3回目：行
+    else if (step == 5) fake::click(at, y);   // 4回目：ぜんぶ
+    else if (step == 7) { platform().sleep_nanos(500000000LL); fake::click(at, y); }
+  }
+  void done(int step, const Str& line) {
+    if (step == 2) expect_line("2回で語（空白から空白まで）", line, "[cd]");
+    if (step == 4) expect_line("3回で行（書かれた改行まで）", line, "[ab cd]");
+    if (step == 6) expect_line("4回でぜんぶ", line, "[ab cd/ef gh]");
+    if (step == 8) expect_line("間があけば、また1回目から", line, "[]");
+  }
+};
+
 // --- つまみは、外へ出ても付いてくる ---------------------------------------
 // 押しっぱなしで動かすものは、部品の外に出たとたん止まると使いにくい。
 // つかんだら、離すまで付いてくること
@@ -706,6 +729,17 @@ int main() {
                  "func shown() -> string { return f\"{sel}\"; }\n")
           .c_str(),
       &ref_list);
+
+  MultiClickCase multi;
+  run("続けて押して選ぶ（ui.textarea）",
+      program_fn("ui.textarea(ref memo, 3)",
+                 "var memo = \"ab cd\\nef gh\";\n"
+                 "func shown() -> string {\n"
+                 "  var s = ui.selected().replace(\"\\n\", \"/\");\n"
+                 "  return f\"[{s}]\";\n"
+                 "}\n")
+          .c_str(),
+      &multi);
 
   SliderDragCase slide;
   run("つまみは外へ出ても付いてくる（ui.slider）",

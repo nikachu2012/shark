@@ -886,6 +886,11 @@ static Str g_num_id, g_num_text;
 // 押しっぱなしで動かすものは、部品の外に出たとたん止まると使いにくい
 static Str g_slide_id;
 static bool g_sliding = false;
+// 続けて押したときの数え（2回で語、3回で行、4回でぜんぶ）
+static Str g_multi_id;
+static int g_multi_n = 0;
+static int64_t g_multi_at = 0;
+static int g_multi_x = 0, g_multi_y = 0;
 // カーソルを合わせたときに出す説明（.tooltip）。この回、どれに乗っているか
 static Str g_tip_text, g_tip_prev;
 static int g_tip_x = 0, g_tip_y = 0;
@@ -895,6 +900,7 @@ static int g_drag_anchor = 0;           // なぞり始めた文字
 // 押されたところ。焦点が移るのは次の回で、変換の受け皿（IME）もそのときできる。
 // 受け皿に位置を入れられるのはそれからなので、どこを押されたかを持ち越す
 static int g_want_caret = -1;
+static int g_want_len = 0;              // 語や行を選んだときは、その長さも
 static Str g_want_id;                   // その位置を入れたい入力欄の名札
 static bool g_lang_ja = true;           // 内蔵メニューの言い方
 
@@ -2312,11 +2318,7 @@ static int box_w() {
   if (h < ui_unit()) h = ui_unit();
   return h < 9 ? 9 : h;
 }
-// 角を落とす大きさ
-static int box_round() {
-  int r = box_w() / 6;
-  return r < 1 ? 1 : (r > 4 ? 4 : r);
-}
+
 
 // この回の送りぶんを、その部品の行の高さで**画素**に直す。
 // 1画素に満たないぶんは持ち越すので、ゆっくり動かしても落ちない。
@@ -2372,13 +2374,18 @@ static void thick_line(int x0, int y0, int x1, int y1, int t, uint32_t c) {
   }
 }
 
-// チェックの印。箱の大きさに合わせて、太さも長さも決める
+// チェックの印。箱の大きさに合わせて太さも長さも決め、**箱の真ん中**に置く。
+// thick_line は右と下へ t 画素ぶん太るので、そのぶんも数に入れて中央に寄せる
 static void check_mark(int bx, int by, int w, uint32_t c) {
   int t = w / 7;
   if (t < 1) t = 1;
-  int x0 = bx + w * 24 / 100, y0 = by + w * 52 / 100;
-  int x1 = bx + w * 42 / 100, y1 = by + w * 70 / 100;
-  int x2 = bx + w * 76 / 100, y2 = by + w * 30 / 100;
+  int mw = w * 56 / 100;          // 印の幅
+  int mh = w * 40 / 100;          // 印の高さ（曲がり角から上まで）
+  int ox = bx + (w - mw - t) / 2;
+  int oy = by + (w - mh - t) / 2;
+  int x0 = ox, y0 = oy + mh * 45 / 100;   // 左上の始まり
+  int x1 = ox + mw * 34 / 100, y1 = oy + mh;   // 曲がり角（いちばん下）
+  int x2 = ox + mw, y2 = oy;                   // 右上の終わり
   thick_line(x0, y0, x1, y1, t, c);
   thick_line(x1, y1, x2, y2, t, c);
 }
@@ -2470,6 +2477,9 @@ static void ui_reset_widgets() {
   g_num_text.clear();
   g_slide_id.clear();
   g_sliding = false;
+  g_multi_id.clear();
+  g_multi_n = 0;
+  g_multi_at = 0;
   g_tip_text.clear();
   g_tip_prev.clear();
   g_tip_since = 0;
@@ -2819,19 +2829,18 @@ static void place_button(const Value& v, int x, int y, const Box& b) {
   if (over && g_mpress[0]) hit(v, 1);
 }
 
-// 入っているときは**中を差し色で塗りつぶし**、印は下地の色で抜く。
-// 枠と印だけより、入切がひと目で分かる
+// 四角い枠と、真ん中のレ点。**中は塗らない**（塗ると印が読みにくく、
+// 並べたときに重い）。入っているかは、枠の濃さと印の有無で分かる
 static void place_checkbox(const Value& v, int x, int y, const Box& b) {
   bool on = w_a(v) != 0;
   bool over = inside(x, y, b.w, b.h);
   if (over) g_cursor_want = SCUR_Hand;
-  int bw = box_w(), r = box_round();
+  int bw = box_w();
   uint32_t edge = blend(g_bg, g_accent, on ? 1.0 : (over ? 0.85 : 0.5));
-  uint32_t face = on ? blend(g_bg, g_accent, over ? 1.0 : 0.9)
-                     : blend(g_bg, g_accent, over ? 0.25 : 0.12);
-  fill_round(x, y, bw, bw, r, edge);
-  fill_round(x + 1, y + 1, bw - 2, bw - 2, r, face);
-  if (on) check_mark(x, y, bw, g_bg);
+  uint32_t face = blend(g_bg, g_accent, over ? 0.25 : 0.12);
+  for (int i = 0; i < bw; i++) span(x, y + i, bw, edge);
+  for (int i = 1; i < bw - 1; i++) span(x + 1, y + i, bw - 2, face);
+  if (on) check_mark(x, y, bw, blend(g_bg, g_accent, 1.0));
   put_text(x + bw + mark_gap(), y + (bw - line_h(1)) / 2, w_text(v), 1, w_fg(v));
   if (over && g_mpress[0]) hit(v, on ? 0 : 1);
 }
@@ -3064,6 +3073,82 @@ static int edge_x(const Str& s, int from, int upto, int x0) {
   return x0 + text_px_width(sub_chars(s, from, upto - from), 1) - 1;
 }
 
+// --- 続けて押したときの選び方 ---------------------------------------------
+// 2回で語、3回で行、4回でぜんぶ。同じ入力欄の近いところを、短いあいだに
+// 押したときだけ「続き」と数える
+static int multi_click(const Str& id) {
+  int64_t now = platform().monotonic_nanos();
+  int dx = g_mx - g_multi_x, dy = g_my - g_multi_y;
+  if (dx < 0) dx = -dx;
+  if (dy < 0) dy = -dy;
+  bool same = g_multi_id.size() > 0 && g_multi_id == id && now - g_multi_at < 450000000LL &&
+              dx <= 3 && dy <= 3;
+  g_multi_n = same ? g_multi_n + 1 : 1;
+  g_multi_at = now;
+  g_multi_x = g_mx;
+  g_multi_y = g_my;
+  g_multi_id = id;
+  return g_multi_n;
+}
+
+// 語の切れ目。空白（半角・全角）とタブと改行で切る。
+// 日本語には空白が無いので、書かれたひと続きがまるごと語になる
+static bool is_break_cp(int cp) {
+  return cp == ' ' || cp == '\t' || cp == '\n' || cp == 0x3000;
+}
+
+// i のところを含む「空白で区切られたひと続き」。押したところが空白なら、その空白のかたまり
+static void word_range(const Str& s, int i, int* from, int* to) {
+  Vec<int> brk;
+  int at = 0;
+  while (at < s.size()) {   // 終わりを先に見る（utf8_decode は端を見てくれない）
+    int cp = 0;
+    int adv = utf8_decode(s, at, &cp);
+    if (adv <= 0) break;
+    brk.push(is_break_cp(cp) ? 1 : 0);
+    at += adv;
+  }
+  int n = brk.size();
+  if (n == 0) { *from = 0; *to = 0; return; }
+  if (i >= n) i = n - 1;
+  if (i < 0) i = 0;
+  int want = brk[i], a = i, b = i;
+  while (a > 0 && brk[a - 1] == want) a--;
+  while (b + 1 < n && brk[b + 1] == want) b++;
+  *from = a;
+  *to = b + 1;
+}
+
+// i のところを含むひと行（改行から改行まで）。折り返しではなく、書かれた改行で切る
+static void line_range(const Str& s, int i, int* from, int* to) {
+  int n = utf8_len(s);
+  if (i > n) i = n;
+  if (i < 0) i = 0;
+  int at = 0, a = 0, b = n;
+  for (int k = 0; k < n; k++) {
+    int cp = 0;
+    int adv = utf8_decode(s, at, &cp);
+    if (adv <= 0) break;
+    if (cp == '\n') {
+      if (k < i) a = k + 1;
+      else { b = k; break; }
+    }
+    at += adv;
+  }
+  *from = a;
+  *to = b;
+}
+
+// 続けて押された回数から、選ぶ範囲を決める。1回なら「その場所」（幅 0）
+static void click_range(const Str& s, int i, int clicks, int* from, int* len) {
+  if (clicks >= 4) { *from = 0; *len = utf8_len(s); return; }
+  int a = i, b = i;
+  if (clicks == 3) line_range(s, i, &a, &b);
+  else if (clicks == 2) word_range(s, i, &a, &b);
+  *from = a;
+  *len = b - a;
+}
+
 // 入力欄の中で、右で押したときに出すもの。
 // 伏せ字の欄（ui.password）では、中身を取り出すもの（コピー・切り取り）は出さない
 static void field_menu(int x, int y, const Str& id, bool masked) {
@@ -3103,13 +3188,16 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
     g_focus_next = id;
     if (!focused) { g_scroll = 0; g_anchor = g_caret = utf8_len(text); }
     int i = char_at_x(masked ? mask_of(text) : text, g_scroll, tx, g_mx);
-    sel_set(text, i, 0);
-    // 選んでいるところを移植層が持つ形（macOS の窓）では、受け皿は焦点が移る
-    // 次の回にできるので、いまの sel_set はまだ効かない。押されたところを
-    // 覚えておいて、受け皿ができてから入れ直す
-    if (!focused && sel_from_platform()) { g_want_caret = i; g_want_id = id; }
+    // 続けて押されていれば、2回で語、3回で行、4回でぜんぶ
+    int st0 = 0, ln0 = 0;
+    click_range(text, i, multi_click(id), &st0, &ln0);
+    sel_set(text, st0, ln0);
+    // 選んでいるところを移植層が持つ形（macOS の窓）では、**受け皿はこのあと
+    // input_frame で用意される**ので、いまの sel_set はまだ効かない。
+    // 選んだところを覚えておいて、用意できてから入れ直す
+    if (sel_from_platform()) { g_want_caret = st0; g_want_len = ln0; g_want_id = id; }
     g_drag_anchor = i;
-    g_dragging = true;
+    g_dragging = ln0 == 0;   // 語や行を選んだあとは、なぞりで上書きしない
   } else if (over && g_mpress[2]) {   // 右で押したら、切り貼りのメニュー
     g_focus_next = id;
     field_menu(g_mx, g_my, id, masked);
@@ -3149,8 +3237,9 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
     text = conf;
     // 受け皿ができた最初の回。押されたところにカーソルを合わせる
     if (g_want_caret >= 0 && g_want_id == id) {
-      sel_set(text, g_want_caret, 0);
+      sel_set(text, g_want_caret, g_want_len);
       g_want_caret = -1;
+      g_want_len = 0;
       g_want_id.clear();
     }
     if (!(conf == w_text(v))) {
@@ -3427,13 +3516,19 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
     if (!focused) g_aanchor = g_acaret = 0;
     g_agoal = -1;
     int i = area_index_at(text, starts, counts, ty, tx, shown, cur);
-    sel_set(text, i, 0);
-    g_aanchor = g_acaret = i;
+    // 続けて押されていれば、2回で語、3回で行（折り返しではなく書かれた改行で）、
+    // 4回でぜんぶ
+    int st0 = 0, ln0 = 0;
+    click_range(text, i, multi_click(id), &st0, &ln0);
+    sel_set(text, st0, ln0);
+    g_aanchor = st0;
+    g_acaret = st0 + ln0;
+    if (ln0 > 0) i = st0 + ln0;
     // 選んでいるところを移植層が持つ形では、受け皿は焦点が移る次の回にできる。
     // 押されたところを覚えておいて、受け皿ができてから入れ直す（ui.field と同じ）
-    if (!focused && sel_from_platform()) { g_want_caret = i; g_want_id = id; }
+    if (sel_from_platform()) { g_want_caret = st0; g_want_len = ln0; g_want_id = id; }
     g_drag_anchor = i;
-    g_dragging = true;
+    g_dragging = ln0 == 0;   // 語や行を選んだあとは、なぞりで上書きしない
   } else if (over && g_mpress[2]) {   // 右で押したら、切り貼りのメニュー
     g_focus_next = id;
     field_menu(g_mx, g_my, id, false);
@@ -3524,9 +3619,11 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
     text = conf;
     // 受け皿ができた最初の回。押されたところにカーソルを合わせる
     if (g_want_caret >= 0 && g_want_id == id) {
-      sel_set(text, g_want_caret, 0);
-      g_aanchor = g_acaret = g_want_caret;
+      sel_set(text, g_want_caret, g_want_len);
+      g_aanchor = g_want_caret;
+      g_acaret = g_want_caret + g_want_len;
       g_want_caret = -1;
+      g_want_len = 0;
       g_want_id.clear();
     }
     if (!(conf == w_text(v))) {
@@ -4587,7 +4684,11 @@ static NativeStatus show_at(VM& vm, Value* a, int x, int y, Value& out) {
   place(*view, x, y, avail, avail_h, true);
   g_focus = g_focus_next;
   // 押された入力欄に焦点が来なかったら、覚えておいた位置は捨てる
-  if (g_want_caret >= 0 && !(g_focus == g_want_id)) { g_want_caret = -1; g_want_id.clear(); }
+  if (g_want_caret >= 0 && !(g_focus == g_want_id)) {
+    g_want_caret = -1;
+    g_want_len = 0;
+    g_want_id.clear();
+  }
   // 押しは受け取った部品が使い切る。こうすると、同じ回にもう一度 ui.show() しても
   // 二度は効かない（ui.run が、状態を変えたあとすぐ描き直すのに要る）
   if (g_hit_any) { g_mpress[0] = false; g_mpress[2] = false; }
