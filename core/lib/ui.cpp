@@ -919,6 +919,8 @@ static Str g_menu_owner;                // 入力欄が出したメニューな�
 static int g_menu_min_w = 0;            // 最低この幅で出す（ui.combo が押した部品に揃える）
 static int g_menu_px = 0, g_menu_to = 0;   // 上に隠しているぶん（画素）と、その目当て
 static int64_t g_menu_step_at = 0;      // 次に1つ送る刻限。0 は「送るしるしに合わせていない」
+static int g_menu_open_mx = 0, g_menu_open_my = 0;   // 出したときの、押した場所（引きずったか判じるのに使う）
+static const int kMenuDragPx = 4;       // これより動いたら「引きずった」とみなす画素数
 
 
 
@@ -2502,6 +2504,7 @@ static void ui_reset_widgets() {
   g_menu_pick = -1;
   g_menu_px = g_menu_to = 0;
   g_menu_step_at = 0;
+  g_menu_open_mx = g_menu_open_my = 0;
   g_caret = g_anchor = g_scroll = g_drag_anchor = g_fcaret = 0;
   g_acaret = g_aanchor = 0;
   g_area_px = g_area_to = 0;
@@ -2958,6 +2961,8 @@ static void menu_open_at(int x, int y, const Vec<Str>& items, const Str& owner,
   g_menu_px = 0;
   g_menu_to = 0;
   g_menu_step_at = 0;
+  g_menu_open_mx = g_mx;
+  g_menu_open_my = g_my;
 }
 static int menu_item_h() { return line_h(1) + pad_y() * 2; }
 // キーの書き方をいちばん広く出すのに要る幅（無ければ 0）
@@ -3055,6 +3060,16 @@ static void menu_hit() {
     // **押したまま動かして、項目の上で離した**（プルダウンの選び方）。
     // 出したところ（部品の上）で離しただけなら、開いたままにする
     if (idx >= 0) {
+      g_menu_pick = idx;
+      g_menu_on = false;
+    }
+  } else if (g_mrel[2]) {
+    // **右で押したまま動かして、項目の上で離した**（プルダウンと同じ選び方）。
+    // ほとんど動かさずに離しただけなら、出した場所の真上でも選んだことにしない
+    // （出す押しがそのまま項目の上に乗ることがあるため）
+    int dx = g_mx - g_menu_open_mx, dy = g_my - g_menu_open_my;
+    bool dragged = dx * dx + dy * dy > kMenuDragPx * kMenuDragPx;
+    if (idx >= 0 && dragged) {
       g_menu_pick = idx;
       g_menu_on = false;
     }

@@ -490,6 +490,25 @@ struct FieldMenuCase : Case {
   }
 };
 
+// --- 押したまま動かして、離して決める（右でも同じ）------------------------
+struct FieldMenuDragCase : Case {
+  int item_h, target_y;
+  FieldMenuDragCase() : item_h(kLineH + kPadY * 2) {
+    target_y = 5 + item_h * 3 + item_h / 2;   // 「すべて選ぶ」のまんなか
+  }
+  int steps() { return 6; }
+  void act(int step) {
+    if (step == 0) fake::mouse(10, 5, 2, true);        // 右で押す（まだ離さない）
+    else if (step == 2) fake::hover(20, target_y);      // 押したまま動かす
+    else if (step == 4) fake::mouse(20, target_y, 2, false);   // 離す → ここで決まる
+  }
+  void done(int step, const Str& line) {
+    if (step == 1) expect_line("押しただけでは決まらない", line, "[]");
+    if (step == 3) expect_line("動かしただけでも決まらない", line, "[]");
+    if (step == 5) expect_line("項目の上で離すと決まる（プルダウンと同じ）", line, "[abcdef]");
+  }
+};
+
 // --- 取り消しとやり直し ---------------------------------------------------
 // Ctrl-Z（macOS は Cmd-Z）で戻し、Shift を足すとやり直す。
 // 受け皿の取り消し帳ではなくコアが持つので、どの機種でも同じに効く
@@ -780,6 +799,14 @@ int main() {
                  "func shown() -> string { return f\"[{ui.selected()}]\"; }\n")
           .c_str(),
       &fmenu);
+
+  FieldMenuDragCase fmenu_drag;
+  run("右で押したときのメニュー、引きずって選ぶ（ui.field）",
+      program_fn("ui.field(ref name)",
+                 "var name = \"abcdef\";\n"
+                 "func shown() -> string { return f\"[{ui.selected()}]\"; }\n")
+          .c_str(),
+      &fmenu_drag);
 
   UndoCase undo;
   run("取り消しとやり直し（ui.field）",
