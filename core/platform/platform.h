@@ -107,6 +107,7 @@ enum ScreenKey {
   SKEY_Enter, SKEY_Escape, SKEY_Tab, SKEY_Back, SKEY_Delete,
   SKEY_Home, SKEY_End, SKEY_PageUp, SKEY_PageDown,
   SKEY_Shift, SKEY_Ctrl, SKEY_Alt,
+  SKEY_Meta,   // macOS の Command、Windows の Windows キー、Linux の Super
   SKEY_F1, SKEY_F2, SKEY_F3, SKEY_F4, SKEY_F5, SKEY_F6,
   SKEY_F7, SKEY_F8, SKEY_F9, SKEY_F10, SKEY_F11, SKEY_F12,
   SKEY_Max

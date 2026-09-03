@@ -1124,6 +1124,7 @@ func number(ref value: int, lo: int, hi: int) -> Widget;
 ///
 ///   なぞれば選べる。矢印で動かし、shift を押しながらなら選びながら動く。
 ///   続けて押すと、2回で語（空白から空白まで）、3回で行、4回でぜんぶ選ぶ。
+///   取り消しは Cmd-Z（Windows と Linux は Ctrl-Z）、やり直しは Shift を足すか Ctrl-Y。
 ///   右で押すと、コピー・切り取り・貼り付け・すべて選ぶ のメニューが出る。
 ///   窓（macOS）では Cmd-C / Cmd-V / Cmd-X / Cmd-A、
 ///   窓（Windows）では ctrl+C / ctrl+V / ctrl+X / ctrl+A も効く。

@@ -407,6 +407,10 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
         }
       }
     }
+    // 取り消し・やり直しはコアが持つ。ブラウザの受け皿にもさせると二重に効く
+    if (down && (e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z' ||
+                                             e.key === 'y' || e.key === 'Y'))
+      e.preventDefault();
     // 面が受け取ったキーは、ブラウザの既定の動き（巻物・焦点の移動）に渡さない
     if (!S.textOn && !e.ctrlKey && !e.metaKey && !e.altKey && PREVENT[e.key]) e.preventDefault();
     // 改行はコア（Shark）が入れる。受け皿にも入れさせると二重になる。
@@ -761,7 +765,7 @@ void init_js() {
       {"Tab", SKEY_Tab}, {"Backspace", SKEY_Back}, {"Delete", SKEY_Delete},
       {"Home", SKEY_Home}, {"End", SKEY_End}, {"PageUp", SKEY_PageUp},
       {"PageDown", SKEY_PageDown}, {"Shift", SKEY_Shift}, {"Control", SKEY_Ctrl},
-      {"Alt", SKEY_Alt}};
+      {"Alt", SKEY_Alt}, {"Meta", SKEY_Meta}};
   for (int i = 0; i < (int)(sizeof m / sizeof m[0]); i++) cv_key(m[i].name, m[i].code);
   for (int i = 0; i < 12; i++) {   // F1〜F12
     char nm[4];

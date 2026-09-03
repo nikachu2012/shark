@@ -823,7 +823,7 @@ static const KeyName kKeyNames[] = {
     {"enter", SKEY_Enter}, {"esc", SKEY_Escape}, {"tab", SKEY_Tab}, {"back", SKEY_Back},
     {"delete", SKEY_Delete}, {"home", SKEY_Home}, {"end", SKEY_End},
     {"pageup", SKEY_PageUp}, {"pagedown", SKEY_PageDown},
-    {"shift", SKEY_Shift}, {"ctrl", SKEY_Ctrl}, {"alt", SKEY_Alt},
+    {"shift", SKEY_Shift}, {"ctrl", SKEY_Ctrl}, {"alt", SKEY_Alt}, {"meta", SKEY_Meta},
     {"space", 32},
     {"f1", SKEY_F1}, {"f2", SKEY_F2}, {"f3", SKEY_F3}, {"f4", SKEY_F4},
     {"f5", SKEY_F5}, {"f6", SKEY_F6}, {"f7", SKEY_F7}, {"f8", SKEY_F8},
@@ -886,6 +886,11 @@ static Str g_num_id, g_num_text;
 // 押しっぱなしで動かすものは、部品の外に出たとたん止まると使いにくい
 static Str g_slide_id;
 static bool g_sliding = false;
+// 取り消し帳。入力欄の中身を、変わる**前**の姿で控えておく
+static Str g_undo_id;                      // どの入力欄のものか
+static Vec<Str> g_undo, g_redo;            // 変わる前の中身
+static Vec<int> g_undo_at, g_redo_at;      // そのときのカーソル
+static int64_t g_undo_last = 0;            // 最後に控えた刻限
 // 続けて押したときの数え（2回で語、3回で行、4回でぜんぶ）
 static Str g_multi_id;
 static int g_multi_n = 0;
@@ -2512,6 +2517,12 @@ static void ui_reset_widgets() {
   g_multi_id.clear();
   g_multi_n = 0;
   g_multi_at = 0;
+  g_undo_id.clear();
+  g_undo.clear();
+  g_undo_at.clear();
+  g_redo.clear();
+  g_redo_at.clear();
+  g_undo_last = 0;
   g_tip_text.clear();
   g_tip_prev.clear();
   g_tip_since = 0;
@@ -3107,6 +3118,70 @@ static int edge_x(const Str& s, int from, int upto, int x0) {
   return x0 + text_px_width(sub_chars(s, from, upto - from), 1) - 1;
 }
 
+// --- 取り消しとやり直し ---------------------------------------------------
+// 入力欄の中身を、変わる**前**の姿で控えておく。Cmd-Z（Windows と Linux は
+// Ctrl-Z）で戻し、Shift を足すとやり直す。
+//
+// 受け皿（macOS の NSTextView など）の取り消し帳には頼らない。機種ごとに
+// 別物になるうえ、こちらが中身を入れ直したときに食い違うため。
+static const int kUndoMax = 200;           // これ以上は古いほうから捨てる
+
+static void undo_forget(const Str& id) {
+  g_undo_id = id;
+  g_undo.clear();
+  g_undo_at.clear();
+  g_redo.clear();
+  g_redo_at.clear();
+  g_undo_last = 0;
+}
+
+// 中身が変わる前に呼ぶ。続けて打った字は、まとめて1回ぶんにする
+static void undo_push(const Str& id, const Str& before, int caret) {
+  if (!(g_undo_id == id)) undo_forget(id);
+  int64_t now = platform().monotonic_nanos();
+  bool join = g_undo.size() > 0 && now - g_undo_last < 500000000LL;   // 0.5 秒
+  g_undo_last = now;
+  g_redo.clear();          // 新しく打ったら、やり直せる先は消える
+  g_redo_at.clear();
+  if (join) return;        // 続きなので、前に控えたものをそのまま使う
+  if (g_undo.size() >= kUndoMax) {
+    g_undo.remove(0);
+    g_undo_at.remove(0);
+  }
+  g_undo.push(before);
+  g_undo_at.push(caret);
+}
+
+// 取り消し（やり直し）。戻す中身があれば true を返し、out に入れる
+static bool undo_take(const Str& id, bool redo, const Str& now_text, int now_caret,
+                      Str* out, int* out_caret) {
+  if (!(g_undo_id == id)) return false;
+  Vec<Str>& from = redo ? g_redo : g_undo;
+  Vec<int>& from_at = redo ? g_redo_at : g_undo_at;
+  Vec<Str>& to = redo ? g_undo : g_redo;
+  Vec<int>& to_at = redo ? g_undo_at : g_redo_at;
+  if (from.size() == 0) return false;
+  *out = from[from.size() - 1];
+  *out_caret = from_at[from_at.size() - 1];
+  from.remove(from.size() - 1);
+  from_at.remove(from_at.size() - 1);
+  to.push(now_text);
+  to_at.push(now_caret);
+  g_undo_last = 0;         // 戻したあとの打鍵は、まとめない
+  return true;
+}
+
+// 取り消しの合図か。macOS は Cmd、Windows と Linux は Ctrl。
+// Shift を足すとやり直し（Ctrl-Y でもやり直せる）
+static bool undo_key(bool* redo) {
+  bool mod = g_key[SKEY_Meta] || g_key[SKEY_Ctrl];
+  if (!mod) return false;
+  if (g_press['y']) { *redo = true; return true; }
+  if (!g_press['z']) return false;
+  *redo = g_key[SKEY_Shift];
+  return true;
+}
+
 // --- 続けて押したときの選び方 ---------------------------------------------
 // 2回で語、3回で行、4回でぜんぶ。同じ入力欄の近いところを、短いあいだに
 // 押したときだけ「続き」と数える
@@ -3265,9 +3340,30 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
   Str marked;
   if (focused && !g_replay) {
     bool was_composing = g_marked.size() > 0;
+    // 取り消し・やり直し。合図を先に見て、あとの打鍵と混ざらないようにする
+    bool redo = false;
+    if (undo_key(&redo)) {
+      int st1 = 0, ln1 = 0;
+      sel_get(text, &st1, &ln1);
+      Str back;
+      int back_at = 0;
+      if (undo_take(id, redo, text, st1 + ln1, &back, &back_at)) {
+        // 中身をまるごと戻す。受け皿を持つ機種では、下の input_frame が
+        // 「呼んだ側の中身が変わった」と見て入れ直してくれる
+        text = back;
+        sel_set(text, back_at > utf8_len(text) ? utf8_len(text) : back_at, 0);
+      }
+      g_press['z'] = false;   // この欄が使い切る
+      g_press['y'] = false;
+    }
     Str conf;
     input_frame(tx, ty, line_h(1), text, &conf, &marked);
     if (g_press[SKEY_Enter] && !was_composing) g_focus_next.clear();
+    if (!(conf == text)) {   // 打たれて変わった。変わる前の姿を控える
+      int st1 = 0, ln1 = 0;
+      sel_get(text, &st1, &ln1);
+      undo_push(id, text, st1 + ln1);
+    }
     text = conf;
     // 受け皿ができた最初の回。押されたところにカーソルを合わせる
     if (g_want_caret >= 0 && g_want_id == id) {
@@ -3644,12 +3740,30 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
         g_press[SKEY_Back] || g_press[SKEY_Delete] || g_press[SKEY_Home] || g_press[SKEY_End])
       g_agoal = -1;
 
+    // 取り消し・やり直し
+    bool redo = false;
+    if (!was_composing && undo_key(&redo)) {
+      Str back;
+      int back_at = 0;
+      if (undo_take(id, redo, text, g_acaret, &back, &back_at)) {
+        text = back;   // 中身をまるごと戻す（受け皿は input_frame が入れ直す）
+        int n = utf8_len(text);
+        g_aanchor = g_acaret = back_at > n ? n : back_at;
+        sel_set(text, g_acaret, 0);
+        area_lines(text, room, &starts, &counts);
+        nrows = starts.size();
+      }
+      g_press['z'] = false;
+      g_press['y'] = false;
+    }
+
     // 変換の候補は、カーソルのある行のあたりに出してもらう
     int cr = area_row_of(starts, g_acaret) - top;
     if (cr < 0) cr = 0;
     if (cr > shown - 1) cr = shown - 1;
     Str conf;
     input_frame(tx, ty + cr * lp, lh, text, &conf, &marked, true);
+    if (!(conf == text)) undo_push(id, text, g_acaret);   // 変わる前の姿を控える
     text = conf;
     // 受け皿ができた最初の回。押されたところにカーソルを合わせる
     if (g_want_caret >= 0 && g_want_id == id) {

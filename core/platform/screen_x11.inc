@@ -353,6 +353,7 @@ int key_of(XID ks) {
     case 0xffe1: case 0xffe2: return SKEY_Shift;
     case 0xffe3: case 0xffe4: return SKEY_Ctrl;
     case 0xffe9: case 0xffea: return SKEY_Alt;
+    case 0xffeb: case 0xffec: return SKEY_Meta;   // Super（Windows キー）
     default: break;
   }
   if (ks >= 0xffbe && ks <= 0xffc9) return SKEY_F1 + (int)(ks - 0xffbe);

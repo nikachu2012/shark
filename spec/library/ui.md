@@ -395,7 +395,8 @@ if ui.font(15) {                                   // 機種のフォントを�
 キーの名前は、印字できる文字ならその文字そのもの（`"a"` `"1"` `"-"`）。
 大文字と小文字は区別しない。そのほかは
 `"left"` `"right"` `"up"` `"down"` `"space"` `"enter"` `"esc"` `"tab"` `"back"`
-`"delete"` `"home"` `"end"` `"pageup"` `"pagedown"` `"shift"` `"ctrl"` `"alt"` `"f1"`〜`"f12"`。
+`"delete"` `"home"` `"end"` `"pageup"` `"pagedown"` `"shift"` `"ctrl"` `"alt"` `"meta"` `"f1"`〜`"f12"`。
+`"meta"` は macOS の Command、Windows の Windows キー、Linux の Super。
 
 打たれた文字（`ui.typed()`）とキー（`ui.key()`）を分けているのは、
 文字を入れる場面と、操作に使う場面が別のものだから。
@@ -872,6 +873,13 @@ ui.textarea("memo", memo)     // ui.show() が "memo" を返す
 | 語を選ぶ | **2回続けて押す**（空白から空白まで。日本語は書かれたひと続き） |
 | 行を選ぶ | **3回続けて押す**（折り返しではなく、書かれた改行まで） |
 | ぜんぶ選ぶ | **4回続けて押す** |
+| 取り消す | Cmd-Z（Windows・Linux は Ctrl-Z） |
+| やり直す | Shift-Cmd-Z（Ctrl-Y でも同じ） |
+
+取り消し帳は**コアが持つ**。受け皿（macOS の `NSTextView` など）の取り消しに頼ると、
+機種ごとに別物になるうえ、こちらが中身を入れ直したときに食い違う。
+控えるのは「変わる前の中身とカーソル」で、**続けて打った字は 0.5 秒のあいだ
+1回ぶんにまとめる**（1字ずつ戻るのは戻しすぎ）。焦点が別の入力欄に移ると忘れる。
 | 切り貼り | 右で押すと出るメニュー（コピー・切り取り・貼り付け・すべて選ぶ） |
 | 同上（窓・macOS） | Cmd-C / Cmd-V / Cmd-X / Cmd-A も効く |
 | 同上（窓・Windows） | ctrl+C / ctrl+V / ctrl+X / ctrl+A も効く |

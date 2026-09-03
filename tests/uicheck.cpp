@@ -474,6 +474,33 @@ struct MultiClickCase : Case {
   }
 };
 
+// --- 取り消しとやり直し ---------------------------------------------------
+// Ctrl-Z（macOS は Cmd-Z）で戻し、Shift を足すとやり直す。
+// 受け皿の取り消し帳ではなくコアが持つので、どの機種でも同じに効く
+struct UndoCase : Case {
+  int steps() { return 12; }
+  void act(int step) {
+    if (step == 0) fake::click(10, 6);              // 押して打てるようにする
+    else if (step == 2) fake::input("abc");         // 打つ
+    else if (step == 4) { fake::key(SKEY_Ctrl, true); fake::key('z', true); }
+    else if (step == 5) { fake::key('z', false); fake::key(SKEY_Ctrl, false); }
+    else if (step == 7) {
+      fake::key(SKEY_Ctrl, true);
+      fake::key(SKEY_Shift, true);
+      fake::key('z', true);
+    } else if (step == 8) {
+      fake::key('z', false);
+      fake::key(SKEY_Shift, false);
+      fake::key(SKEY_Ctrl, false);
+    }
+  }
+  void done(int step, const Str& line) {
+    if (step == 4) expect_line("打った字が入る", line, "[abc]");
+    if (step == 6) expect_line("Ctrl-Z で戻る", line, "[]");
+    if (step == 9) expect_line("Shift-Ctrl-Z でやり直す", line, "[abc]");
+  }
+};
+
 // --- つまみは、外へ出ても付いてくる ---------------------------------------
 // 押しっぱなしで動かすものは、部品の外に出たとたん止まると使いにくい。
 // つかんだら、離すまで付いてくること
@@ -729,6 +756,14 @@ int main() {
                  "func shown() -> string { return f\"{sel}\"; }\n")
           .c_str(),
       &ref_list);
+
+  UndoCase undo;
+  run("取り消しとやり直し（ui.field）",
+      program_fn("ui.field(ref name)",
+                 "var name = \"\";\n"
+                 "func shown() -> string { return f\"[{name}]\"; }\n")
+          .c_str(),
+      &undo);
 
   MultiClickCase multi;
   run("続けて押して選ぶ（ui.textarea）",

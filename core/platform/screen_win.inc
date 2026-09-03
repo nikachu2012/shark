@@ -510,6 +510,7 @@ int key_of(WPARAM vk) {
     case VK_SHIFT: case VK_LSHIFT: case VK_RSHIFT: return SKEY_Shift;
     case VK_CONTROL: case VK_LCONTROL: case VK_RCONTROL: return SKEY_Ctrl;
     case VK_MENU: case VK_LMENU: case VK_RMENU: return SKEY_Alt;
+    case VK_LWIN: case VK_RWIN: return SKEY_Meta;   // Windows キー
     case VK_SPACE: return (int)' ';
     default: break;
   }

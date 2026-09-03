@@ -393,8 +393,9 @@ void mouse_ev(Obj ev, int code, bool down) {
 // 修飾キーは「変わった」としか来ないので、前回と比べて押し・離しにする
 void flags_ev(unsigned long now) {
   struct { unsigned long bit; int key; } m[] = {
-      {1ul << 17, SKEY_Shift}, {1ul << 18, SKEY_Ctrl}, {1ul << 19, SKEY_Alt}};
-  for (int i = 0; i < 3; i++) {
+      {1ul << 17, SKEY_Shift}, {1ul << 18, SKEY_Ctrl}, {1ul << 19, SKEY_Alt},
+      {1ul << 20, SKEY_Meta}};   // Command
+  for (int i = 0; i < 4; i++) {
     bool was = (g.mods & m[i].bit) != 0;
     bool is = (now & m[i].bit) != 0;
     if (was != is) key_ev(m[i].key, is);
@@ -481,17 +482,10 @@ void pump() {
         }
         // Cmd の切り貼り。menu bar を持たないので、こちらから受け皿に頼む
         if (down && g_text_on && g_sink && (mods & (1ul << 20))) {
-          if (cp == 'z') {
-            // 取り消しとやり直しは、受け皿ではなく**取り消し帳**（NSUndoManager）が
-            // 持っている。NSTextView に undo: は無いので、送るとそこで落ちる
-            Obj um = responds(g_sink, "undoManager") ? send(g_sink, "undoManager") : 0;
-            if (um) {
-              bool shift = (mods & (1ul << 17)) != 0;   // Shift つきなら、やり直し
-              if (shift) { if (sendbool(um, "canRedo")) sendv(um, "redo"); }
-              else if (sendbool(um, "canUndo")) sendv(um, "undo");
-            }
-            break;
-          }
+          // 取り消し（Cmd-Z）とやり直し（Shift-Cmd-Z）は**コアが持つ**。
+          // 受け皿の取り消し帳（NSUndoManager）に頼むと、機種ごとに別物になるうえ、
+          // こちらが中身を入れ直したときに食い違う。キーはそのまま上で渡してある
+          if (cp == 'z') break;
           const char* act = 0;
           if (cp == 'c') act = "copy:";
           else if (cp == 'v') act = "paste:";
