@@ -2306,10 +2306,36 @@ static int caret_w() {
   int n = ui_unit() / 8;
   return n < 1 ? 1 : n;
 }
+// 字の**見た目のまんなか**が、行の箱の上から何画素目か。
+// put_text は行の箱を置くだけで、字のインクはその中で下に寄っている（上に行間があく）。
+// 印と並べるときに行の箱の真ん中で合わせると、印だけ上にずれて見えるので、
+// 大文字の高さの真ん中で合わせる
+static int text_mid(int scale) {
+  if (font_active()) {
+    int px = font_size() * scale;
+    int asc = font_ascender(px);
+    FontGlyph g;
+    if (font_glyph('H', px, &g) && g.h > 0) return asc - g.top + g.h / 2;
+    return asc / 2;
+  }
+  return (kCellH - 2) * scale / 2;   // 内蔵の 5×7 は、8 の枠の 0〜6 行目に乗る
+}
+
 // 印（チェックの四角・ラジオの丸）と、そのうしろの字とのあいだ
 static int mark_gap() {
   int n = ui_unit() / 3;
   return n < 4 ? 4 : n;
+}
+static int box_w();   // 下で定義
+// 印と字を並べた1行の高さ。印は字の見た目のまんなかに合わせて置くので、
+// その下端まで入るだけ取る
+static int mark_row_h() {
+  int h = line_h(1);
+  int bw = box_w();
+  int need = text_mid(1) + (bw + 1) / 2;
+  if (need > h) h = need;
+  if (bw > h) h = bw;
+  return h;
 }
 // チェックの四角と、ラジオの丸。**字の高さに合わせる**（小さいと押しにくく、
 // 字と並べたときに沈んで見える）
@@ -2381,6 +2407,9 @@ static void check_mark(int bx, int by, int w, uint32_t c) {
   if (t < 1) t = 1;
   int mw = w * 56 / 100;          // 印の幅
   int mh = w * 40 / 100;          // 印の高さ（曲がり角から上まで）
+  // 余りを偶数にしておくと、割り切れて**きっちり真ん中**に来る
+  if (((w - mw - t) & 1) != 0 && mw + t + 1 <= w) mw++;
+  if (((w - mh - t) & 1) != 0 && mh + t + 1 <= w) mh++;
   int ox = bx + (w - mw - t) / 2;
   int oy = by + (w - mh - t) / 2;
   int x0 = ox, y0 = oy + mh * 45 / 100;   // 左上の始まり
@@ -2576,9 +2605,12 @@ static Box intrinsic(const Value& v, int wrap_w) {
       b.w = text_px_width(w_text(v), 1) + pad_x() * 2;
       b.h = line_h(1) + pad_y() * 2;
       break;
+    // 高さは、字の行と印のどちらも収まるぶん。字の高さだけにすると、
+    // 字の見た目のまんなかに合わせた印が下からはみ出すことがある
     case WK_Checkbox:
+    case WK_Radio:
       b.w = box_w() + mark_gap() + text_px_width(w_text(v), 1);
-      b.h = box_w();
+      b.h = mark_row_h();
       break;
     case WK_Slider: b.w = slide_w(); b.h = line_h(1) + 2; break;
     case WK_Field: b.w = field_w(); b.h = line_h(1) + field_pad_y() * 2; break;
@@ -2589,10 +2621,7 @@ static Box intrinsic(const Value& v, int wrap_w) {
       b.h = line_h(1) + (rows - 1) * line_pitch(1) + field_pad_y() * 2;
       break;
     }
-    case WK_Radio:
-      b.w = box_w() + mark_gap() + text_px_width(w_text(v), 1);
-      b.h = box_w();
-      break;
+
     case WK_Combo:
       b.w = opt_widest(v) + pad_x() * 3 + arrow_w();
       b.h = line_h(1) + pad_y() * 2;
@@ -2836,12 +2865,16 @@ static void place_checkbox(const Value& v, int x, int y, const Box& b) {
   bool over = inside(x, y, b.w, b.h);
   if (over) g_cursor_want = SCUR_Hand;
   int bw = box_w();
+  int ty = y + (b.h - line_h(1)) / 2;       // 行の箱を、部品の真ん中に
+  int by = ty + text_mid(1) - bw / 2;       // 印は、字の見た目のまんなかに合わせる
+  if (by < y) by = y;
+  if (by + bw > y + b.h) by = y + b.h - bw;
   uint32_t edge = blend(g_bg, g_accent, on ? 1.0 : (over ? 0.85 : 0.5));
   uint32_t face = blend(g_bg, g_accent, over ? 0.25 : 0.12);
-  for (int i = 0; i < bw; i++) span(x, y + i, bw, edge);
-  for (int i = 1; i < bw - 1; i++) span(x + 1, y + i, bw - 2, face);
-  if (on) check_mark(x, y, bw, blend(g_bg, g_accent, 1.0));
-  put_text(x + bw + mark_gap(), y + (bw - line_h(1)) / 2, w_text(v), 1, w_fg(v));
+  for (int i = 0; i < bw; i++) span(x, by + i, bw, edge);
+  for (int i = 1; i < bw - 1; i++) span(x + 1, by + i, bw - 2, face);
+  if (on) check_mark(x, by, bw, blend(g_bg, g_accent, 1.0));
+  put_text(x + bw + mark_gap(), ty, w_text(v), 1, w_fg(v));
   if (over && g_mpress[0]) hit(v, on ? 0 : 1);
 }
 
@@ -3823,13 +3856,18 @@ static int64_t clamp_i(int64_t v, int64_t lo, int64_t hi) {
   return v < lo ? lo : (v > hi ? hi : v);
 }
 
-// 選ばれているときは、チェックと同じく中を差し色で塗って、真ん中を下地の色で抜く
+// 差し色の輪と、選ばれているときの真ん中の点。四角のチェックと見分けがつくので、
+// 「いくつも選べる」のか「1つだけ」なのかがひと目で分かる
 static void place_radio(const Value& v, int x, int y, const Box& b) {
   bool on = w_a(v) != 0;
   bool over = inside(x, y, b.w, b.h);
   if (over) g_cursor_want = SCUR_Hand;
   int bw = box_w(), r = bw / 2;
-  int cx = x + r, cy = y + r;
+  int ty = y + (b.h - line_h(1)) / 2;
+  int by = ty + text_mid(1) - bw / 2;            // 丸も、字の見た目のまんなかに合わせる
+  if (by < y) by = y;
+  if (by + bw > y + b.h) by = y + b.h - bw;
+  int cx = x + r, cy = by + r;
   uint32_t edge = blend(g_bg, g_accent, on ? 1.0 : (over ? 0.85 : 0.5));
   uint32_t face = on ? g_bg : blend(g_bg, g_accent, over ? 0.25 : 0.12);
   int t = bw / 8;
@@ -3841,7 +3879,7 @@ static void place_radio(const Value& v, int x, int y, const Box& b) {
     if (dot < 2) dot = 2;
     disc(cx, cy, dot, edge);
   }
-  put_text(x + bw + mark_gap(), y + (bw - line_h(1)) / 2, w_text(v), 1, w_fg(v));
+  put_text(x + bw + mark_gap(), ty, w_text(v), 1, w_fg(v));
   if (over && g_mpress[0]) hit(v, w_b(v));   // ref の形なら「自分の数」、名札なら 1
 }
 
