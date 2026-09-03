@@ -884,10 +884,11 @@ func font_name() -> string;
 
 /// 宣言的に書くときの入り口。**くり返しも描き直しも引き受ける。**
 ///
-/// 書くのは2つだけ。状態はふつうの変数で持つ。
+/// 書くのは view() だけでよい。状態はふつうの変数で持ち、部品には **ref で渡す**。
+/// 動いたらその変数が直に書き換わるので、update も名札も ui.value() も要らない。
 ///
 ///   view()        いまどうあるべきか（部品1つ。並べるなら ui.col などに入れる）を返す
-///   update(hit)   押されたものの名札を受け取って、状態を変える
+///   update(hit)   押されたものの名札を受け取って、状態を変える（**省ける**）
 ///
 /// 中でしていること。
 ///
@@ -897,7 +898,7 @@ func font_name() -> string;
 ///   4. 何か押されていれば update() を呼び、**その場で描き直す**
 ///   5. 窓が閉じられるか ui.quit() まで、2 に戻る
 ///
-/// 部品に関数を持たせているなら、update は要らない（update を省いた形）。
+/// ref で渡すか、部品に関数を持たせているなら、update は要らない（省いた形）。
 ///
 /// 引数:
 ///   title           窓の名札
@@ -913,14 +914,16 @@ func font_name() -> string;
 ///
 /// 例:
 ///   var count = 0;
+///   var sound = true;
 ///   func view() -> Widget {
-///     return ui.col([ui.label(f"{count} 回"), ui.button("ふやす", "inc")]);
+///     return ui.col([
+///       ui.label(f"{count} 回"),
+///       ui.button("ふやす", func() -> void { count += 1; }),
+///       ui.checkbox("音を出す", ref sound),   // 押されたら sound が直に変わる
+///     ]);
 ///   }
-///   func update(hit: string) -> void {
-///     if hit == "inc" { count += 1; }
-///   }
-///   ui.run("かうんた", 200, 100, view, update);
-///   print(count);   // 0
+///   ui.run("かうんた", 200, 120, view);       // update は要らない
+///   print(f"{count} {sound}");   // 0 true
 func run(title: string, width: int, height: int, view: func() -> Widget, update: func(string) -> void) -> void;
 func run(title: string, width: int, height: int, view: func() -> Widget, update: func(string) -> void, resizable: bool) -> void;
 func run(title: string, width: int, height: int, view: func() -> Widget) -> void;
@@ -967,65 +970,90 @@ func button(label: string, action: func() -> void) -> Widget;
 
 /// 入切のチェック。
 ///
-/// 押されると ui.show() が `id` を返す。新しい入切は ui.value() が
-/// 1 か 0 で返すので、それを自分の変数に入れ直す。
+/// **変数を ref で渡すのがいちばん短い。**押されるたびに、その変数が
+/// 直に入切します。名札も update() も ui.value() も要りません。
+///
+/// ```
+/// ui.checkbox("音を出す", ref sound)        // sound が直にひっくり返る
+/// ui.checkbox("音を出す", "sound", sound)   // ui.show() が "sound" を返す
+/// ```
+///
 /// 名札の代わりに関数を渡すと、押されたときにその関数が呼ばれる
 /// （新しい入切は、その中で ui.value() を読む）。
 ///
 /// 引数:
 ///   label   出す文字
+///   on      いま入っているか（ref なら、書き換える先の変数）
 ///   id      名札
-///   on      いま入っているか
+///
+/// 注意:
+///   ref で渡せるのは**一番外側の var** だけ（誤り E0307）。ui.field と同じ理由で、
+///   覚えているのは借用ではなく「どの var か」だから。
 ///
 /// 例:
 ///   ui.open(80, 40);
 ///   var on = true;
-///   var hit = ui.show(ui.checkbox("音を出す", "sound", on));
-///   if hit == "sound" { on = ui.value() == 1; }
-///   print(on);   // true
+///   _ = ui.show(ui.checkbox("音を出す", ref on));
+///   print(on);   // true（まだ押していない）
 func checkbox(label: string, id: string, on: bool) -> Widget;
 func checkbox(label: string, action: func() -> void, on: bool) -> Widget;
+func checkbox(label: string, ref on: bool) -> Widget;
 
 /// 丸いほうのチェック。**いくつか並べて、そのうち1つを選ぶ**ときに使う。
 ///
-/// 受け取り方は ui.checkbox と同じ。押されると ui.show() が `id` を返す。
-/// 「どれが選ばれているか」を持つのは書く人で、部品は覚えない。
-/// だから `on` には「自分が選ばれているか」を、そのつど渡す。
+/// **同じ変数を ref で渡し、それぞれに「自分の数」を持たせるのがいちばん短い。**
+/// 押されると、その数が変数に入る。選ばれて見えるのは、変数と自分の数が同じとき。
+///
+/// ```
+/// ui.row([ui.radio("小", ref mode, 0),
+///         ui.radio("中", ref mode, 1),
+///         ui.radio("大", ref mode, 2)])
+/// ```
+///
+/// 名札を渡す形もある。そのときは「自分が選ばれているか」を bool で渡し、
+/// 押されたら ui.show() が名札を返す。
 ///
 /// 引数:
 ///   label   出す文字
-///   id      名札
-///   on      いま選ばれているか
+///   value   いまの数（ref なら、書き換える先の変数）
+///   mine    自分の数。押されたらこれが入る
+///   id      名札（ref の代わりに渡す）
+///   on      いま選ばれているか（名札の形で渡す）
 ///
 /// 例:
 ///   ui.open(160, 40);
-///   var mode = 0;
-///   var hit = ui.show(ui.row([ui.radio("小", "m0", mode == 0),
-///                             ui.radio("大", "m1", mode == 1)]));
-///   if hit == "m0" { mode = 0; }
-///   if hit == "m1" { mode = 1; }
-///   print(mode);   // 0
+///   var mode = 1;
+///   _ = ui.show(ui.row([ui.radio("小", ref mode, 0), ui.radio("大", ref mode, 1)]));
+///   print(mode);   // 1（まだ押していない）
 func radio(label: string, id: string, on: bool) -> Widget;
 func radio(label: string, action: func() -> void, on: bool) -> Widget;
+func radio(label: string, ref value: int, mine: int) -> Widget;
 
 /// つまみ。lo から hi までの数を選ぶ。
 ///
-/// 動かされている間、ui.show() が `id` を返し、ui.value() が今の数を返す。
-/// 名札の代わりに関数を渡すと、動かされている間その関数が呼ばれる。
+/// **変数を ref で渡すのがいちばん短い。**動かすたびに、その変数が書き換わる。
+///
+/// ```
+/// ui.slider(ref vol, 0, 100)        // vol が直に書き換わる
+/// ui.slider("vol", vol, 0, 100)     // ui.show() が "vol" を返す
+/// ```
+///
+/// 名札の代わりに関数を渡すと、動かされている間その関数が呼ばれる
+/// （新しい数は、その中で ui.value() を読む）。
 ///
 /// 引数:
-///   id      名札
-///   value   いまの数
+///   value   いまの数（ref なら、書き換える先の変数）
 ///   lo, hi  下と上
+///   id      名札（ref の代わりに渡す）
 ///
 /// 例:
 ///   ui.open(120, 40);
 ///   var vol = 40;
-///   var hit = ui.show(ui.slider("vol", vol, 0, 100));
-///   if hit == "vol" { vol = ui.value(); }
-///   print(vol);   // 40
+///   _ = ui.show(ui.slider(ref vol, 0, 100));
+///   print(vol);   // 40（まだ動かしていない）
 func slider(id: string, value: int, lo: int, hi: int) -> Widget;
 func slider(action: func() -> void, value: int, lo: int, hi: int) -> Widget;
+func slider(ref value: int, lo: int, hi: int) -> Widget;
 
 /// 数を打つ入力欄。**lo から hi の外には出られない。**
 ///
@@ -1033,13 +1061,19 @@ func slider(action: func() -> void, value: int, lo: int, hi: int) -> Widget;
 /// 限りから出てしまう数は**打っても入らない**ので、範囲の外の値になることがない。
 /// 右の − と ＋ でも 1 ずつ動かせる（上下の矢印も同じ）。
 ///
-/// 動いた回に ui.show() が `id` を返し、新しい数は ui.value() で取れる。
+/// **変数を ref で渡すのがいちばん短い。**打つたびに、その変数が書き換わる。
+///
+/// ```
+/// ui.number(ref age, 0, 120)        // age が直に書き換わる
+/// ui.number("age", age, 0, 120)     // ui.show() が "age" を返す
+/// ```
+///
 /// 名札の代わりに関数を渡したときは、その中で ui.value() を読む。
 ///
 /// 引数:
-///   id      名札
-///   value   いまの数
+///   value   いまの数（ref なら、書き換える先の変数）
 ///   lo, hi  下と上（この間しか入らない）
+///   id      名札（ref の代わりに渡す）
 ///
 /// 注意:
 ///   打っている途中は「まだ数になっていない形」（空や `-` だけ）も通る。
@@ -1053,6 +1087,7 @@ func slider(action: func() -> void, value: int, lo: int, hi: int) -> Widget;
 ///   print(age);   // 12
 func number(id: string, value: int, lo: int, hi: int) -> Widget;
 func number(action: func() -> void, value: int, lo: int, hi: int) -> Widget;
+func number(ref value: int, lo: int, hi: int) -> Widget;
 
 /// 1行の入力欄。
 ///
@@ -1163,8 +1198,15 @@ func password(id: string, value: string) -> Widget;
 
 /// 押すと一覧が出て、その中の1つを選ぶ部品。
 ///
-/// 選ばれた回に ui.show() が `id` を返し、**選ばれたものの番号**が ui.value() で取れる
-/// （番号は 0 から）。名札の代わりに関数を渡したときは、その中で ui.value() を読む。
+/// **番号の変数を ref で渡すのがいちばん短い。**選ばれるたびに、その変数が書き換わる
+/// （番号は 0 から）。
+///
+/// ```
+/// ui.combo(ref iro, iro_na)         // iro が直に書き換わる
+/// ui.combo("iro", iro_na, iro)      // ui.show() が "iro" を返す
+/// ```
+///
+/// 名札の代わりに関数を渡したときは、その中で ui.value() を読む。
 ///
 /// 選び方は2つあり、どちらでもよい。
 ///
@@ -1175,47 +1217,60 @@ func password(id: string, value: string) -> Widget;
 /// そこにカーソルを合わせているあいだ、少しずつ送れる（押したままでも送れる）。
 ///
 /// 引数:
-///   id        名札
+///   index     いま選ばれているものの番号（ref なら、書き換える先の変数）
 ///   options   並べる文字
-///   index     いま選ばれているものの番号（0 から）
+///   id        名札（ref の代わりに渡す）
 ///
 /// 例:
 ///   ui.open(160, 60);
-///   var iro = ["あか", "あお", "みどり"];
+///   var iro_na = ["あか", "あお", "みどり"];
 ///   var pick = 1;
-///   if ui.show(ui.combo("iro", iro, pick)) == "iro" { pick = ui.value(); }
-///   print(iro[pick]);   // あお
+///   _ = ui.show(ui.combo(ref pick, iro_na));
+///   print(iro_na[pick]);   // あお
 func combo(id: string, options: list<string>, index: int) -> Widget;
 func combo(action: func() -> void, options: list<string>, index: int) -> Widget;
+func combo(ref index: int, options: list<string>) -> Widget;
 
 /// 並べたものが見えていて、その中の1つを選ぶ部品。
 ///
-/// 受け取り方は ui.combo と同じ（ui.value() が選ばれた番号）。
+/// 受け取り方は ui.combo と同じ（ref で渡すか、名札＋ui.value()）。
+///
+/// ```
+/// ui.listbox(ref sel, sakana, 5)    // sel が直に書き換わる
+/// ui.listbox("s", sakana, sel, 5)   // ui.show() が "s" を返す
+/// ```
 ///
 /// 入りきらないときは右に帯が出る。**帯はつまんで動かせる**ので、
 /// 選んでいるものから離れたところも見に行ける。押して焦点が来ているあいだは、
 /// 上下の矢印でも選べる（選んだものが見えるところまで、ひとりでに送る）。
 ///
 /// 引数:
-///   id        名札
+///   index     いま選ばれているものの番号（ref なら、書き換える先の変数）
 ///   options   並べる文字
-///   index     いま選ばれているものの番号（0 から）
 ///   rows      見せる行の数。省くと 4 行
+///   id        名札（ref の代わりに渡す）
 ///
 /// 例:
 ///   ui.open(160, 100);
-///   var sakana = ["さめ", "しゃち", "いるか"];
+///   var sakana_na = ["さめ", "しゃち", "いるか"];
 ///   var sel = 0;
-///   if ui.show(ui.listbox("s", sakana, sel, 3)) == "s" { sel = ui.value(); }
-///   print(sakana[sel]);   // さめ
+///   _ = ui.show(ui.listbox(ref sel, sakana_na, 3));
+///   print(sakana_na[sel]);   // さめ
 func listbox(id: string, options: list<string>, index: int) -> Widget;
 func listbox(id: string, options: list<string>, index: int, rows: int) -> Widget;
 func listbox(action: func() -> void, options: list<string>, index: int) -> Widget;
 func listbox(action: func() -> void, options: list<string>, index: int, rows: int) -> Widget;
+func listbox(ref index: int, options: list<string>) -> Widget;
+func listbox(ref index: int, options: list<string>, rows: int) -> Widget;
 
 /// タブの見出し。**出すのは見出しだけ**で、中身は書く人が選んで返す。
 ///
-/// 押された回に ui.show() が `id` を返し、押されたタブの番号が ui.value() で取れる。
+/// **番号の変数を ref で渡すのがいちばん短い。**押されるたびに、その変数が書き換わる。
+///
+/// ```
+/// ui.tabs(ref page, ["メモ", "いろ"])       // page が直に書き換わる
+/// ui.tabs("page", ["メモ", "いろ"], page)   // ui.show() が "page" を返す
+/// ```
 ///
 /// ```
 /// ui.col([
@@ -1228,17 +1283,18 @@ func listbox(action: func() -> void, options: list<string>, index: int, rows: in
 /// 見出しと中身が別々なので、中身をどこに置くかも自由に決められる。
 ///
 /// 引数:
-///   id       名札
+///   index    いま開いているタブの番号（ref なら、書き換える先の変数）
 ///   labels   見出しの文字
-///   index    いま開いているタブの番号（0 から）
+///   id       名札（ref の代わりに渡す）
 ///
 /// 例:
 ///   ui.open(200, 60);
 ///   var tab = 0;
-///   if ui.show(ui.tabs("tab", ["あ", "い"], tab)) == "tab" { tab = ui.value(); }
+///   _ = ui.show(ui.tabs(ref tab, ["あ", "い"]));
 ///   print(tab);   // 0
 func tabs(id: string, labels: list<string>, index: int) -> Widget;
 func tabs(action: func() -> void, labels: list<string>, index: int) -> Widget;
+func tabs(ref index: int, labels: list<string>) -> Widget;
 
 /// 縦に空ける。h は画素の数。
 ///

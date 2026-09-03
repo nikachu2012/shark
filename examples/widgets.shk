@@ -13,10 +13,12 @@
 // 一覧（ui.listbox）と選ぶ（ui.combo）とメモ（ui.textarea）は、カーソルを乗せて
 // 車輪（ホイール）を回しても送れる。一覧の右の帯は、つまんで動かせる。
 //
-// 押されたときの受け取り方も、両方とも出てくる。
-//   ・部品に**関数を持たせる**（動きを、その場に書く）
-//   ・部品に**名札を付ける**（update() で振り分ける）
-// 入力欄も、両方とも出てくる（ref で変数を渡す形と、名札で受ける形）。
+// 状態はぜんぶ、ふつうの変数を **ref で渡す**だけ。動いたらその変数が直に
+// 書き換わるので、名札も update() も ui.value() も要らない。
+// 値を持つのは今までどおり書く人で、処理系は「どの var か」を覚えるだけ。
+//
+// 名札を付けて update() で振り分ける形もある（下の格子がそれ。その場に書いた
+// 関数からは外側の変数が見えないので、升ごとに作るものは名札で受ける）。
 //
 // 日本語は ui.run() が機種のフォントを読むので、そのまま出る（ブラウザでは
 // ブラウザが描くので、かな漢字変換もそのまま使える）。窓で FreeType を入れずに
@@ -74,7 +76,7 @@ func body() -> Widget {
   }
   if page == 2 {
     return ui.col([
-      ui.listbox("sakana", sakana_na, sakana, 5),
+      ui.listbox(ref sakana, sakana_na, 5),
       ui.label(f"えらんだの: {sakana_na[sakana]}"),
     ]);
   }
@@ -97,43 +99,44 @@ func view() -> Widget {
       ui.col([
         ui.label(f"{count} 回おした"),
         ui.row([
-          // 関数を持たせる形と、名札を付ける形。混ぜてよい
+          // ボタンは値を持たないので、動きをその場に書く
           ui.button("ふやす", func() -> void { count += 1; }),
-          ui.button("へらす", "dec"),
+          ui.button("へらす", func() -> void { count -= 1; }),
           ui.spacer(20),               // 並んでいる向き（ここは横）に 20 画素あける
-          ui.button("もどす", "reset").tooltip("0 にもどします"),
+          ui.button("もどす", func() -> void { count = 0; }).tooltip("0 にもどします"),
         ]),
         ui.space(4),
 
-        ui.checkbox("音を出す", func() -> void { sound = ui.value() == 1; }, sound),
+        ui.checkbox("音を出す", ref sound),
         ui.row([
           ui.label("おおきさ"),
-          ui.slider("vol", volume, 0, 100),
+          ui.slider(ref volume, 0, 100),
           ui.label(f"{volume}").width(28).align("right"),
         ]),
         ui.row([
           ui.label("とし"),
           // 0 から 120 の外には出られない。− と ＋ でも動かせる
-          ui.number("age", age, 0, 120).tooltip("0 から 120 まで。打っても外には出ません"),
+          ui.number(ref age, 0, 120).tooltip("0 から 120 まで。打っても外には出ません"),
         ]),
         ui.space(4),
 
         ui.label("いくつかから1つ選ぶ"),
         ui.row([
-          ui.radio("小", "s0", size == 0),
-          ui.radio("中", "s1", size == 1),
-          ui.radio("大", "s2", size == 2),
+          // 同じ変数を渡して、それぞれに「自分の数」を持たせる
+          ui.radio("小", ref size, 0),
+          ui.radio("中", ref size, 1),
+          ui.radio("大", ref size, 2),
         ]),
         ui.row([
           ui.label("すきないろ"),
-          ui.combo("iro", iro_na, iro),      // 押すと一覧が出る
+          ui.combo(ref iro, iro_na),         // 押すと一覧が出る
         ]),
         ui.space(4),
 
         ui.label("なまえ（押してから打つ。右で押すと切り貼り）"),
         // 空のあいだは、うすい字で「何を入れるところか」を出しておく
         ui.field(ref name).placeholder("なまえ"),   // 打たれるたびに name が書き換わる
-        ui.password("word", word).placeholder("あいことば")
+        ui.password(ref word).placeholder("あいことば")
             .tooltip("打った字は * になります"),
         ui.label(f"こんにちは、{name} さん").color(ui.rgb(150, 220, 150)),
       ]).width(1.0),
@@ -141,7 +144,7 @@ func view() -> Widget {
       // ---------------------------------------------------------- 右がわ
       ui.col([
         // 見出しだけを出して、中身は body() が返す
-        ui.tabs("page", ["メモ", "いろ", "さかな"], page),
+        ui.tabs(ref page, ["メモ", "いろ", "さかな"]),
         body().height(float.infinity()),     // 余ったところまで伸びる
         ui.divider(),
 
@@ -163,20 +166,9 @@ func view() -> Widget {
   ]);
 }
 
-// 名札の付いた部品が動いたとき。新しい値は ui.value() / ui.text_value() で取る
+// 名札の付いた部品が動いたとき。ここに来るのは、上の格子（升ごとに作るもの）だけ
 func update(hit: string) -> void {
   if hit != "" { last = hit; }
-  if hit == "dec" { count -= 1; }
-  if hit == "reset" { count = 0; }
-  if hit == "vol" { volume = ui.value(); }
-  if hit == "age" { age = ui.value(); }
-  if hit == "word" { word = ui.text_value(); }
-  if hit == "page" { page = ui.value(); }
-  if hit == "iro" { iro = ui.value(); }
-  if hit == "sakana" { sakana = ui.value(); }
-  for var i in range(3) {
-    if hit == f"s{i}" { size = i; }
-  }
   for var i in range(iro_ne.len()) {
     if hit == f"c{i}" { iro = i; }
   }

@@ -3,13 +3,20 @@
 // ui.run() が、開く・くり返す・描き直す・閉じる をぜんぶ引き受ける。
 // 書く人が書くのは、いまどうあるべきか（view）と、押されたときの動きだけ。
 //
-// 押されたときの動きは、2つの書き方がある。
-//   ・部品に関数を持たせる      ui.button("ふやす", func() -> void { count += 1; })
-//   ・名札を付けて update で振り分ける   ui.button("ふやす", "inc")
-// 関数は名前を付けたものでもよい（ui.button("ふやす", inc)）。混ぜてもよい。
+// 値を持つ部品（checkbox・radio・slider・number・field・textarea・password・
+// combo・listbox・tabs）は、**変数を ref で渡すのがいちばん短い**。動いたら
+// その変数が直に書き換わるので、名札も update も ui.value() も要らない。
+//   ui.checkbox("音を出す", ref sound)
+//   ui.slider(ref volume, 0, 100)
+//   ui.combo(ref iro, iro_na)
 //
-// 入力欄は ref で変数を渡すと、打たれるたびにその変数が書き換わる
-//   ui.field(ref name)
+// ボタンのように値を持たないものは、動きをその場に書く。
+//   ui.button("ふやす", func() -> void { count += 1; })
+//
+// 名札を付けて update で振り分ける形も残してある。その場に書いた関数からは
+// 外側の局所変数が見えないので、升ごとに作るもの（ui.grid の cell）などはこちら。
+//   ui.button("ふやす", "inc")
+// 混ぜてよい。
 //
 // 格子を升ごとの関数から作る形（ui.grid(rows, cols, cell)）もここにある。
 // 処理系（ネイティブ）からは Shark の関数を呼び戻せないので、関数を受ける形は Shark で書く。

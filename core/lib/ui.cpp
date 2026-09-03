@@ -2023,7 +2023,7 @@ enum WidgetKind {
 enum WidgetField {
   WF_Kind = 0, WF_Text, WF_Id, WF_A, WF_B, WF_C, WF_Kids,
   WF_Fg, WF_Bg, WF_Pad, WF_Wid, WF_Hei, WF_WidFr, WF_HeiFr, WF_Align, WF_Act, WF_Tip,
-  WF_Hint, WF_Count
+  WF_Hint, WF_Var, WF_Count
 };
 enum WidgetAlign { WA_Left = 0, WA_Center, WA_Right };
 
@@ -2099,8 +2099,10 @@ static bool make_widget(VM& vm, int kind, const Str& text, const Str& id, int64_
   o->fields.push(action ? val_retain(*action) : mk_void());
   o->fields.push(mk_str(Str()));   // カーソルを合わせたときに出す説明（.tooltip）
   o->fields.push(mk_str(Str()));   // 何も入っていないときに、うすく出す字（.placeholder）
+  o->fields.push(mk_int(-1));      // ref で受けたときの、書き戻す var の番号（-1 は無い）
   return true;
 }
+
 
 // 見た目を1つ変えたものを返す。**元は変えない**（すべての代入はコピー、と同じ考え）。
 // まず自分だけの実体を作り、field に value を入れる
@@ -2120,6 +2122,12 @@ static void widget_put(InstObj* o, int field, const Value& v) {
   if (field >= o->fields.size()) return;
   val_release(o->fields[field]);
   o->fields[field] = v;
+}
+
+// ref で受けた var の番号を覚えさせる。動いたら、そこへ直に書き戻す（hit）
+static void set_var_slot(Value& w, int slot) {
+  if (w.k != V_Obj || w.o->kind != O_Inst) return;
+  widget_put(as_inst(w), WF_Var, mk_int(slot));
 }
 
 static NativeStatus widget_with(VM& vm, Value* a, int field, int64_t value, Value& out) {
@@ -2227,11 +2235,8 @@ static int64_t w_field(const Value& v, int i) {
   InstObj* o = as_inst(v);
   return i < o->fields.size() ? o->fields[i].i : 0;
 }
-// 入力欄が書き戻す先の var の番号（-1 なら名札で受ける形）
-static int w_var(const Value& v) {
-  int k = w_kind(v);
-  return (k == WK_Field || k == WK_Area) ? (int)w_a(v) : -1;
-}
+// 動いたときに書き戻す先の var の番号（-1 なら、名札か関数で受ける形）
+static int w_var(const Value& v) { return (int)w_field(v, WF_Var); }
 static double w_fieldf(const Value& v, int i) {
   InstObj* o = as_inst(v);
   return i < o->fields.size() ? o->fields[i].f : 0.0;
@@ -2361,8 +2366,22 @@ static void clear_hit_action() {
   g_hit_action = mk_void();
 }
 
-// 押されたことを覚える。名札と、持っていれば関数も
+// その var に、新しい数（か入切）を入れ直す
+static void write_var_num(VM& vm, int slot, int64_t n, bool as_bool) {
+  if (slot < 0 || slot >= vm.globals.size()) return;
+  Value v = as_bool ? mk_bool(n != 0) : mk_int(n);
+  val_release(vm.globals[slot]);
+  vm.globals[slot] = v;
+}
+
+// 押されたことを覚える。名札と、持っていれば関数も。
+// ref で受けた形なら、**その var を直に書き換える**（名札も update() も要らない）
 static void hit(const Value& v, int64_t val) {
+  int slot = w_var(v);
+  if (slot >= 0 && g_vm) {
+    write_var_num(*g_vm, slot, val, w_kind(v) == WK_Checkbox);
+    g_edited = true;
+  }
   g_hit_id = w_id(v);
   g_hit_val = val;
   g_hit_any = true;
@@ -3657,7 +3676,7 @@ static void place_radio(const Value& v, int x, int y, const Box& b) {
   ring(cx, cy, r, blend(g_bg, g_accent, over ? 1.0 : 0.7));
   if (on) disc(cx, cy, r / 2 < 2 ? 2 : r / 2, g_fg);   // 選ばれているしるし
   put_text(x + bw + mark_gap(), y + (bw - line_h(1)) / 2, w_text(v), 1, w_fg(v));
-  if (over && g_mpress[0]) hit(v, 1);
+  if (over && g_mpress[0]) hit(v, w_b(v));   // ref の形なら「自分の数」、名札なら 1
 }
 
 // 選ぶ（押すと一覧が出て、選んだものになる）。一覧は ui.menu と同じ仕組みで出す
@@ -4208,8 +4227,10 @@ static NativeStatus u_field_ref(VM& vm, Value* a, int n, Value& out) {
                   "ui.field(ref ...) takes a string var"));
     return N_Panic;
   }
-  return make_widget(vm, WK_Field, as_str(*p)->s, var_field_id(slot), slot, 0, 0, 0, out)
-             ? N_Ok : N_Panic;
+  if (!make_widget(vm, WK_Field, as_str(*p)->s, var_field_id(slot), 0, 0, 0, 0, out))
+    return N_Panic;
+  set_var_slot(out, slot);
+  return N_Ok;
 }
 // 複数行の入力欄。行数（rows）を省くと 4 行ぶん
 static const int kAreaRows = 4;
@@ -4235,8 +4256,10 @@ static NativeStatus u_textarea_ref(VM& vm, Value* a, int n, Value& out) {
   }
   int64_t rows = n >= 2 ? A(a, 1)->i : kAreaRows;
   if (rows < 1) rows = 1;
-  return make_widget(vm, WK_Area, as_str(*p)->s, var_field_id(slot), slot, rows, 0, 0, out)
-             ? N_Ok : N_Panic;
+  if (!make_widget(vm, WK_Area, as_str(*p)->s, var_field_id(slot), 0, rows, 0, 0, out))
+    return N_Panic;
+  set_var_slot(out, slot);
+  return N_Ok;
 }
 // 伏せ字の入力欄。中身は ui.field と同じ持ち方で、出すときだけ * になる
 static NativeStatus u_password(VM& vm, Value* a, int n, Value& out) {
@@ -4258,20 +4281,24 @@ static NativeStatus u_password_ref(VM& vm, Value* a, int n, Value& out) {
                   "ui.password(ref ...) takes a string var"));
     return N_Panic;
   }
-  return make_widget(vm, WK_Field, as_str(*p)->s, var_field_id(slot), slot, 1, 0, 0, out)
-             ? N_Ok : N_Panic;
+  if (!make_widget(vm, WK_Field, as_str(*p)->s, var_field_id(slot), 0, 1, 0, 0, out))
+    return N_Panic;
+  set_var_slot(out, slot);
+  return N_Ok;
 }
 // 入切のラジオ。checkbox と同じ受け取り方で、見た目が丸になる
 static NativeStatus u_radio(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_widget(vm, WK_Radio, as_str(*A(a, 0))->s, as_str(*A(a, 1))->s,
-                     A(a, 2)->b ? 1 : 0, 0, 0, 0, out) ? N_Ok : N_Panic;
+                     A(a, 2)->b ? 1 : 0, 1, 0, 0, out) ? N_Ok : N_Panic;
 }
 static NativeStatus u_radio_fn(VM& vm, Value* a, int n, Value& out) {
   (void)n;
-  return make_widget(vm, WK_Radio, as_str(*A(a, 0))->s, Str(), A(a, 2)->b ? 1 : 0, 0, 0, 0, out,
+  return make_widget(vm, WK_Radio, as_str(*A(a, 0))->s, Str(), A(a, 2)->b ? 1 : 0, 1, 0, 0, out,
                      A(a, 1)) ? N_Ok : N_Panic;
 }
+static const int kListRows = 4;   // ui.listbox で行数を省いたとき
+
 // 並べる文字を持つ部品（選ぶ・一覧・タブ）。中身の置き場を文字の並びとして借りる
 static NativeStatus make_options(VM& vm, int kind, Value* a, int id_at, int opts_at, int idx_at,
                                  int64_t rows, Value& out, bool fn) {
@@ -4289,7 +4316,6 @@ static NativeStatus u_combo_fn(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_options(vm, WK_Combo, a, 0, 1, 2, 0, out, true);
 }
-static const int kListRows = 4;
 static NativeStatus u_list(VM& vm, Value* a, int n, Value& out) {
   int64_t rows = n >= 4 ? A(a, 3)->i : kListRows;
   return make_options(vm, WK_List, a, 0, 1, 2, rows < 1 ? 1 : rows, out, false);
@@ -4327,6 +4353,93 @@ static NativeStatus u_number_fn(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_number(vm, a, out, true);
 }
+// --- ref で受ける形 -------------------------------------------------------
+// 変数を ref で渡すと、動いたときに**その変数が直に書き換わる**。
+// 名札も update() も ui.value() も要らない。値を持つのは今までどおり書く人で、
+// 処理系は「どの var か」だけを覚える（ui.field(ref ...) と同じ仕組み）
+static bool ref_slot(VM& vm, Value* a, int at, const char* what, int* slot, Value** got) {
+  Value* p = val_deref(&a[at]);
+  *slot = var_slot(vm, p);
+  if (*slot < 0) {
+    vm.panic(vm.L(Str(what) + " に ref で渡せるのは、一番外側の var だけです",
+                  Str(what) + " takes a top-level var by ref"));
+    return false;
+  }
+  *got = p;
+  return true;
+}
+
+static NativeStatus u_checkbox_ref(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  int slot = 0;
+  Value* p = 0;
+  if (!ref_slot(vm, a, 1, "ui.checkbox", &slot, &p)) return N_Panic;
+  // 持たせるのは**いまの入切**。押されたら place_checkbox がひっくり返す
+  if (!make_widget(vm, WK_Checkbox, as_str(*A(a, 0))->s, Str(), p->b ? 1 : 0, 0, 0, 0, out))
+    return N_Panic;
+  set_var_slot(out, slot);
+  return N_Ok;
+}
+// ラジオ。押されたら「自分の数」を書き戻す。選ばれて見えるのは、いまの数と同じとき
+static NativeStatus u_radio_ref(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  int slot = 0;
+  Value* p = 0;
+  if (!ref_slot(vm, a, 1, "ui.radio", &slot, &p)) return N_Panic;
+  int64_t mine = A(a, 2)->i;
+  if (!make_widget(vm, WK_Radio, as_str(*A(a, 0))->s, Str(), p->i == mine ? 1 : 0, mine, 0, 0,
+                   out))
+    return N_Panic;
+  set_var_slot(out, slot);
+  return N_Ok;
+}
+static NativeStatus u_slider_ref(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  int slot = 0;
+  Value* p = 0;
+  if (!ref_slot(vm, a, 0, "ui.slider", &slot, &p)) return N_Panic;
+  if (!make_widget(vm, WK_Slider, Str(), Str(), p->i, A(a, 1)->i, A(a, 2)->i, 0, out))
+    return N_Panic;
+  set_var_slot(out, slot);
+  return N_Ok;
+}
+static NativeStatus u_number_ref(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  int slot = 0;
+  Value* p = 0;
+  if (!ref_slot(vm, a, 0, "ui.number", &slot, &p)) return N_Panic;
+  int64_t lo = A(a, 1)->i, hi = A(a, 2)->i;
+  if (hi < lo) {
+    vm.panic(vm.L("数の入力欄は、下より上を大きくします", "number needs hi >= lo"));
+    return N_Panic;
+  }
+  int64_t val = p->i < lo ? lo : (p->i > hi ? hi : p->i);
+  if (!make_widget(vm, WK_Number, Str(), Str(), val, lo, hi, 0, out)) return N_Panic;
+  set_var_slot(out, slot);
+  return N_Ok;
+}
+// 並べたものから選ぶ形（選ぶ・一覧・タブ）。番号を ref で受ける
+static NativeStatus make_options_ref(VM& vm, int kind, Value* a, int64_t rows, Value& out) {
+  int slot = 0;
+  Value* p = 0;
+  if (!ref_slot(vm, a, 0, "ui.combo / ui.listbox / ui.tabs", &slot, &p)) return N_Panic;
+  if (!make_widget(vm, kind, Str(), Str(), p->i, rows, 0, A(a, 1), out)) return N_Panic;
+  set_var_slot(out, slot);
+  return N_Ok;
+}
+static NativeStatus u_combo_ref(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_options_ref(vm, WK_Combo, a, 0, out);
+}
+static NativeStatus u_list_ref(VM& vm, Value* a, int n, Value& out) {
+  int64_t rows = n >= 3 ? A(a, 2)->i : kListRows;
+  return make_options_ref(vm, WK_List, a, rows < 1 ? 1 : rows, out);
+}
+static NativeStatus u_tabs_ref(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_options_ref(vm, WK_Tabs, a, 0, out);
+}
+
 static NativeStatus u_space(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_widget(vm, WK_Space, Str(), Str(), A(a, 0)->i, 0, 0, 0, out) ? N_Ok : N_Panic;
@@ -4689,6 +4802,16 @@ void register_ui(Registry& r) {
   r.add("ui.tabs", u_tabs_fn, tw, tact, tls, ti);
   r.add("ui.number", u_number, tw, ts, ti, ti, ti);
   r.add("ui.number", u_number_fn, tw, tact, ti, ti, ti);
+  // 変数を ref で渡す形。動いたらその変数が直に書き換わるので、
+  // 名札も update() も ui.value() も要らない
+  r.mark_ref_var(r.add("ui.checkbox", u_checkbox_ref, tw, ts, tb), 1);
+  r.mark_ref_var(r.add("ui.radio", u_radio_ref, tw, ts, ti, ti), 1);
+  r.mark_ref_var(r.add("ui.slider", u_slider_ref, tw, ti, ti, ti), 0);
+  r.mark_ref_var(r.add("ui.number", u_number_ref, tw, ti, ti, ti), 0);
+  r.mark_ref_var(r.add("ui.combo", u_combo_ref, tw, ti, tls), 0);
+  r.mark_ref_var(r.add("ui.listbox", u_list_ref, tw, ti, tls), 0);
+  r.mark_ref_var(r.add("ui.listbox", u_list_ref, tw, ti, tls, ti), 0);
+  r.mark_ref_var(r.add("ui.tabs", u_tabs_ref, tw, ti, tls), 0);
   r.add("ui.edited", u_edited, tb);
   r.add("ui.has_action", u_has_action, tb);
   r.add("ui.action", u_action, tact);

@@ -524,32 +524,41 @@ ui.run("かうんた", 420, 300, view, update);
 どの形も、末尾に `false` を足すと**大きさの変わらない窓**になる
 （`ui.run("かうんた", 420, 300, view, update, false)`）。省くと変えられる。
 
-| | 関数・ref を渡す | 名札を渡す |
-|---|---|---|
-| `ui.button` | `ui.button(label, f)` | `ui.button(label, id)` |
-| `ui.checkbox` | `ui.checkbox(label, f, on)` | `ui.checkbox(label, id, on)` |
-| `ui.slider` | `ui.slider(f, v, lo, hi)` | `ui.slider(id, v, lo, hi)` |
-| `ui.field` | `ui.field(ref value)` | `ui.field(id, value)` |
-| `ui.textarea` | `ui.textarea(ref value)` | `ui.textarea(id, value)` |
-| `ui.password` | `ui.password(ref value)` | `ui.password(id, value)` |
-| `ui.radio` | `ui.radio(label, f, on)` | `ui.radio(label, id, on)` |
-| `ui.number` | `ui.number(f, v, lo, hi)` | `ui.number(id, v, lo, hi)` |
-| `ui.combo` | `ui.combo(f, options, i)` | `ui.combo(id, options, i)` |
-| `ui.listbox` | `ui.listbox(f, options, i)` | `ui.listbox(id, options, i)` |
-| `ui.tabs` | `ui.tabs(f, labels, i)` | `ui.tabs(id, labels, i)` |
+**値を持つ部品は、変数を `ref` で渡すのがいちばん短い。**動いたらその変数が
+直に書き換わるので、名札も `update()` も `ui.value()` も要らない。
 
-入力欄だけは関数ではなく **`ref` で変数を渡す**。押されたときに一度呼べばよい
-ボタンと違い、入力欄は打たれた文字を毎回どこかに入れ直すことになるので、
-入れ先そのものを渡す方が短い。
+| | ref を渡す | 関数を渡す | 名札を渡す |
+|---|---|---|---|
+| `ui.button` | — | `ui.button(label, f)` | `ui.button(label, id)` |
+| `ui.checkbox` | `ui.checkbox(label, ref on)` | `ui.checkbox(label, f, on)` | `ui.checkbox(label, id, on)` |
+| `ui.radio` | `ui.radio(label, ref v, mine)` | `ui.radio(label, f, on)` | `ui.radio(label, id, on)` |
+| `ui.slider` | `ui.slider(ref v, lo, hi)` | `ui.slider(f, v, lo, hi)` | `ui.slider(id, v, lo, hi)` |
+| `ui.number` | `ui.number(ref v, lo, hi)` | `ui.number(f, v, lo, hi)` | `ui.number(id, v, lo, hi)` |
+| `ui.field` | `ui.field(ref value)` | — | `ui.field(id, value)` |
+| `ui.textarea` | `ui.textarea(ref value)` | — | `ui.textarea(id, value)` |
+| `ui.password` | `ui.password(ref value)` | — | `ui.password(id, value)` |
+| `ui.combo` | `ui.combo(ref i, options)` | `ui.combo(f, options, i)` | `ui.combo(id, options, i)` |
+| `ui.listbox` | `ui.listbox(ref i, options)` | `ui.listbox(f, options, i)` | `ui.listbox(id, options, i)` |
+| `ui.tabs` | `ui.tabs(ref i, labels)` | `ui.tabs(f, labels, i)` | `ui.tabs(id, labels, i)` |
 
 ```shark
-var name = "";                       // 一番外側の var（下の「ref で渡せるもの」）
+var sound = true;                    // 一番外側の var（下の「ref で渡せるもの」）
+var volume = 60;
 
-ui.field(ref name)                   // 打たれるたびに name が書き換わる
+ui.checkbox("音を出す", ref sound)   // 押されるたびに sound が入切する
+ui.slider(ref volume, 0, 100)        // 動かすたびに volume が書き換わる
 ```
 
-値を持つ部品（checkbox、slider）に関数を渡したときは、新しい値をその中で
-`ui.value()` から読む。
+**これでも部品は状態を持たない。**値は今までどおり呼んだ側の変数にあり、処理系が
+覚えるのは「どの var か」（一番外側の var の番号）だけ。書き戻しはその var への
+代入と同じで、次の回の `view()` はその変数を読み直す。だから画面と食い違わない。
+
+ボタンのように値を持たないものは、動きをその場に書く。値を持つ部品に関数を
+渡したときは、新しい値をその中で `ui.value()` から読む。
+
+名札を付けて `update()` で振り分ける形も残してある。その場に書いた関数からは
+外側の局所変数が見えないので、**升ごとに作るもの**（`ui.grid(rows, cols, cell)`）
+などはこちらになる。混ぜてよい。
 
 `ui.run()` の中身はこれだけ。
 

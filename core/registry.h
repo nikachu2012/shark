@@ -16,12 +16,12 @@ struct NativeEntry {
   NativeFn fn;
   Vec<Type*> params;
   Type* ret;
-  bool ref0;       // 第1引数を ref で受け取る
-  bool ref0_var;   // その ref を「どの var か」として覚える（一番外側の var だけを受ける）
+  int ref_at;      // ref で受け取る引数の番号（-1 なら無い）
+  bool ref_var;    // その ref を「どの var か」として覚える（一番外側の var だけを受ける）
   bool typed;      // 型検査に使える型を持っているか
   bool is_host;    // ホストが足した関数
   NativeEntry()
-      : fn(0), ret(0), ref0(false), ref0_var(false), typed(true), is_host(false) {}
+      : fn(0), ret(0), ref_at(-1), ref_var(false), typed(true), is_host(false) {}
 };
 
 class Registry {
@@ -34,11 +34,13 @@ class Registry {
           Type* p5 = 0, Type* p6 = 0, Type* p7 = 0, Type* p8 = 0, Type* p9 = 0);
   // 型検査では使わない（checker が型を決める）もの
   int add_untyped(const char* name, NativeFn fn);
-  void mark_ref0(int id) { e_[id].ref0 = true; }
-  // 第1引数の ref を、呼び出しのあとも書き戻し先にするもの（ui.field など）。
+  void mark_ref0(int id) { e_[id].ref_at = 0; }
+  // ref を、呼び出しのあとも書き戻し先にするもの（ui.field など）。
   // 持ち続けるのは借用ではなく「どの var か」なので、型検査は一番外側の var だけを通す
-  // （check.cpp。一番外側の var はプログラムが終わるまで生きている）
-  void mark_ref0_var(int id) { e_[id].ref0 = true; e_[id].ref0_var = true; }
+  // （check.cpp。一番外側の var はプログラムが終わるまで生きている）。
+  // at は何番目の引数か（ui.checkbox(label, ref on) のように 0 でないこともある）
+  void mark_ref_var(int id, int at = 0) { e_[id].ref_at = at; e_[id].ref_var = true; }
+  void mark_ref0_var(int id) { mark_ref_var(id, 0); }
   void mark_host(int id) { e_[id].is_host = true; }
 
   int size() const { return e_.size(); }

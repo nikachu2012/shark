@@ -67,7 +67,7 @@ uint64_t registry_signature(const Registry& r) {
     k += "/";
     k += str_from_int(e.params.size());
     k += e.typed ? "t" : "u";
-    k += e.ref0 ? "r" : "-";
+    k += e.ref_at >= 0 ? "r" : "-";
     for (int j = 0; j < e.params.size(); j++) {
       k += ",";
       k += e.params[j] ? type_name(e.params[j]) : Str("?");

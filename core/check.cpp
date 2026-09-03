@@ -161,6 +161,7 @@ void Checker::make_builtin_classes() {
         {"act", t_.func_type(no_params, t_.t_void())},   // 押されたときに呼ぶ関数
         {"tip", t_.t_string()},      // カーソルを合わせたときに出す説明
         {"hint", t_.t_string()},     // 何も入っていないときに、うすく出す字
+        {"var", t_.t_int()},         // ref で受けたときの、書き戻す var の番号
     };
     for (int i = 0; i < (int)(sizeof(wf) / sizeof(wf[0])); i++) {
       FieldInfo f;
@@ -2350,7 +2351,7 @@ bool Checker::resolve_overload(Node* call, const Vec<int>& cand_funcs, const Vec
   for (int i = 0; i < nargs; i++) {
     bool in_var = best_variadic && i >= nfixed;
     Type* wt = in_var ? elem_of(ps[ps.size() - 1]) : ps[i];
-    bool want_ref = in_var ? false : (fps ? (*fps)[i].is_ref : (i == 0 && reg_[best].ref0));
+    bool want_ref = in_var ? false : (fps ? (*fps)[i].is_ref : (i == reg_[best].ref_at));
     bool given_ref = args[i]->kind == E_Ref;
     if (want_ref && !given_ref) {
       Diagnostic& d = diag_.error("E0301", diag_.L("ここは ref を付けて渡します",
@@ -2379,7 +2380,7 @@ bool Checker::resolve_overload(Node* call, const Vec<int>& cand_funcs, const Vec
         err("E0113", diag_.L("const は ref で渡せません", "a const cannot be passed by ref"), args[i]);
       // 「どの var か」として覚える ref（ui.field など）は、一番外側の var だけを受ける。
       // 関数の中の変数は、その関数が返ると消えてしまうため（spec/runtime/memory.md）
-      if (best_native && want_ref && reg_[best].ref0_var && !inner->is_global) {
+      if (best_native && want_ref && reg_[best].ref_var && !inner->is_global) {
         Diagnostic& d = diag_.error("E0307",
                                     diag_.L("ここに ref で渡せるのは、一番外側の var だけです",
                                             "only a top-level var can be passed by ref here"));

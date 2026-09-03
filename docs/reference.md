@@ -972,8 +972,23 @@ func update(hit: string) -> void {
 ui.run("かうんた", 420, 300, view, update);
 ```
 
-入力欄（`ui.field` と `ui.textarea`）だけは、関数ではなく **`ref` で変数を渡します**。
-打たれるたびに、その変数が書き換わります。
+値を持つ部品は、**変数を `ref` で渡す**のがいちばん短い書き方です。
+動いたらその変数が直に書き換わるので、名札も `update()` も `ui.value()` も要りません。
+
+```shark
+ui.checkbox("音を出す", ref sound),      // 押すと sound が入切する
+ui.slider(ref volume, 0, 100),           // 動かすと volume が変わる
+ui.number(ref age, 0, 120),
+ui.combo(ref iro, iro_na),
+ui.listbox(ref sakana, sakana_na, 5),
+ui.tabs(ref page, ["メモ", "いろ"]),
+ui.radio("小", ref size, 0),             // 押すと size に 0 が入る
+```
+
+これでも**部品は状態を持ちません**。値は自分の変数にあり、処理系が覚えるのは
+「どの `var` か」だけです。だから「いまの状態」と「画面」が食い違いません。
+
+入力欄も同じです。打たれるたびに、その変数が書き換わります。
 
 ```shark
 var name = "さめ";                    // 一番外側の var に置きます

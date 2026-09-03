@@ -413,6 +413,44 @@ struct AreaWheelCase : Case {
   }
 };
 
+// --- ref で受ける形（update() も名札も ui.value() も要らない）--------------
+// 動いたら、渡した変数が**直に書き換わる**。処理系が覚えるのは「どの var か」だけ
+struct RefToggleCase : Case {
+  int steps() { return 6; }
+  void act(int step) {
+    if (step == 0 || step == 2) fake::click(4, 4);
+  }
+  void done(int step, const Str& line) {
+    if (step == 0) expect_line("はじめは切", line, "false");
+    if (step == 1) expect_line("押すと入（変数が直に変わる）", line, "true");
+    if (step == 3) expect_line("もう一度押すと切", line, "false");
+  }
+};
+
+// ラジオは「自分の数」を書き戻す（ui.radio(label, ref sel, 自分の数)）
+struct RefRadioCase : Case {
+  int steps() { return 4; }
+  void act(int step) {
+    if (step == 0) fake::click(4, 4);
+  }
+  void done(int step, const Str& line) {
+    if (step == 0) expect_line("はじめは 0", line, "0");
+    if (step == 1) expect_line("押すと「自分の数」が入る", line, "2");
+  }
+};
+
+// 一覧も同じ。押した行の番号がそのまま入る
+struct RefListCase : Case {
+  int steps() { return 4; }
+  void act(int step) {
+    if (step == 0) fake::click(5, kFPadY + kLineH + 2);   // 2行目
+  }
+  void done(int step, const Str& line) {
+    if (step == 0) expect_line("はじめは 0", line, "0");
+    if (step == 1) expect_line("押した行の番号が入る", line, "1");
+  }
+};
+
 // --- ゆっくり回しても落ちない ---------------------------------------------
 // 1行に満たない送りを何度も受け取る（トラックパッドをゆっくり動かしたとき）。
 // 端数を持ち越さないと、毎回切り捨てられて**いつまでも動かない**
@@ -624,6 +662,30 @@ int main() {
               "func update(hit: string) -> void { if hit == \"m\" { memo = ui.text_value(); } }\n")
           .c_str(),
       &area_wheel);
+
+  RefToggleCase ref_toggle;
+  run("ref で受ける（ui.checkbox）",
+      program_fn("ui.checkbox(\"あ\", ref on)",
+                 "var on = false;\n"
+                 "func shown() -> string { return f\"{on}\"; }\n")
+          .c_str(),
+      &ref_toggle);
+
+  RefRadioCase ref_radio;
+  run("ref で受ける（ui.radio）",
+      program_fn("ui.radio(\"あ\", ref sel, 2)",
+                 "var sel = 0;\n"
+                 "func shown() -> string { return f\"{sel}\"; }\n")
+          .c_str(),
+      &ref_radio);
+
+  RefListCase ref_list;
+  run("ref で受ける（ui.listbox）",
+      program_fn("ui.listbox(ref sel, [\"あ\", \"い\", \"う\"], 3)",
+                 "var sel = 0;\n"
+                 "func shown() -> string { return f\"{sel}\"; }\n")
+          .c_str(),
+      &ref_list);
 
   SlowWheelCase slow;
   {
