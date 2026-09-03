@@ -574,6 +574,24 @@ createShark().then((M) => {
             gw.ink > 20000 && !gw.err,
         JSON.stringify(gw));
 
+  // --- お手本（examples.js に入るもの）------------------------------------
+  // 一覧（web/examples.py の ITEMS）と examples/ が食い違っていないかは、
+  // 作るときに examples.py が見ている。こちらは「載ったものが**ブラウザの道でも
+  // 読める**か」を見る。examples/ に足したものが web で通らない、を防ぐ
+  {
+    const src = fs.readFileSync(path.join(__dirname, 'dist/examples.js'), 'utf8');
+    const box = {};
+    new Function('window', src)(box);
+    const items = box.SHARK_EXAMPLES || [];
+    const bad = [];
+    for (const e of items) {
+      api.config(64, 0, 0);
+      if (api.load(path.basename(e.path), e.code) > 0) bad.push(e.path + ' → ' + api.diagnostics());
+    }
+    check('お手本がぜんぶブラウザで読める（' + items.length + ' 件）',
+          items.length > 10 && bad.length === 0, bad.join('\n'));
+  }
+
   // --- こまの速さ（ui.frame と host_paced）--------------------------------
   // app.js と同じく「画面を描く合図ごとに1度だけ pump する」で走らせる。
   // ui.frame() は刻限の半こま手前で起きるので、合図に間に合って 60 出る。

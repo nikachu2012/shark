@@ -64,7 +64,9 @@ core/       実行系。字句解析→構文解析→型検査→コード生�
   platform/   移植層（desktop / console / web）← 機種ごとに差し替える場所
   lib/        標準ライブラリの実装（*.cpp）。ホスト関数は Engine::register_host() に足す
 frontend/   shark コマンド（main.cpp）と sharkvm（vm_main.cpp）。コアを呼ぶ参考実装
-web/        同じコアを WebAssembly にした一式（移植層は core/platform/web.cpp）
+web/        同じコアを WebAssembly にした一式（移植層は core/platform/web.cpp）。
+            プレイグラウンドのお手本は web/examples.py の ITEMS が正で、
+            examples/ と食い違うと make web が止まる
 stdlib/     標準ライブラリの宣言ファイル（*.shk）← 名前・型・説明・例はここが正
 spec/       仕様（syntax / types/ / runtime/ / library/）。思想は spec/README.md
 tests/      .shk と .expected の組 + memcheck / bytecheck / imecheck / uicheck（C++ 側の検査）

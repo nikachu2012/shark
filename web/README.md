@@ -44,7 +44,25 @@ git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
 | [`build.sh`](build.sh) | 作る。emcc の呼び出しと Monaco の取り寄せ。`web/dist/` にまとめる |
 | [`serve.sh`](serve.sh) | 配る。先に `build.sh` を呼んでから、`web/dist/` をその場で配る |
 | [`test.js`](test.js) | できたものを node で確かめる |
-| [`examples.py`](examples.py) / [`examples/`](examples) | お手本を `examples.js` にまとめる |
+| [`examples.py`](examples.py) / [`examples/`](examples) | お手本を `examples.js` にまとめる（下） |
+
+### お手本
+
+選ぶところに出すお手本は、[`examples.py`](examples.py) の `ITEMS` が正。
+並べる順と、選ぶところに出す名前を決めたいので手で並べている。
+
+そのぶん [`../examples/`](../examples) に足したものが `ITEMS` に入っていないと、
+ブラウザからは見えないまま古くなる。なので作るときに**両方向で突き合わせて、
+食い違っていれば止める**（`make web` が失敗する）。
+
+- `../examples/*.shk` と `web/examples/*.shk` は、ぜんぶ `ITEMS` に入っていること
+- `ITEMS` に書いたファイルは、あること
+
+`web/examples/` にあるのは、ブラウザでしか意味のないもの（入力を読む、
+止まらない繰り返し、ブラウザの字と変換を使う `ui.shk`）だけ。
+それ以外は `../examples/` のものをそのまま載せる。
+
+載ったものが**ブラウザの道でも読める**かは [`test.js`](test.js) が見ている。
 
 ```
         Shark のプログラム（プレイグラウンドに書くもの）
