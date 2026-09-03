@@ -882,6 +882,10 @@ static bool g_list_drag = false;   // 右の帯をつかんでいる最中か
 // 数の入力欄（ui.number）を打っている途中の字。値にできない形（空や "-"）も通るので、
 // 焦点のあるあいだだけここに置く。中身そのものは、いつもどおり呼んだ側が持つ
 static Str g_num_id, g_num_text;
+// つまみ（ui.slider）をつかんでいる最中か。**つかんだら、外へ出ても付いてくる**。
+// 押しっぱなしで動かすものは、部品の外に出たとたん止まると使いにくい
+static Str g_slide_id;
+static bool g_sliding = false;
 // カーソルを合わせたときに出す説明（.tooltip）。この回、どれに乗っているか
 static Str g_tip_text, g_tip_prev;
 static int g_tip_x = 0, g_tip_y = 0;
@@ -2301,10 +2305,17 @@ static int mark_gap() {
   int n = ui_unit() / 3;
   return n < 4 ? 4 : n;
 }
-// チェックの四角
+// チェックの四角と、ラジオの丸。**字の高さに合わせる**（小さいと押しにくく、
+// 字と並べたときに沈んで見える）
 static int box_w() {
-  int h = ui_unit() - 2;
-  return h < 8 ? 8 : h;
+  int h = line_h(1) * 7 / 8;
+  if (h < ui_unit()) h = ui_unit();
+  return h < 9 ? 9 : h;
+}
+// 角を落とす大きさ
+static int box_round() {
+  int r = box_w() / 6;
+  return r < 1 ? 1 : (r > 4 ? 4 : r);
 }
 
 // この回の送りぶんを、その部品の行の高さで**画素**に直す。
@@ -2329,6 +2340,47 @@ static int ease_to(int cur, int to) {
   if (step == 0) step = d > 0 ? 1 : -1;
   int next = cur + step;
   return d > 0 ? (next > to ? to : next) : (next < to ? to : next);
+}
+
+// 角を少し落とした四角を塗る。r が 0 ならただの四角。
+// 角を丸めるだけで、四角い部品はずいぶん柔らかく見える
+static void fill_round(int x, int y, int w, int h, int r, uint32_t c) {
+  if (w <= 0 || h <= 0) return;
+  if (r * 2 > w) r = w / 2;
+  if (r * 2 > h) r = h / 2;
+  for (int i = 0; i < h; i++) {
+    int cut = 0;
+    if (i < r) cut = r - i;
+    else if (i >= h - r) cut = i - (h - 1 - r);
+    span(x + cut, y + i, w - cut * 2, c);
+  }
+}
+
+// 太さのある線（チェックの印に使う）
+static void thick_line(int x0, int y0, int x1, int y1, int t, uint32_t c) {
+  int dx = x1 - x0 < 0 ? x0 - x1 : x1 - x0;
+  int dy = y1 - y0 < 0 ? y0 - y1 : y1 - y0;
+  int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  int err = dx - dy;
+  for (;;) {
+    for (int k = 0; k < t; k++)
+      for (int j = 0; j < t; j++) put(x0 + j, y0 + k, c);
+    if (x0 == x1 && y0 == y1) break;
+    int e2 = err * 2;
+    if (e2 > -dy) { err -= dy; x0 += sx; }
+    if (e2 < dx) { err += dx; y0 += sy; }
+  }
+}
+
+// チェックの印。箱の大きさに合わせて、太さも長さも決める
+static void check_mark(int bx, int by, int w, uint32_t c) {
+  int t = w / 7;
+  if (t < 1) t = 1;
+  int x0 = bx + w * 24 / 100, y0 = by + w * 52 / 100;
+  int x1 = bx + w * 42 / 100, y1 = by + w * 70 / 100;
+  int x2 = bx + w * 76 / 100, y2 = by + w * 30 / 100;
+  thick_line(x0, y0, x1, y1, t, c);
+  thick_line(x1, y1, x2, y2, t, c);
 }
 
 static uint32_t blend(uint32_t a, uint32_t b, double t) {
@@ -2416,6 +2468,8 @@ static void ui_reset_widgets() {
   g_list_drag = false;
   g_num_id.clear();
   g_num_text.clear();
+  g_slide_id.clear();
+  g_sliding = false;
   g_tip_text.clear();
   g_tip_prev.clear();
   g_tip_since = 0;
@@ -2765,47 +2819,60 @@ static void place_button(const Value& v, int x, int y, const Box& b) {
   if (over && g_mpress[0]) hit(v, 1);
 }
 
+// 入っているときは**中を差し色で塗りつぶし**、印は下地の色で抜く。
+// 枠と印だけより、入切がひと目で分かる
 static void place_checkbox(const Value& v, int x, int y, const Box& b) {
   bool on = w_a(v) != 0;
   bool over = inside(x, y, b.w, b.h);
   if (over) g_cursor_want = SCUR_Hand;
-  uint32_t edge = blend(g_bg, g_accent, over ? 1.0 : 0.7);
-  int bw = box_w();
-  for (int i = 0; i < bw; i++) span(x, y + i, bw, blend(g_bg, g_accent, over ? 0.35 : 0.2));
-  span(x, y, bw, edge);
-  span(x, y + bw - 1, bw, edge);
-  for (int i = 0; i < bw; i++) { put(x, y + i, edge); put(x + bw - 1, y + i, edge); }
-  if (on) {   // 中の印。四角の大きさに合わせて引く
-    int n = bw / 4;
-    if (n < 2) n = 2;
-    for (int i = 0; i < n; i++) put(x + bw / 4 + i, y + bw / 2 + i, g_fg);
-    for (int i = 0; i < n + 1; i++) put(x + bw / 4 + n + i, y + bw / 2 + n - i, g_fg);
-  }
+  int bw = box_w(), r = box_round();
+  uint32_t edge = blend(g_bg, g_accent, on ? 1.0 : (over ? 0.85 : 0.5));
+  uint32_t face = on ? blend(g_bg, g_accent, over ? 1.0 : 0.9)
+                     : blend(g_bg, g_accent, over ? 0.25 : 0.12);
+  fill_round(x, y, bw, bw, r, edge);
+  fill_round(x + 1, y + 1, bw - 2, bw - 2, r, face);
+  if (on) check_mark(x, y, bw, g_bg);
   put_text(x + bw + mark_gap(), y + (bw - line_h(1)) / 2, w_text(v), 1, w_fg(v));
   if (over && g_mpress[0]) hit(v, on ? 0 : 1);
 }
+
+static Str widget_key(const Value& v, int x, int y);   // 下（並べる文字）で定義
 
 static void place_slider(const Value& v, int x, int y, const Box& b) {
   int64_t lo = w_b(v), hi = w_c(v), val = w_a(v);
   if (hi <= lo) hi = lo + 1;
   if (val < lo) val = lo;
   if (val > hi) val = hi;
-  int track_y = y + b.h / 2 - 1;
+  Str key = widget_key(v, x, y);
   int tw = b.w, knob = box_w() / 2 + 1;
-  span(x, track_y, tw, blend(g_bg, g_fg, 0.35));
-  span(x, track_y + 1, tw, blend(g_bg, g_fg, 0.35));
   int usable = tw - knob;
-  int kx = x + (int)((val - lo) * usable / (hi - lo));
-  for (int i = 0; i < b.h; i++) span(kx, y + i, knob, g_accent);
-  if (inside(x - 3, y - 3, tw + 6, b.h + 6)) g_cursor_want = SCUR_Hand;
-  // 押されている間は、そのつど今の位置から値を出す
-  if (g_mb[0] && inside(x - 3, y - 3, tw + 6, b.h + 6)) {
+  bool over = inside(x - 3, y - 3, tw + 6, b.h + 6);
+
+  // つかむ・離す。**つかんでいるあいだは、外へ出ても付いてくる**
+  if (over && g_mpress[0]) { g_sliding = true; g_slide_id = key; }
+  if (!g_mb[0] && g_sliding && g_slide_id == key) { g_sliding = false; g_slide_id.clear(); }
+  bool mine = g_sliding && g_slide_id.size() > 0 && g_slide_id == key;
+  if (over || mine) g_cursor_want = SCUR_Hand;
+  if (mine && usable > 0) {   // つかんでいる間は、そのつど今の位置から値を出す
     int rel = g_mx - x - knob / 2;
     if (rel < 0) rel = 0;
     if (rel > usable) rel = usable;
     int64_t nv = lo + (int64_t)rel * (hi - lo) / usable;
     hit(v, nv);
+    val = nv;                 // 描くのも新しいところ（1こま遅れない）
   }
+
+  // 描く
+  int track_y = y + b.h / 2 - 1;
+  span(x, track_y, tw, blend(g_bg, g_fg, 0.35));
+  span(x, track_y + 1, tw, blend(g_bg, g_fg, 0.35));
+  int kx = x + (int)((val - lo) * usable / (hi - lo));
+  // 通ってきたところは差し色で塗って、どのあたりか分かるようにする
+  span(x, track_y, kx - x, blend(g_bg, g_accent, 0.8));
+  span(x, track_y + 1, kx - x, blend(g_bg, g_accent, 0.8));
+  int r = knob / 3;
+  uint32_t face = blend(g_bg, g_accent, mine ? 1.0 : (over ? 0.95 : 0.85));
+  fill_round(kx, y, knob, b.h, r, face);
 }
 
 
@@ -3607,20 +3674,7 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
 // どれも「値は呼んだ側が持ち、部品は状態を持たない」は同じ。動いたときに
 // ui.show() が名札を返し、新しい値は ui.value() で受け取る。
 
-// 丸を描く（ラジオボタン用）。ui.circle / ui.fill_circle と同じ書き方
-static void ring(int cx, int cy, int r, uint32_t c) {
-  if (r < 0) return;
-  int x = r, y = 0, err = 1 - r;
-  while (x >= y) {
-    put(cx + x, cy + y, c); put(cx + y, cy + x, c);
-    put(cx - y, cy + x, c); put(cx - x, cy + y, c);
-    put(cx - x, cy - y, c); put(cx - y, cy - x, c);
-    put(cx + y, cy - x, c); put(cx + x, cy - y, c);
-    y++;
-    if (err < 0) err += 2 * y + 1;
-    else { x--; err += 2 * (y - x) + 1; }
-  }
-}
+// 塗った丸（ラジオボタン用）。ui.fill_circle と同じ書き方
 static void disc(int cx, int cy, int r, uint32_t c) {
   for (int dy = -r; dy <= r; dy++) {
     int w = 0;
@@ -3654,6 +3708,12 @@ static int opt_widest(const Value& v) {
 static Str widget_key(const Value& v, int x, int y) {
   const Str& id = w_id(v);
   if (id.size() > 0) return id;
+  int slot = w_var(v);
+  if (slot >= 0) {   // ref で受けた形。どの var かで見分けられる（置き場所が動いても同じ）
+    Str k("\x03");
+    k += str_from_int(slot);
+    return k;
+  }
   Str k("\x02");
   k += str_from_int(x);
   k.push(',');
@@ -3666,15 +3726,24 @@ static int64_t clamp_i(int64_t v, int64_t lo, int64_t hi) {
   return v < lo ? lo : (v > hi ? hi : v);
 }
 
+// 選ばれているときは、チェックと同じく中を差し色で塗って、真ん中を下地の色で抜く
 static void place_radio(const Value& v, int x, int y, const Box& b) {
   bool on = w_a(v) != 0;
   bool over = inside(x, y, b.w, b.h);
   if (over) g_cursor_want = SCUR_Hand;
   int bw = box_w(), r = bw / 2;
   int cx = x + r, cy = y + r;
-  disc(cx, cy, r, blend(g_bg, g_accent, over ? 0.35 : 0.2));
-  ring(cx, cy, r, blend(g_bg, g_accent, over ? 1.0 : 0.7));
-  if (on) disc(cx, cy, r / 2 < 2 ? 2 : r / 2, g_fg);   // 選ばれているしるし
+  uint32_t edge = blend(g_bg, g_accent, on ? 1.0 : (over ? 0.85 : 0.5));
+  uint32_t face = on ? g_bg : blend(g_bg, g_accent, over ? 0.25 : 0.12);
+  int t = bw / 8;
+  if (t < 1) t = 1;
+  disc(cx, cy, r, edge);              // 外の輪
+  disc(cx, cy, r - t, face);
+  if (on) {                           // 選ばれているしるしは、真ん中の点
+    int dot = r / 2;
+    if (dot < 2) dot = 2;
+    disc(cx, cy, dot, edge);
+  }
   put_text(x + bw + mark_gap(), y + (bw - line_h(1)) / 2, w_text(v), 1, w_fg(v));
   if (over && g_mpress[0]) hit(v, w_b(v));   // ref の形なら「自分の数」、名札なら 1
 }

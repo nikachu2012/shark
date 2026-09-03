@@ -451,6 +451,26 @@ struct RefListCase : Case {
   }
 };
 
+// --- つまみは、外へ出ても付いてくる ---------------------------------------
+// 押しっぱなしで動かすものは、部品の外に出たとたん止まると使いにくい。
+// つかんだら、離すまで付いてくること
+struct SliderDragCase : Case {
+  int steps() { return 9; }
+  void act(int step) {
+    if (step == 0) fake::mouse(10, 5, 0, true);          // つまみをつかむ
+    else if (step == 2) fake::hover(80, 5);              // 中で動かす
+    else if (step == 4) fake::hover(50, 60);             // **枠の外**へ出して動かす
+    else if (step == 6) fake::mouse(50, 60, 0, false);   // 離す
+    else if (step == 7) fake::hover(20, 60);             // 離したあとは付いてこない
+  }
+  void done(int step, const Str& line) {
+    if (step == 1) expect_line("つかんだところの数になる", line, "8");
+    if (step == 3) expect_line("中で動かすと付いてくる", line, "85");
+    if (step == 5) expect_line("枠の外へ出ても付いてくる", line, "52");
+    if (step == 8) expect_line("離したあとは付いてこない", line, "52");
+  }
+};
+
 // --- ゆっくり回しても落ちない ---------------------------------------------
 // 1行に満たない送りを何度も受け取る（トラックパッドをゆっくり動かしたとき）。
 // 端数を持ち越さないと、毎回切り捨てられて**いつまでも動かない**
@@ -686,6 +706,14 @@ int main() {
                  "func shown() -> string { return f\"{sel}\"; }\n")
           .c_str(),
       &ref_list);
+
+  SliderDragCase slide;
+  run("つまみは外へ出ても付いてくる（ui.slider）",
+      program_fn("ui.slider(ref vol, 0, 100)",
+                 "var vol = 0;\n"
+                 "func shown() -> string { return f\"{vol}\"; }\n")
+          .c_str(),
+      &slide);
 
   SlowWheelCase slow;
   {
