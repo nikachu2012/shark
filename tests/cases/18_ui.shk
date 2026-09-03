@@ -36,6 +36,16 @@ func t_call() -> void {
   }
 }
 
+// その色が最初に出てくるところ（ui.spacer の位置を見るのに使う）
+func first_x(col: int, y: int, w: int) -> int {
+  for var x in range(w) { if ui.get(x, y) == col { return x; } }
+  return -1;
+}
+func first_y(col: int, x: int, h: int) -> int {
+  for var y in range(h) { if ui.get(x, y) == col { return y; } }
+  return -1;
+}
+
 func hits(x0: int, y0: int, x1: int, y1: int) -> int {
   var n = 0;
   for var y in range(y0, y1) {
@@ -436,6 +446,45 @@ func main() -> int {
   ui.clear(0);
   _ = ui.show(ui.label("l").tooltip("せつめい"), 20, 20);
   print(ui.to_png().to_hex() == plain_tip);
+
+  // --- 空き場所（ui.spacer）---
+  // 並んでいる向きに場所を取る。横並びなら横、縦並びなら縦
+  ui.font_builtin();
+  ui.open(120, 60);
+  var sp_red = ui.rgb(255, 0, 0);
+  var sp_blue = ui.rgb(0, 0, 255);
+  var sp_a = ui.label("a").background(sp_red);
+  var sp_b = ui.label("b").background(sp_blue);
+  // 横：字 6 ＋ 間 6 で 12。あいだに 20 空けると 38、伸ばすと右端（120 − 6 = 114）
+  ui.clear(0);
+  _ = ui.show(ui.row([sp_a, sp_b]), 0, 0);
+  print(first_x(sp_blue, 7, 120));
+  ui.clear(0);
+  _ = ui.show(ui.row([sp_a, ui.spacer(20), sp_b]), 0, 0);
+  print(first_x(sp_blue, 7, 120));
+  ui.clear(0);
+  _ = ui.show(ui.row([sp_a, ui.spacer(), sp_b]), 0, 0);
+  print(first_x(sp_blue, 7, 120));
+  // 縦：字 8 ＋ 間 4 で 12。あいだに 20 空けると 36、伸ばすと下端（60 − 8 = 52）
+  ui.clear(0);
+  _ = ui.show(ui.col([sp_a, sp_b]), 0, 0);
+  print(first_y(sp_blue, 2, 60));
+  ui.clear(0);
+  _ = ui.show(ui.col([sp_a, ui.spacer(20), sp_b]), 0, 0);
+  print(first_y(sp_blue, 2, 60));
+  ui.clear(0);
+  _ = ui.show(ui.col([sp_a, ui.spacer(), sp_b]), 0, 0);
+  print(first_y(sp_blue, 2, 60));
+  // 縦に入れた空きは、横には場所を取らない（入れ物の幅は字のぶんだけ）
+  ui.clear(0);
+  var sp_green = ui.rgb(0, 255, 0);
+  _ = ui.show(ui.row([ui.col([sp_a, ui.spacer(20), sp_b]).background(sp_green),
+                      ui.label("x")]), 0, 0);
+  print(f"{ui.get(5, 20) != 0} {ui.get(7, 20) != 0}");
+  // 伸びる空きを2つ置くと、余りを等分する（まんなかに寄る）
+  ui.clear(0);
+  _ = ui.show(ui.row([ui.spacer(), sp_b, ui.spacer()]), 0, 0);
+  print(first_x(sp_blue, 7, 120));
 
   // --- 車輪（ホイール）---
   // 画面が無いところでは回らないので、いつも 0

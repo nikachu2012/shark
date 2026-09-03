@@ -2018,7 +2018,7 @@ static NativeStatus u_font_name(VM& vm, Value* a, int n, Value& out) {
 // 値は呼んだ側が持つ。だから「今の状態」と「画面」がずれない。
 enum WidgetKind {
   WK_Label = 0, WK_Button, WK_Checkbox, WK_Slider, WK_Field, WK_Space, WK_Column, WK_Row,
-  WK_Divider, WK_Grid, WK_Area, WK_Radio, WK_Combo, WK_List, WK_Tabs, WK_Number
+  WK_Divider, WK_Grid, WK_Area, WK_Radio, WK_Combo, WK_List, WK_Tabs, WK_Number, WK_Spacer
 };
 enum WidgetField {
   WF_Kind = 0, WF_Text, WF_Id, WF_A, WF_B, WF_C, WF_Kids,
@@ -2451,6 +2451,19 @@ static bool inside(int x, int y, int w, int h) {
 // --- 大きさを測る ---------------------------------------------------------
 struct Box { int w, h; };
 
+// いま、どちら向きの並びの中を測って（置いて）いるか。
+// ui.spacer は「**並んでいる向き**に場所を取る」ので、これを見る。
+// 測るとき（measure）と置くとき（place）と取り分を数えるとき（eff_fr）で、
+// 同じ向きを見ていないと大きさが食い違うので、入れ物はどこでもこれを立て直す
+static bool g_row_axis = false;
+struct RowAxis {   // 入れ物の中にいるあいだだけ立てて、抜けたら戻す
+  bool keep;
+  RowAxis(bool row) : keep(g_row_axis) { g_row_axis = row; }
+  ~RowAxis() { g_row_axis = keep; }
+};
+// 「余りをぜんぶ取る」取り分。float.infinity() と同じ扱いになる大きさ（fr_is_fill）
+static const double kFillFr = 1.7e308;
+
 static Box measure(const Value& v, int wrap_w = 0);
 static void grid_axes(const Value& v, int avail_w, int avail_h, Vec<int>& cw, Vec<int>& rh);
 static int opt_count(const Value& v);          // 下（並べる文字）で定義
@@ -2520,7 +2533,14 @@ static Box intrinsic(const Value& v, int wrap_w) {
       break;
     case WK_Divider: b.w = 0; b.h = ui_unit() / 2 + 1; break;   // 幅は置くときに決まる
     case WK_Space: b.h = (int)w_a(v); break;
+    // 空き場所。**並んでいる向き**にだけ場所を取る（横並びなら横、縦並びなら縦）。
+    // 伸びる形（ui.spacer()）は、ここでは 0。余りは取り分（eff_fr）で取る
+    case WK_Spacer:
+      if (g_row_axis) b.w = (int)w_a(v);
+      else b.h = (int)w_a(v);
+      break;
     case WK_Column: {
+      RowAxis axis(false);
       ListObj* k = w_kids(v);
       for (int i = 0; i < k->v.size(); i++) {
         Box c = measure(k->v[i], wrap_w);
@@ -2531,6 +2551,7 @@ static Box intrinsic(const Value& v, int wrap_w) {
       break;
     }
     case WK_Row: {
+      RowAxis axis(true);
       ListObj* k = w_kids(v);
       for (int i = 0; i < k->v.size(); i++) {
         Box c = measure(k->v[i]);
@@ -2585,10 +2606,14 @@ static int grid_cols(const Value& v);   // 下（格子）で定義
 static double eff_fr(const Value& v, bool horiz) {
   double f = w_fr(v, horiz);
   if (f > 0) return f;
+  // 伸びる空き（ui.spacer()）は、並んでいる向きに余りをぜんぶ取る
+  if (w_kind(v) == WK_Spacer && w_b(v) != 0) return horiz == g_row_axis ? kFillFr : 0;
   if (!is_container(v)) return 0;
   if (horiz ? w_wid(v) > 0 : w_hei(v) > 0) return 0;   // 画素で決めてあれば、そこで止まる
   ListObj* k = w_kids(v);
   int kind = w_kind(v);
+  // 中身を見に行くあいだは、その入れ物の向きにする（上の spacer が見る）
+  RowAxis axis(kind == WK_Row);
   if (kind == WK_Grid) {
     int cols = grid_cols(v);
     int n = k->v.size();
@@ -4074,6 +4099,7 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
       break;
     }
     case WK_Column: {
+      RowAxis axis(false);
       ListObj* k = w_kids(v);
       Vec<int> hs;
       axis_sizes(k, false, ch, gap_y(), hs, cw);   // 縦に並べる。余りは高さの取り分へ
@@ -4085,6 +4111,7 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
       break;
     }
     case WK_Row: {
+      RowAxis axis(true);
       ListObj* k = w_kids(v);
       Vec<int> ws;
       axis_sizes(k, true, cw, gap_x(), ws);    // 横に並べる。余りは幅の取り分へ
@@ -4304,6 +4331,13 @@ static NativeStatus u_space(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_widget(vm, WK_Space, Str(), Str(), A(a, 0)->i, 0, 0, 0, out) ? N_Ok : N_Panic;
 }
+// 並んでいる向きに場所を取る空き。数を渡せばその画素ぶん、省くと余りをぜんぶ取る
+static NativeStatus u_spacer(VM& vm, Value* a, int n, Value& out) {
+  int64_t size = n >= 1 ? A(a, 0)->i : 0;
+  if (size < 0) size = 0;
+  return make_widget(vm, WK_Spacer, Str(), Str(), size, n >= 1 ? 0 : 1, 0, 0, out)
+             ? N_Ok : N_Panic;
+}
 static NativeStatus u_col(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_widget(vm, WK_Column, Str(), Str(), 0, 0, 0, A(a, 0), out) ? N_Ok : N_Panic;
@@ -4357,6 +4391,7 @@ static NativeStatus show_at(VM& vm, Value* a, int x, int y, Value& out) {
   g_last_x = x;
   g_last_y = y;
   g_tip_text.clear();
+  g_row_axis = false;   // いちばん外は縦並びとみなす（ui.spacer の向き）
   g_click_seen = g_mpress[0];
   g_focus_next = g_focus;
   if (g_click_seen) g_focus_next.clear();   // どこも押されなければ焦点は外れる
@@ -4628,6 +4663,8 @@ void register_ui(Registry& r) {
   r.add("ui.password", u_password, tw, ts, ts);
   r.mark_ref0_var(r.add("ui.password", u_password_ref, tw, ts));
   r.add("ui.space", u_space, tw, ti);
+  r.add("ui.spacer", u_spacer, tw);
+  r.add("ui.spacer", u_spacer, tw, ti);
   r.add("ui.col", u_col, tw, tlw);
   r.add("ui.row", u_row, tw, tlw);
   r.add("ui.grid", u_grid, tw, ti, tlw);

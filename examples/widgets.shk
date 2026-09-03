@@ -5,7 +5,7 @@
 // 出てくる部品:
 //   ui.label / ui.button / ui.checkbox / ui.radio / ui.slider / ui.number /
 //   ui.field / ui.password / ui.textarea / ui.combo / ui.listbox / ui.tabs /
-//   ui.space / ui.divider / ui.col / ui.row / ui.grid / ui.center
+//   ui.space / ui.spacer / ui.divider / ui.col / ui.row / ui.grid / ui.center
 // 見た目を変える鎖:
 //   .color / .background / .padding / .width / .height / .align /
 //   .tooltip / .placeholder
@@ -67,6 +67,7 @@ func body() -> Widget {
       ui.row([
         ui.label("えらんだの"),
         ui.label(" ").background(iro_ne[iro]).width(40).height(12),
+        ui.spacer(),                   // 数を省くと、余りをぜんぶ取る（右へ寄る）
         ui.label(iro_na[iro]),
       ]),
     ]);
@@ -99,6 +100,7 @@ func view() -> Widget {
           // 関数を持たせる形と、名札を付ける形。混ぜてよい
           ui.button("ふやす", func() -> void { count += 1; }),
           ui.button("へらす", "dec"),
+          ui.spacer(20),               // 並んでいる向き（ここは横）に 20 画素あける
           ui.button("もどす", "reset").tooltip("0 にもどします"),
         ]),
         ui.space(4),

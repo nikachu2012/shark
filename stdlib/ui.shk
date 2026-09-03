@@ -1248,6 +1248,34 @@ func tabs(action: func() -> void, labels: list<string>, index: int) -> Widget;
 ///   print(ui.height());   // 60
 func space(h: int) -> Widget;
 
+/// 空き場所を取る部品。**並んでいる向き**に空ける。
+///
+/// ui.row の中なら横に、ui.col の中なら縦に場所を取る。
+/// 数を省くと、**余ったところをぜんぶ取る**（伸びる空き）。
+/// 横に並べたものを端に寄せたいときは、あいだに1つ置く。
+///
+/// ```
+/// ui.row([ui.label("なまえ"), ui.spacer(), ui.button("消す", "del")])   // 右端へ
+/// ui.row([ui.spacer(), ui.button("おわる", "end")])                     // 右に寄せる
+/// ui.row([ui.spacer(), ui.label("まんなか"), ui.spacer()])              // 真ん中へ
+/// ui.col([ui.label("上"), ui.spacer(), ui.label("下")])                 // 上と下へ
+/// ```
+///
+/// 引数:
+///   size   空ける画素の数。省くと、余りをぜんぶ取る
+///
+/// 注意:
+///   ui.space(h) は**縦にしか**空けない。横に並べたときにも効かせたいときは、こちら。
+///   伸びる空きを2つ以上置くと、余りを等分する。
+///
+/// 例:
+///   ui.open(120, 40);
+///   var red = ui.rgb(255, 0, 0);
+///   _ = ui.show(ui.row([ui.label("a"), ui.spacer(), ui.label("b").background(red)]), 0, 0);
+///   print(ui.get(119, 0));   // 16711680（右の端まで寄る）
+func spacer() -> Widget;
+func spacer(size: int) -> Widget;
+
 /// 中身を縦に並べる部品。
 ///
 /// 部品を並べるいちばんふつうの入れ物で、view() が返す1つは、たいていこれになる。
