@@ -80,15 +80,21 @@ func body() -> Widget {
       ui.label(f"えらんだの: {sakana_na[sakana]}"),
     ]);
   }
-  var lines = memo.split("\n").len();
   return ui.col([
     ui.textarea(ref memo, 5).placeholder("ここに おもったことを 書きます").width(float.infinity()),
-    ui.label(f"{memo.len()} 文字 / {lines} 行").align("right"),
+    ui.label(f"{memo.len()} 文字").align("right"),
   ]);
 }
 
-// いまどうあるべきか。部品を組んで、1つ返すだけ
+// いまどうあるべきか。部品を組んで、1つ返すだけ。
+// 名前と中身は **ui.grid(2, ...) の表**に並べる。列の幅はその列でいちばん広い升に
+// 揃うので、名前を右に寄せておくと、中身の左端が1本にそろう
+func name_of(s: string) -> Widget {
+  return ui.label(s).align("right");
+}
+
 func view() -> Widget {
+  var lines = memo.split("\n").len();
   return ui.col([
     // 見出し。ui.center は「置ける幅の真ん中に置く」
     ui.center([ui.label("ぜんぶの部品").color(ui.rgb(120, 200, 255))]),
@@ -97,7 +103,6 @@ func view() -> Widget {
     ui.row([
       // ---------------------------------------------------------- 左がわ
       ui.col([
-        ui.label(f"{count} 回おした"),
         ui.row([
           // ボタンは値を持たないので、動きをその場に書く
           ui.button("ふやす", func() -> void { count += 1; }),
@@ -107,37 +112,37 @@ func view() -> Widget {
         ]),
         ui.space(4),
 
-        ui.checkbox("音を出す", ref sound),
-        ui.row([
-          ui.label("おおきさ"),
-          ui.slider(ref volume, 0, 100),
-          ui.label(f"{volume}").width(28).align("right"),
-        ]),
-        ui.row([
-          ui.label("とし"),
+        // 名前と中身の表。升は左上から右へ、2つずつ詰まる
+        ui.grid(2, [
+          name_of("おした数"), ui.label(f"{count} 回"),
+
+          name_of("音"), ui.checkbox("出す", ref sound),
+
+          name_of("おおきさ"), ui.row([
+            ui.slider(ref volume, 0, 100),
+            ui.label(f"{volume}").width(28).align("right"),
+          ]),
+
           // 0 から 120 の外には出られない。− と ＋ でも動かせる
-          ui.number(ref age, 0, 120).tooltip("0 から 120 まで。打っても外には出ません"),
-        ]),
-        ui.space(4),
+          name_of("とし"), ui.number(ref age, 0, 120)
+              .tooltip("0 から 120 まで。打っても外には出ません"),
 
-        ui.label("いくつかから1つ選ぶ"),
-        ui.row([
-          // 同じ変数を渡して、それぞれに「自分の数」を持たせる
-          ui.radio("小", ref size, 0),
-          ui.radio("中", ref size, 1),
-          ui.radio("大", ref size, 2),
-        ]),
-        ui.row([
-          ui.label("すきないろ"),
-          ui.combo(ref iro, iro_na),         // 押すと一覧が出る
-        ]),
-        ui.space(4),
+          name_of("大きさ"), ui.row([
+            // 同じ変数を渡して、それぞれに「自分の数」を持たせる
+            ui.radio("小", ref size, 0),
+            ui.radio("中", ref size, 1),
+            ui.radio("大", ref size, 2),
+          ]),
 
-        ui.label("なまえ（押してから打つ。右で押すと切り貼り）"),
-        // 空のあいだは、うすい字で「何を入れるところか」を出しておく
-        ui.field(ref name).placeholder("なまえ"),   // 打たれるたびに name が書き換わる
-        ui.password(ref word).placeholder("あいことば")
-            .tooltip("打った字は * になります"),
+          name_of("すきないろ"), ui.combo(ref iro, iro_na),
+
+          name_of("なまえ"), ui.field(ref name).placeholder("なまえ"),
+
+          name_of("あいことば"), ui.password(ref word).placeholder("あいことば")
+              .tooltip("打った字は * になります"),
+        ]),
+
+        ui.space(4),
         ui.label(f"こんにちは、{name} さん").color(ui.rgb(150, 220, 150)),
       ]).width(1.0),
 
@@ -148,11 +153,12 @@ func view() -> Widget {
         body().height(float.infinity()),     // 余ったところまで伸びる
         ui.divider(),
 
-        // 升を並べて渡す格子。列の幅はその列でいちばん広い升に揃う
+        // こちらも同じ表
         ui.grid(2, [
-          ui.label("音"), ui.label(onoff(sound)),
-          ui.label("おおきさ"), ui.label(f"{volume}"),
-          ui.label("とし"), ui.label(f"{age}"),
+          name_of("音"), ui.label(onoff(sound)),
+          name_of("おおきさ"), ui.label(f"{volume}"),
+          name_of("とし"), ui.label(f"{age}"),
+          name_of("メモ"), ui.label(f"{lines} 行"),
         ]),
       ]).width(1.0),
     ]),
