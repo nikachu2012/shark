@@ -82,7 +82,7 @@ func body() -> Widget {
   }
   var lines = memo.split("\n").len();
   return ui.col([
-    ui.textarea(ref memo, 5).placeholder("ここに おもったことを 書きます"),
+    ui.textarea(ref memo, 5).placeholder("ここに おもったことを 書きます").width(float.infinity()),
     ui.label(f"{memo.len()} 文字 / {lines} 行").align("right"),
   ]);
 }
