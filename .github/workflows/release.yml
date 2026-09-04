@@ -47,33 +47,15 @@ jobs:
         if: runner.os != 'Windows'
         run: make test $(sh tools/freetype_static.sh --flags)
 
+      # 包み方は ci.yml と同じ（tools/package.sh）
       - name: 包む
+        run: sh tools/package.sh ${{ matrix.name }}
         shell: bash
-        run: |
-          set -e
-          dir="shark-${{ matrix.name }}"
-          mkdir -p "$dir"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp shark.exe sharkvm.exe "$dir"/
-          else
-            cp shark sharkvm "$dir"/
-          fi
-          cp README.md "$dir"/
-          mkdir -p "$dir/assets"
-          cp -r assets/fonts "$dir/assets/" 2>/dev/null || true
-          cp -r examples "$dir/examples"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            7z a "$dir.zip" "$dir" > /dev/null
-          else
-            tar -czf "$dir.tar.gz" "$dir"
-          fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: shark-${{ matrix.name }}
-          path: |
-            shark-${{ matrix.name }}.tar.gz
-            shark-${{ matrix.name }}.zip
+          path: dist/shark-${{ matrix.name }}.*
           if-no-files-found: error
 
   publish:

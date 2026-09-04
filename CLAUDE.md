@@ -16,6 +16,7 @@ make test           # tests/ を走らせる（sh tests/run.sh。memcheck / byte
 make docs           # stdlib/ の宣言から docs/reference/ に HTML を作り、実装と突き合わせる
 make docs-check     # 宣言ファイルの例をぜんぶ本物の shark で動かす（python3 tools/runex.py）
 make embed          # ゲームに組み込む例（examples/embed/game と play_stage）
+make dist           # 配れる形に包む（dist/shark-<機種>.tar.gz。中身は tools/package.sh）
 make web            # WebAssembly 版を web/dist/ に作る（Emscripten が要る）
 make web-serve      # 作ってから http://localhost:8000/ に配る
 make web-test       # 作ったものを node で確かめる
@@ -62,9 +63,11 @@ MSYS2 / MinGW の make なら Makefile がそのまま動く（`.exe` は Makefi
 
 ## 押すたびの検査（.github/workflows）
 
-`ci.yml`（3機種で作って試す）・`pages.yml`（ブラウザ版を Cloudflare Pages へ）・
+`ci.yml`（4機種で作って試す）・`pages.yml`（ブラウザ版を Cloudflare Pages へ）・
 `release.yml`（タグを押すと実行ファイルを配る）の3つ。
 どれも FreeType を静的に作って繋ぐので、配るものは1つの実行ファイルで済む。
+**包み方は tools/package.sh の1か所**で、CI も配るときも `make dist` も同じものを呼ぶ。
+できたものは、実行ごとの Artifacts から落とせる。
 Pages に載せるには `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` が要る（README）。
 
 ## アーキテクチャ

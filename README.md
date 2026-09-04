@@ -313,6 +313,29 @@ sh tools/freetype_static.sh                    # 元から静的に作る（一�
 make $(sh tools/freetype_static.sh --flags)    # それを繋いで作る
 ```
 
+### できたものを取る
+
+押すたびの検査（`ci.yml`）は、4つの機種ぶんを包んで置いていく。
+GitHub の **Actions → その実行 → Artifacts** から落とせる（14 日で消える）。
+ブラウザ版も同じで、`pages.yml` の実行に `shark-web`（`web/dist` そのもの）が付く。
+
+| 名前 | 中身 |
+|---|---|
+| `shark-macos-arm64` / `shark-macos-x86_64` | macOS の実行ファイル一式 |
+| `shark-linux-x86_64` | Linux の実行ファイル一式 |
+| `shark-windows-x86_64` | Windows の実行ファイル一式 |
+| `shark-web` | ブラウザ版（そのまま静的に配れる） |
+
+同じ包みは手元でも作れる。中身は実行ファイル（`shark` / `sharkvm`）と、
+同梱のフォント・見本・README で、**入れてもらうものは何も無い**。
+
+```
+make dist                    # → dist/shark-<機種>.tar.gz（Windows は .zip）
+make dist NAME=macos-arm64   # 機種の名前を自分で決める
+```
+
+名札（タグ）を押したときは、同じものが Release にも付く。
+
 Cloudflare Pages に載せるには、リポジトリの Settings → Secrets and variables →
 Actions に2つ入れておく。無ければ、作るところまでで止まる（載せない）。
 

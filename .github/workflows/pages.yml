@@ -44,6 +44,14 @@ jobs:
       - name: 作ったものを node で確かめる
         run: make web-test
 
+      # 載せる先が無くても、ここから落として自分の機械で配れる
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shark-web
+          path: web/dist
+          if-no-files-found: error
+          retention-days: 14
+
       # 合鍵が無いところ（fork からの pull request）では、ここまでで止める
       - name: 載せる
         if: env.HAS_CF == 'true'

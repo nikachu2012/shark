@@ -6,6 +6,7 @@
 /shark.exe
 /sharkvm.exe
 /build/
+/dist/
 # FreeType は build/ の中に取ってきて作る（tools/build_win.bat freetype）
 /examples/embed/game
 /examples/embed/build_stage

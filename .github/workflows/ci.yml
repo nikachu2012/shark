@@ -1,8 +1,12 @@
-# ci.yml — 押すたびに、3つの機種で作って試す
+# ci.yml — 押すたびに、4つの機種で作って試し、できたものを置いておく
 #
 # 作るのに要るのは C++17 の翻訳器だけ（外部ライブラリなし）。
 # 日本語の字を出す FreeType は任意なので、ここでは**元から静的に作って**繋ぐ。
 # 相手の機械に何も入れなくてよいことも、ここで確かめている。
+#
+# できたものは、GitHub の実行ごとの「Artifacts」から落とせる（14 日で消える）。
+# 名札（タグ）を押したときの配りかたは release.yml。包み方はどちらも
+# tools/package.sh で同じ。
 name: CI
 
 on:
@@ -13,12 +17,15 @@ on:
 
 jobs:
   posix:
-    name: 作って試す（${{ matrix.os }}）
+    name: 作って試す（${{ matrix.name }}）
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - { os: ubuntu-latest, name: linux-x86_64 }
+          - { os: macos-latest,  name: macos-arm64 }
+          - { os: macos-13,      name: macos-x86_64 }
     steps:
       - uses: actions/checkout@v4
 
@@ -39,6 +46,17 @@ jobs:
       - name: 説明の中の例を、ぜんぶ動かす
         run: make docs-check
 
+      # できたものは、この実行の「Artifacts」から落とせる（配るときと同じ包み）
+      - name: 包む
+        run: sh tools/package.sh ${{ matrix.name }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shark-${{ matrix.name }}
+          path: dist/shark-${{ matrix.name }}.*
+          if-no-files-found: error
+          retention-days: 14
+
   windows:
     name: 作って試す（windows）
     runs-on: windows-latest
@@ -58,3 +76,14 @@ jobs:
       - name: 試す
         run: sh tests/run.sh
         shell: bash
+
+      - name: 包む
+        run: sh tools/package.sh windows-x86_64
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shark-windows-x86_64
+          path: dist/shark-windows-x86_64.*
+          if-no-files-found: error
+          retention-days: 14

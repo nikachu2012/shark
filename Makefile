@@ -138,6 +138,14 @@ tests/uicheck$(EXE): tests/uicheck.o $(CORE_SRC:.cpp=.o)
 print-core-src:
 	@echo $(CORE_SRC)
 
+# 配れる形に包む（dist/shark-<機種>.tar.gz、Windows は .zip）。
+# 中身は実行ファイル・同梱のフォント・見本。押すたびの検査（.github/workflows）も
+# 配るときも、同じ tools/package.sh を呼ぶ
+#   make dist NAME=macos-arm64   で機種の名前を決められる（省くと uname から）
+NAME ?=
+dist: all
+	@sh tools/package.sh $(NAME)
+
 # C・Python・Shark の速さ比べ
 bench: shark$(EXE)
 	@python3 bench/run.py
@@ -173,6 +181,6 @@ clean:
 	rm -f examples/embed/build_stage.o examples/embed/build_stage$(EXE) examples/embed/play_stage.o \
 	      examples/embed/play_stage$(EXE) examples/embed/stage_bytecode.h
 	rm -rf docs/reference
-	rm -rf bench/build web/dist
+	rm -rf bench/build web/dist dist
 
-.PHONY: all test clean embed bench docs docs-check web web-serve web-test print-core-src
+.PHONY: all test clean dist embed bench docs docs-check web web-serve web-test print-core-src
