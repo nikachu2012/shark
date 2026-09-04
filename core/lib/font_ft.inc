@@ -11,8 +11,7 @@
 // 作り方は README の「日本語の字を出す」。
 #if defined(SHARK_FREETYPE)
 
-#include <ft2build.h>
-#include FT_FREETYPE_H
+// ヘッダ（ft2build.h / FT_FREETYPE_H）は ui.cpp が名前空間の外で読んでいる。
 
 namespace ft {
 

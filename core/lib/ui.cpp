@@ -13,6 +13,14 @@
 
 #include "font5x7.inc"
 
+// FreeType のヘッダは、**名前空間の外**で読む。
+// 字を描く中身（font_ft.inc）は namespace shark { の中で取り込むので、そこで読むと
+// 連れてくる <stdlib.h> などまで shark:: の中に入ってしまい、std:: が壊れる。
+#if defined(SHARK_FREETYPE)
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#endif
+
 namespace shark {
 
 // 字形を FreeType で出す口（入っていなければ中身は空）
