@@ -25,6 +25,7 @@ ITEMS = [
     ("examples/widgets.shk", "部品をぜんぶ出す（std.ui）"),
     ("examples/breakout.shk", "2D のゲーム（ブロック崩し）"),
     ("examples/cube3d.shk", "3D を描く（回る立方体）"),
+    ("examples/cube_ui.shk", "3D を部品で動かす（上の層）"),
     ("web/examples/forever.shk", "止まらない繰り返し"),
 ]
 

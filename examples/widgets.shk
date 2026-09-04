@@ -4,11 +4,12 @@
 //
 // 出てくる部品:
 //   ui.label / ui.button / ui.checkbox / ui.radio / ui.slider / ui.number /
-//   ui.field / ui.password / ui.textarea / ui.combo / ui.listbox / ui.tabs /
-//   ui.space / ui.spacer / ui.divider / ui.col / ui.row / ui.grid / ui.center
+//   ui.drag / ui.field / ui.password / ui.textarea / ui.combo / ui.listbox /
+//   ui.tabs / ui.color / ui.tree / ui.image / ui.space / ui.spacer /
+//   ui.divider / ui.col / ui.row / ui.grid / ui.center / ui.stack / ui.scroll
 // 見た目を変える鎖:
-//   .color / .background / .padding / .width / .height / .align /
-//   .tooltip / .placeholder
+//   .color / .background / .border / .radius / .padding / .width / .height /
+//   .align / .valign / .filter / .decimals / .tooltip / .placeholder
 //
 // 一覧（ui.listbox）と選ぶ（ui.combo）とメモ（ui.textarea）は、カーソルを乗せて
 // 車輪（ホイール）を回しても送れる。一覧の右の帯は、つまんで動かせる。
@@ -40,6 +41,12 @@ var page = 0;
 var iro = 4;
 var sakana = 0;
 var last = "なし";
+var fine = 0.35;                       // 小数のつまみ・引いて変える欄
+var seen = false;                      // あいことばを見せるか
+var hex = "1F";                        // 16 進しか入らない欄
+var sumi = ui.rgb(232, 92, 92);        // 色の入力
+var open_ki = true;                    // 木を開いているか
+var erabu: list<int> = [0, 4];         // いくつも選べる一覧
 
 var iro_na = ["あか", "だいだい", "きいろ", "みどり", "あお", "むらさき"];
 var iro_ne = [ui.rgb(232, 92, 92), ui.rgb(232, 168, 76), ui.rgb(224, 216, 96),
@@ -47,12 +54,28 @@ var iro_ne = [ui.rgb(232, 92, 92), ui.rgb(232, 168, 76), ui.rgb(224, 216, 96),
 var sakana_na = ["さめ", "しゃち", "いるか", "くじら", "まぐろ", "まんぼう",
                  "たい", "ひらめ", "うなぎ", "さんま", "あじ", "ふぐ"];
 
+// ui.image に渡す絵。選んだ色で、まるを1つ描くだけ
+func swatch() -> Canvas {
+  var e = ui.canvas(40, 24, ui.rgb(24, 24, 34));
+  e.fill_circle(20, 12, 9, iro_ne[iro]);
+  return e;
+}
+
 // 升ごとの関数から作る格子（ui.grid(行, 列, cell)）。
 // その場に書いた関数からは外側の変数が見えないので、ここは名札で受ける
 func cell(r: int, c: int) -> Widget {
   var i = r * 3 + c;
   return ui.button(iro_na[i], f"c{i}").background(iro_ne[i]).width(1.0)
       .tooltip(f"{iro_na[i]} にします");
+}
+
+// 巻物に入れる中身。数が多くて入りきらないので、送って見ることになる
+func scroll_kids() -> list<Widget> {
+  var kids: list<Widget> = [];
+  for var i in range(sakana_na.len()) {
+    kids.push(ui.label(f"{i + 1}. {sakana_na[i]}"));
+  }
+  return kids;
 }
 
 func onoff(on: bool) -> string {
@@ -68,9 +91,15 @@ func body() -> Widget {
       ui.grid(2, 3, cell),
       ui.row([
         ui.label("えらんだの"),
-        ui.label(" ").background(iro_ne[iro]).width(40).height(12),
+        // 重ね置き（ui.stack）。下地の上に、字をまんなかで重ねる
+        ui.stack([
+          ui.label("").width(64).height(16).background(iro_ne[iro]).radius(4),
+          ui.label(iro_na[iro]).width(64).height(16).align("center").valign("middle")
+              .color(ui.rgb(20, 20, 28)),
+        ]),
         ui.spacer(),                   // 数を省くと、余りをぜんぶ取る（右へ寄る）
-        ui.label(iro_na[iro]),
+        // 絵を出す部品。中身は下の swatch() が描く
+        ui.image(swatch()).border(ui.rgb(70, 80, 100)),
       ]),
     ]);
   }
@@ -78,6 +107,18 @@ func body() -> Widget {
     return ui.col([
       ui.listbox(ref sakana, sakana_na, 5),
       ui.label(f"えらんだの: {sakana_na[sakana]}"),
+    ]);
+  }
+  if page == 3 {
+    // いくつも選べる一覧（番号の並びを渡す）と、折りたためる木
+    return ui.col([
+      ui.listbox(ref erabu, sakana_na, 4),
+      ui.label(f"{erabu.len()} ひき えらんだ"),
+      ui.tree("しらべる", ref open_ki, [
+        ui.label("木の中には、どんな部品でも入れられる"),
+        // 巻物。高さを決めると、はみ出したぶんは送って見る
+        ui.scroll(scroll_kids()).height(60).border(ui.rgb(70, 80, 100)).radius(4),
+      ]),
     ]);
   }
   return ui.col([
@@ -134,12 +175,30 @@ func view() -> Widget {
             ui.radio("大", ref size, 2),
           ]),
 
+          // つまみと同じ書き方で、小数もそのまま渡せる
+          name_of("こまかさ"), ui.row([
+            ui.slider(ref fine, 0.0, 1.0),
+            ui.drag(ref fine, 0.0, 1.0).decimals(2)
+                .tooltip("押したまま横に引くと変わります。動かさずに離すと打てます"),
+          ]),
+
           name_of("すきないろ"), ui.combo(ref iro, iro_na),
+
+          // 押すと、色を選ぶ板が下に出る
+          name_of("すみの色"), ui.color(ref sumi),
 
           name_of("なまえ"), ui.field(ref name).placeholder("なまえ"),
 
-          name_of("あいことば"), ui.password(ref word).placeholder("あいことば")
-              .tooltip("打った字は * になります"),
+          // 見せるかどうかも、ただの変数
+          name_of("あいことば"), ui.row([
+            ui.password(ref word, seen).placeholder("あいことば")
+                .tooltip("打った字は * になります"),
+            ui.checkbox("見せる", ref seen),
+          ]),
+
+          // 入れてよい字を決めておくと、それ以外は入らない
+          name_of("16 進"), ui.field(ref hex).filter("hex").width(70)
+              .tooltip("0〜9 と a〜f だけが入ります"),
         ]),
 
         ui.space(4),
@@ -149,7 +208,7 @@ func view() -> Widget {
       // ---------------------------------------------------------- 右がわ
       ui.col([
         // 見出しだけを出して、中身は body() が返す
-        ui.tabs(ref page, ["メモ", "いろ", "さかな"]),
+        ui.tabs(ref page, ["メモ", "いろ", "さかな", "えらぶ"]),
         body().height(float.infinity()),     // 余ったところまで伸びる
         ui.divider(),
 

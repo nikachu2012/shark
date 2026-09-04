@@ -1587,6 +1587,7 @@ static NativeStatus u_text(VM& vm, Value* a, int n, Value& out);
 static NativeStatus u_text_scaled(VM& vm, Value* a, int n, Value& out);
 static NativeStatus u_draw(VM& vm, Value* a, int n, Value& out);
 static NativeStatus u_tri(VM& vm, Value* a, int n, Value& out);
+static NativeStatus u_clear_depth(VM& vm, Value* a, int n, Value& out);
 
 NativeStatus n_canvas_clear(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_clear, vm, a, n, out); }
 NativeStatus n_canvas_set(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_set, vm, a, n, out); }
@@ -1602,6 +1603,7 @@ NativeStatus n_canvas_clip(VM& vm, Value* a, int n, Value& out) { return canvas_
 NativeStatus n_canvas_clip_off(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_clip_off, vm, a, n, out); }
 NativeStatus n_canvas_draw(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_draw, vm, a, n, out); }
 NativeStatus n_canvas_tri(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_tri, vm, a, n, out); }
+NativeStatus n_canvas_clear_depth(VM& vm, Value* a, int n, Value& out) { return canvas_forward(u_clear_depth, vm, a, n, out); }
 NativeStatus n_canvas_text(VM& vm, Value* a, int n, Value& out) {
   return canvas_forward(n >= 6 ? u_text_scaled : u_text, vm, a, n, out);
 }

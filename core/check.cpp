@@ -64,6 +64,7 @@ NativeStatus n_canvas_blit(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_text(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_draw(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_tri(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_clear_depth(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_clip(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_clip_off(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_to_png(VM& vm, Value* args, int n, Value& out);
@@ -292,6 +293,7 @@ void Checker::make_builtin_classes() {
         {"draw", n_canvas_draw, tv2, 3, {tc, ti, ti}},
         {"draw", n_canvas_draw, tv2, 5, {tc, ti, ti, ti, ti}},
         {"tri", n_canvas_tri, tv2, 10, {ti, ti, ti, ti, ti, ti, ti, ti, ti, ti}},
+        {"clear_depth", n_canvas_clear_depth, tv2, 0, {}},
         {"clip", n_canvas_clip, tv2, 4, {ti, ti, ti, ti}},
         {"clip_off", n_canvas_clip_off, tv2, 0, {}},
         {"to_png", n_canvas_to_png, t_.t_bytes(), 0, {}},

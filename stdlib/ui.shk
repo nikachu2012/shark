@@ -1426,7 +1426,7 @@ func space(h: int) -> Widget;
 func spacer() -> Widget;
 func spacer(size: int) -> Widget;
 
-/// 中身を縦に並べる部品。
+/// カラム（縦の並び）。中身を縦に並べる部品。
 ///
 /// 部品を並べるいちばんふつうの入れ物で、view() が返す1つは、たいていこれになる。
 /// 横並び（ui.row）の中に縦の並びを入れるのにも使う。
@@ -1449,7 +1449,7 @@ func spacer(size: int) -> Widget;
 ///   print(ui.get(5, 4) != 0);   // true
 func col(children: list<Widget>) -> Widget;
 
-/// 中身を横に並べる部品。
+/// ロウ（横の並び）。中身を横に並べる部品。
 ///
 /// 例:
 ///   ui.open(160, 40);
@@ -1501,7 +1501,7 @@ func grid(rows: int, cols: int, cell: func(int, int) -> Widget) -> Widget;
 ///   print(ui.width());   // 120
 func center(children: list<Widget>) -> Widget;
 
-/// 中身を**同じところに重ねて**置く（重ね置き・ZStack）。
+/// スタック（重ね置き・ZStack）。中身を**同じところに重ねて**置く。
 ///
 /// 書いた順に重なり、あとのものが上に来る。大きさはいちばん大きい中身に合わせる。
 /// 絵の上に字を出す、下地の上にボタンを置く、といったときに使う。
@@ -1518,7 +1518,7 @@ func center(children: list<Widget>) -> Widget;
 ///   print(ui.get(0, 0));   // 255
 func stack(children: list<Widget>) -> Widget;
 
-/// 巻物（スクロールできる入れ物）。中身は縦に並び、はみ出したぶんは送って見る。
+/// スクロールビュー（巻物）。中身は縦に並び、はみ出したぶんは送って見る。
 ///
 /// **高さを決める**（`.height(n)` か取り分）と、そこに入りきらないぶんが
 /// 隠れて、右に帯が出る。帯はつまんで動かせるほか、上に載せて車輪（ホイール）でも送れる。
@@ -1583,7 +1583,7 @@ func tree(label: string, id: string, open: bool, children: list<Widget>) -> Widg
 func tree(label: string, action: func() -> void, open: bool, children: list<Widget>) -> Widget;
 func tree(label: string, ref open: bool, children: list<Widget>) -> Widget;
 
-/// 絵を出す部品。ui.canvas() や ui.load_png() で作った絵を、そのまま置く。
+/// イメージビュー（絵を出す部品）。ui.canvas() や ui.load_png() で作った絵を、そのまま置く。
 ///
 /// 大きさを決めなければ絵そのものの大きさで、`.width(n)` `.height(n)` を書けば
 /// その大きさに伸ばす（いちばん近い画素を取るので、輪郭がぼけない）。
@@ -1918,6 +1918,21 @@ class Canvas {
   ///   e.tri(0, 0, 0, 7, 0, 0, 0, 7, 0, ui.rgb(255, 0, 0));
   ///   print(f"{e.get(1, 1)} {e.get(6, 6)}");   // 16711680 0
   func tri(x0: int, y0: int, z0: int, x1: int, y1: int, z1: int, x2: int, y2: int, z2: int, color: int) -> void;
+
+  /// 奥行きの面を「いちばん遠い」に戻す。**この絵の大きさに合わせて**戻す。
+  ///
+  /// 奥行きの面は1枚を使い回すので、画面と違う大きさの絵に描くときは、
+  /// ひとこまごとに ui.clear_depth() ではなく**こちら**を呼ぶ。
+  ///
+  /// 例:
+  ///   ui.open(8, 8);
+  ///   ui.depth(true);
+  ///   var e = ui.canvas(16, 16);
+  ///   e.clear_depth();
+  ///   e.tri(0, 0, 0, 15, 0, 0, 0, 15, 0, ui.rgb(255, 0, 0));
+  ///   print(e.get(1, 1));   // 16711680
+  ///   ui.depth(false);
+  func clear_depth() -> void;
 
   /// ここから外には描かない。絵ごとに覚えている。
   ///

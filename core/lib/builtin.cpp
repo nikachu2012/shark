@@ -232,6 +232,7 @@ NativeStatus n_canvas_blit(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_text(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_draw(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_tri(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_canvas_clear_depth(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_clip(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_clip_off(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_to_png(VM& vm, Value* args, int n, Value& out);
@@ -244,6 +245,7 @@ NativeFn builtin_native_method(const Str& cls, const Str& name, const Vec<ParamI
     if (name == "height" && nparams == 0) return n_canvas_height;
     if (name == "to_png" && nparams == 0) return n_canvas_to_png;
     if (name == "clip_off" && nparams == 0) return n_canvas_clip_off;
+    if (name == "clear_depth" && nparams == 0) return n_canvas_clear_depth;
     if (name == "get" && nparams == 2) return n_canvas_get;
     if (name == "set" && nparams == 3) return n_canvas_set;
     if (name == "clear" && nparams == 1) return n_canvas_clear;

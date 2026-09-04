@@ -1,0 +1,213 @@
+// cube_ui.shk — 宣言的な層（部品）で 3D を動かす見本
+//
+//   ./shark run examples/cube_ui.shk
+//
+// 低い層で書いた examples/cube3d.shk と、**出るものはほとんど同じ**。
+// 違うのは動かし方で、こちらは
+//
+//   1. 状態はぜんぶ、ふつうの変数（角・遠さ・色・入切）
+//   2. view() が「いまどうあるべきか」を部品1つにして返す
+//   3. 3D は絵（Canvas）に描いて、ui.image で部品として置く
+//
+// つまみを動かすと変数が書き換わり、次の回の view() がその変数で描き直す。
+// 絵の上を引いて回すのも、ui.point_x / ui.point_y で「絵の中のどこか」が
+// 分かるので書ける。**画面の作り替えを自分で書くところが1つも無い。**
+import std.ui;
+import std.math;
+import std.file;
+
+var W: int = 320;        // 絵の横（画素）
+var H: int = 240;        // 絵の縦
+
+// --- 状態（ぜんぶただの変数）------------------------------------------------
+var ax: float = 0.35;         // 縦に回した角（ラジアン）
+var ay: float = 0.6;          // 横に回した角
+var dist: float = 5.4;        // 目から中心までの遠さ
+var spin: bool = true;        // ひとりでに回るか
+var shade_on: bool = true;    // 光を当てるか
+var iro: int = ui.rgb(230, 80, 70);    // 手前の面の色
+var open_view: bool = true;   // 「見え方」の木を開いているか
+var open_light: bool = false; // 「色と光」の木を開いているか
+var last_x: int = -1;         // 前の回に、絵の中のどこを押していたか
+var last_y: int = -1;
+
+var scene: Canvas = ui.canvas(1, 1);   // 3D を描く先。毎回ここに描いて、部品にする
+
+// --- 3次元の点 --------------------------------------------------------------
+class Vec3 {
+  public var x: float;
+  public var y: float;
+  public var z: float;
+  func init(x: float, y: float, z: float) { this.x = x; this.y = y; this.z = z; }
+  public func dot(o: Vec3) -> float { return this.x * o.x + this.y * o.y + this.z * o.z; }
+  public func minus(o: Vec3) -> Vec3 { return Vec3(this.x - o.x, this.y - o.y, this.z - o.z); }
+  public func cross(o: Vec3) -> Vec3 {
+    return Vec3(this.y * o.z - this.z * o.y,
+                this.z * o.x - this.x * o.z,
+                this.x * o.y - this.y * o.x);
+  }
+  public func unit() -> Vec3 {
+    var n = math.sqrt(this.dot(this));
+    if n == 0.0 { return Vec3(0.0, 0.0, 0.0); }
+    return Vec3(this.x / n, this.y / n, this.z / n);
+  }
+}
+
+// 立方体の頂点（中心から面まで 1.0）と、外から見て反時計回りの四角い面
+var verts: list<Vec3> = [];
+var faces: list<int> = [];
+var colors: list<int> = [];
+
+func quad(a: int, b: int, c: int, d: int, color: int) -> void {
+  faces.push(a); faces.push(b); faces.push(c);
+  faces.push(a); faces.push(c); faces.push(d);
+  colors.push(color); colors.push(color);
+}
+
+func build() -> void {
+  verts = [Vec3(-1.0, -1.0, -1.0), Vec3( 1.0, -1.0, -1.0),
+           Vec3( 1.0,  1.0, -1.0), Vec3(-1.0,  1.0, -1.0),
+           Vec3(-1.0, -1.0,  1.0), Vec3( 1.0, -1.0,  1.0),
+           Vec3( 1.0,  1.0,  1.0), Vec3(-1.0,  1.0,  1.0)];
+  faces = [];
+  colors = [];
+  quad(0, 3, 2, 1, iro);                        // 手前だけ、選んだ色にする
+  quad(4, 5, 6, 7, ui.rgb(240, 170,  60));
+  quad(0, 4, 7, 3, ui.rgb( 90, 170, 240));
+  quad(1, 2, 6, 5, ui.rgb(120, 205, 130));
+  quad(3, 7, 6, 2, ui.rgb(235, 225, 120));
+  quad(0, 1, 5, 4, ui.rgb(180, 110, 220));
+}
+
+// --- 描く -------------------------------------------------------------------
+func to_view(p: Vec3) -> Vec3 {
+  var s = math.sin(ay);
+  var c = math.cos(ay);
+  var x = p.x * c + p.z * s;
+  var z = p.z * c - p.x * s;
+  var s2 = math.sin(ax);
+  var c2 = math.cos(ax);
+  var y = p.y * c2 + z * s2;
+  var z2 = z * c2 - p.y * s2;
+  return Vec3(x, y, z2 + dist);
+}
+
+func shade(color: int, lit: float) -> int {
+  var t = math.clamp(lit, 0.0, 1.0);
+  return ui.rgb(int(float(ui.red(color)) * t),
+                int(float(ui.green(color)) * t),
+                int(float(ui.blue(color)) * t));
+}
+
+// 立方体を絵に描く。**立方体は出っぱりが無い形なので、裏の面を落とすだけで
+// 正しく重なる**（奥行きの面は要らない）
+func render() -> void {
+  scene.clear(ui.rgb(16, 18, 26));
+  var focal = float(H) * 1.15;
+  var light = Vec3(-0.45, 0.72, -0.60).unit();
+
+  var view: list<Vec3> = [];
+  var sx: list<int> = [];
+  var sy: list<int> = [];
+  for var p in verts {
+    var v = to_view(p);
+    view.push(v);
+    sx.push(int(float(W) * 0.5 + focal * v.x / v.z));
+    sy.push(int(float(H) * 0.5 - focal * v.y / v.z));
+  }
+
+  for var i in range(colors.len()) {
+    var a = faces[i * 3];
+    var b = faces[i * 3 + 1];
+    var c = faces[i * 3 + 2];
+    var n = view[b].minus(view[a]).cross(view[c].minus(view[a])).unit();
+    if n.dot(view[a]) >= 0.0 { continue; }        // 向こうを向いている面は描かない
+    var lit = 1.0;
+    if shade_on { lit = 0.28 + 0.72 * math.max(0.0, n.dot(light)); }
+    scene.tri(sx[a], sy[a], 0, sx[b], sy[b], 0, sx[c], sy[c], 0,
+              shade(colors[i], lit));
+  }
+}
+
+// --- いまどうあるべきか -----------------------------------------------------
+func name_of(s: string) -> Widget {
+  return ui.label(s).align("right");
+}
+
+func view() -> Widget {
+  build();      // 色が変わっているかもしれないので、面を組み直す
+  render();
+
+  return ui.row([
+    // 絵は部品1つ。名札を付けてあるので、押されたことも返る
+    ui.image("scene", scene).border(ui.rgb(70, 80, 100)).radius(4),
+
+    ui.col([
+      ui.label("立方体").color(ui.rgb(120, 200, 255)),
+      ui.divider(),
+
+      ui.tree("見え方", ref open_view, [
+        ui.grid(2, [
+          name_of("よこ"), ui.slider(ref ay, -3.2, 3.2),
+          name_of("たて"), ui.slider(ref ax, -1.5, 1.5),
+          name_of("とおさ"), ui.drag(ref dist, 2.6, 12.0).decimals(2),
+        ]),
+        ui.checkbox("ひとりでに回す", ref spin),
+      ]),
+
+      ui.tree("色と光", ref open_light, [
+        ui.grid(2, [
+          name_of("手前の色"), ui.color(ref iro),
+        ]),
+        ui.checkbox("光を当てる", ref shade_on),
+      ]),
+
+      ui.spacer(),
+      ui.label("絵の上を引いても回せます").color(ui.rgb(150, 160, 180)),
+      ui.button("はじめに戻す", func() -> void {
+        ax = 0.35; ay = 0.6; dist = 5.4; spin = true;
+      }),
+      ui.button("おわる", func() -> void { ui.quit(); }),
+    ]).width(1.0),
+  ]);
+}
+
+// 絵の上を引いて回す。ui.point_x / ui.point_y が「絵の中のどこか」を返すので、
+// 前の回との差だけ角を動かす
+func drag_turn() -> void {
+  if !ui.mouse(0) || ui.point_x() < 0 {
+    last_x = -1;
+    last_y = -1;
+    return;
+  }
+  if last_x >= 0 {
+    ay += float(ui.point_x() - last_x) * 0.012;
+    ax += float(ui.point_y() - last_y) * 0.012;
+    ax = math.clamp(ax, -1.5, 1.5);
+  }
+  last_x = ui.point_x();
+  last_y = ui.point_y();
+}
+
+func update(hit: string) -> void {
+  drag_turn();
+  if spin && last_x < 0 { ay += 0.012; }   // 引いている間は、ひとりでに回さない
+}
+
+func main() -> int {
+  var k = ui.scale();
+  W = 320 * k;
+  H = 240 * k;
+  scene = ui.canvas(W, H);
+  ui.theme(ui.rgb(18, 18, 26), ui.rgb(232, 232, 236), ui.rgb(76, 155, 232));
+
+  ui.run("立方体（部品で動かす）", 640 * k, 300 * k, view, update);
+
+  // 画面が無いときは、ui.run が1回だけ描いて返る
+  if ui.width() > 0 {
+    _ = file.write_bytes("cube_ui.png", ui.to_png());
+    print("画面がないので cube_ui.png に保存しました");
+    ui.close();
+  }
+  return 0;
+}
