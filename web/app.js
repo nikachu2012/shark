@@ -384,7 +384,7 @@
   function echoCommand(which, fl, file) {
     var s = 'shark ' + which + ' ' + file;
     if (fl.lang === 'en') s += ' --lang en';
-    if (fl.memory !== 64) s += ' --memory ' + fl.memory;
+    if (fl.memory !== 256) s += ' --memory ' + fl.memory;
     if (fl.strict) s += ' --strict';
     newlineIfNeeded();
     append(PS1, 'ps1');
@@ -567,7 +567,7 @@
     '\n' +
     '選べるもの:\n' +
     '  --lang ja|en   診断の言語（既定は ja）\n' +
-    '  --memory <MB>  使ってよいメモリの量。超えたら実行時エラー（既定は 64、0 で上限なし）\n' +
+    '  --memory <MB>  使ってよいメモリの量。超えたら実行時エラー（既定は 256、0 で上限なし）\n' +
     '  --strict       警告もエラーとして扱う\n' +
     '  --no-color     色を付けない\n' +
     '\n' +

@@ -92,7 +92,7 @@ static void setup(Engine& e) {
   e.set_module_loader(module_loader, 0);
 }
 
-static size_t g_memory_mb = 64;   // --memory で変えられる
+static size_t g_memory_mb = 256;   // --memory で変えられる
 static bool g_memory_given = false;  // 保存したバイトコードは、作ったときの量を引き継ぐ
 
 static bool looks_like_bytecode(const Str& s) {
@@ -483,7 +483,7 @@ static void usage() {
       "\n"
       "選べるもの:\n"
       "  --lang ja|en   診断の言語（既定は ja）\n"
-      "  --memory <MB>  使ってよいメモリの量。超えたら実行時エラー（既定は 64、0 で上限なし）\n"
+      "  --memory <MB>  使ってよいメモリの量。超えたら実行時エラー（既定は 256、0 で上限なし）\n"
       "  --strict       警告もエラーとして扱う\n"
       "  --no-color     色を付けない（環境変数 NO_COLOR でも同じ）\n"
       "\n"

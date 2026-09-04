@@ -22,7 +22,7 @@ struct Config {
       with_ui;
   Config()
       : lang(LANG_JA), strict(false), stack_size(65536), task_stack_size(4096),
-        max_call_depth(10000), memory_limit(64u << 20), with_file(true), with_path(true),
+        max_call_depth(10000), memory_limit(256u << 20), with_file(true), with_path(true),
         with_text(true), with_fmt(true), with_json(true), with_os(true), with_crypto(true),
         with_test(true), with_ui(true) {}
 };

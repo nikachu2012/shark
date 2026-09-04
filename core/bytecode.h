@@ -27,7 +27,7 @@ struct BytecodeHeader {
   int memory_mb;       // 動かすときに使ってよい量。0 は上限なし
   uint32_t modules;    // 入れた標準ライブラリの組み合わせ
   uint64_t natives;    // 関数の表の指紋（registry_signature）
-  BytecodeHeader() : version(kBytecodeVersion), lang(LANG_JA), memory_mb(64), modules(0), natives(0) {}
+  BytecodeHeader() : version(kBytecodeVersion), lang(LANG_JA), memory_mb(256), modules(0), natives(0) {}
 };
 
 // 設定 ⇔ 覚え書きのビット
