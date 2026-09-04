@@ -914,4 +914,8 @@ const PlatformScreen kCanvasScreen = {
     canvas::clipboard_set,
     0,                      // 窓の縁を引いている間の描き直しは要らない（ブラウザは止まらない）
     canvas::set_cursor,     canvas::set_resizable,
-    true};                  // 刻みは requestAnimationFrame が握っている（app.js）
+    true,                   // 刻みは requestAnimationFrame が握っている（app.js）
+    // 機種のファイル選びは持たない。ブラウザの <input type="file"> は選び終わるまで
+    // 返らない形では呼べず、ui.pick_file() は**その場で道を返す**約束のため
+    // （spec/library/ui.md）。ブラウザでは、いつも値なしが返る
+    0};

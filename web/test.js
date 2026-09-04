@@ -213,6 +213,8 @@ createShark().then((M) => {
     memoryUsed: M.cwrap('shk_memory_used', 'number', []),
     modules: M.cwrap('shk_modules', 'string', []),
     explain: M.cwrap('shk_explain', 'string', ['string']),
+    format: M.cwrap('shk_format', 'string', ['string']),
+    formatted: M.cwrap('shk_formatted', 'number', []),
   };
 
   function take() {
@@ -848,6 +850,18 @@ createShark().then((M) => {
   check('補完のモジュールと、処理系が持つモジュールが一致する',
         onlyInApi.length === 0 && onlyInRuntime.length === 0,
         'api.js だけ: ' + onlyInApi.join(' ') + ' / 処理系だけ: ' + onlyInRuntime.join(' '));
+
+  // --- 見た目を整える（core/fmt_src.cpp。shark fmt と同じもの）---
+  {
+    const messy = 'func main()->int{\nvar n=1+2;\n  if n>2 {\nprint(n);\n}\nreturn 0;\n}\n';
+    const tidy = api.format(messy);
+    check('整える', api.formatted() === 1 && tidy.indexOf('  var n = 1 + 2;') >= 0, tidy);
+    check('整えたものを、もう一度整えても変わらない', api.format(tidy) === tidy, api.format(tidy));
+    // 読めないソースは触らない（もとのまま返る）
+    const broken = 'func main() -> int { var s = "とじていない;\n';
+    check('読めないソースは触らない',
+          api.format(broken) === broken && api.formatted() === 0);
+  }
 
   // --- モジュールと説明 ---
   api.config(64, 0, 0);
