@@ -300,6 +300,60 @@ main {
 .dim { opacity: .7; }
 
 /* ------------------------------------------------------------------ つかいかた */
+/* 説明の小窓。かぶせる板（.overlay）と違って**消さずに置いておける**ので、
+   書きながら読める。頭をつかんで動かし、右下の角で大きさを変える */
+.win {
+  position: fixed;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+  min-height: 160px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .45);
+  overflow: hidden;
+}
+.win.hidden { display: none; }
+.win-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  cursor: move;
+  user-select: none;
+}
+.win-title { font-size: 13px; font-weight: 600; }
+.win-space { flex: 1; }
+.win-head .ghost {
+  border: none;
+  background: none;
+  color: var(--ink-dim);
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 7px;
+  border-radius: 6px;
+  text-decoration: none;
+}
+.win-head .ghost:hover { color: var(--ink); background: var(--panel); }
+.win iframe { flex: 1; width: 100%; border: 0; background: var(--panel); }
+/* つかんで動かしている間は、中の頁に押しを取られないようにする（app.js） */
+.win.dragging iframe { pointer-events: none; }
+.win-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(135deg, transparent 50%, var(--border) 50%, var(--border) 60%, transparent 60%,
+                    transparent 70%, var(--border) 70%, var(--border) 80%, transparent 80%);
+}
+
 .overlay {
   position: fixed;
   inset: 0;

@@ -734,6 +734,11 @@
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') $('help').classList.add('hidden');
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); start('run', { echo: true }); }
+    // 説明の小窓を出したり消したり
+    if ((e.key === 'i' || e.key === 'I') && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+      e.preventDefault();
+      docsToggle();
+    }
     // 整える（多くの編集器と同じ Shift-Alt-F）
     if ((e.key === 'f' || e.key === 'F') && e.shiftKey && e.altKey) {
       e.preventDefault();
@@ -767,6 +772,119 @@
     });
   })();
   window.addEventListener('resize', function () { renderLine(); });
+
+  // ================================================================ 説明の小窓
+  // 別のタブに飛ばすと、書いているものが見えなくなる。ここでは**同じ画面に小窓で
+  // 出して、動かしながら読める**ようにする。中身は同じところに配ってある docs/。
+  // 置き場所と大きさ、開いていたかどうかは覚えておく（次に来たとき、そのまま出る）
+  var DOCS_KEY = 'shark.docs';
+  var docsLoaded = false;
+
+  function docsBox() {
+    var w = $('docs');
+    return { x: w.offsetLeft, y: w.offsetTop, w: w.offsetWidth, h: w.offsetHeight };
+  }
+
+  function docsPut(b) {
+    var w = $('docs');
+    var maxw = window.innerWidth - 40, maxh = window.innerHeight - 40;
+    var bw = Math.max(260, Math.min(b.w || 460, maxw));
+    var bh = Math.max(160, Math.min(b.h || 520, maxh));
+    var bx = Math.max(0, Math.min(b.x == null ? window.innerWidth - bw - 24 : b.x,
+                                  window.innerWidth - 80));
+    var by = Math.max(0, Math.min(b.y == null ? 64 : b.y, window.innerHeight - 60));
+    w.style.left = bx + 'px';
+    w.style.top = by + 'px';
+    w.style.width = bw + 'px';
+    w.style.height = bh + 'px';
+  }
+
+  function docsSave(open) {
+    try {
+      var b = docsBox();
+      b.open = open;
+      localStorage.setItem(DOCS_KEY, JSON.stringify(b));
+    } catch (e) { /* 使えない設定のこともある */ }
+  }
+
+  function docsOpen(on) {
+    var w = $('docs');
+    if (on && !docsLoaded) {          // 開けるまで読み込まない（初めの表示を軽くする）
+      $('docs-frame').src = 'docs/index.html';
+      docsLoaded = true;
+    }
+    w.classList.toggle('hidden', !on);
+    if (on) docsPut(docsBox());       // 窓の外へはみ出していたら、中へ戻す
+    docsSave(on);
+  }
+
+  function docsToggle() { docsOpen($('docs').classList.contains('hidden')); }
+
+  (function () {
+    var w = $('docs');
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(DOCS_KEY) || 'null'); } catch (e) { saved = null; }
+    docsPut(saved || {});
+    if (saved && saved.open) docsOpen(true);
+
+    // 頭をつかんで動かす
+    var head = $('docs-head'), drag = null;
+    head.addEventListener('pointerdown', function (e) {
+      if (e.target.closest('button, a')) return;   // ボタンの上は動かさない
+      var b = docsBox();
+      drag = { dx: e.clientX - b.x, dy: e.clientY - b.y };
+      w.classList.add('dragging');
+      head.setPointerCapture(e.pointerId);
+    });
+    head.addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      docsPut({ x: e.clientX - drag.dx, y: e.clientY - drag.dy,
+                w: w.offsetWidth, h: w.offsetHeight });
+    });
+    head.addEventListener('pointerup', function (e) {
+      if (!drag) return;
+      drag = null;
+      w.classList.remove('dragging');
+      head.releasePointerCapture(e.pointerId);
+      docsSave(true);
+    });
+
+    // 右下の角で大きさを変える
+    var grip = $('docs-grip'), size = null;
+    grip.addEventListener('pointerdown', function (e) {
+      var b = docsBox();
+      size = { x: e.clientX, y: e.clientY, w: b.w, h: b.h };
+      w.classList.add('dragging');
+      grip.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    grip.addEventListener('pointermove', function (e) {
+      if (!size) return;
+      var b = docsBox();
+      docsPut({ x: b.x, y: b.y,
+                w: size.w + (e.clientX - size.x), h: size.h + (e.clientY - size.y) });
+    });
+    grip.addEventListener('pointerup', function (e) {
+      if (!size) return;
+      size = null;
+      w.classList.remove('dragging');
+      grip.releasePointerCapture(e.pointerId);
+      docsSave(true);
+    });
+
+    window.addEventListener('resize', function () {
+      if (!w.classList.contains('hidden')) docsPut(docsBox());
+    });
+  })();
+
+  $('btn-docs').addEventListener('click', docsToggle);
+  $('docs-close').addEventListener('click', function () { docsOpen(false); });
+  $('docs-home').addEventListener('click', function () {
+    $('docs-frame').src = 'docs/index.html';
+  });
+  $('docs-back').addEventListener('click', function () {
+    try { $('docs-frame').contentWindow.history.back(); } catch (e) { /* 別の出どころ */ }
+  });
 
   // ================================================================ 保存と共有
   function save() {

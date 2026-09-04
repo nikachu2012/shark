@@ -45,6 +45,21 @@ git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
 | [`serve.sh`](serve.sh) | 配る。先に `build.sh` を呼んでから、`web/dist/` をその場で配る |
 | [`test.js`](test.js) | できたものを node で確かめる |
 | [`examples.py`](examples.py) / [`examples/`](examples) | お手本を `examples.js` にまとめる（下） |
+| [`../docs/gen.py`](../docs/gen.py) | 説明（`dist/docs/`）を作る。中身は宣言ファイルと `docs/reference.md` が正（下） |
+
+### 説明も一緒に配る
+
+`make web` は、プレイグラウンドと一緒に**説明も `web/dist/docs/` に入れる**
+（`docs/gen.py`。`make docs` が `docs/reference/` に作るのと同じもの）。
+上の帯の「説明」（`Ctrl`（`⌘`）+ `I`）で**小窓**が開き、関数の一覧（宣言ファイルが正）と、
+言語の使い方（[`../docs/reference.md`](../docs/reference.md) を HTML にしたもの）を
+**書きながら**読める。別のタブに飛ばすと書いているものが見えなくなるので、
+同じ画面に置ける形にしてある。頭をつかんで動かし、右下の角で大きさを変える。
+置き場所・大きさ・開いていたかどうかは覚えておく。
+
+配るものの中で閉じているので、**繋がっていなくても読める**。
+外（リポジトリの中）へのリンクは作らない。作ったときに宣言と実装が食い違っていれば、
+お手本の突き合わせと同じように `make web` が止まる。
 
 ### お手本
 

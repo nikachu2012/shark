@@ -6,7 +6,7 @@
 #   make dist                      # 作ってから包む（Makefile から）
 #
 # 中身は、それだけで動く1つの実行ファイル（shark と sharkvm）と、
-# 同梱のフォント・見本・README。**入れてもらうものは何も無い。**
+# 同梱のフォント・見本・説明（docs/）・README。**入れてもらうものは何も無い。**
 # 押すたびの検査（.github/workflows）も、配るときも、ここを呼ぶ
 # （包み方を1か所にしておく。README の「押すたびの検査と、配りかた」）。
 set -e
@@ -56,6 +56,15 @@ cp "$root/assets/fonts/LICENSE-NotoSansJP.txt" "$dir/assets/fonts/"
 cp -r "$root/examples" "$dir/examples"
 rm -rf "$dir/examples/embed"
 
+# 説明（関数の一覧と、言語の使い方）。ブラウザ版に入れるのと同じもの。
+# 無ければここで作る（作れなければ、説明なしで包む）
+if [ ! -f "$root/docs/reference/index.html" ]; then
+  python3 "$root/docs/gen.py" > /dev/null 2>&1 || true
+fi
+if [ -f "$root/docs/reference/index.html" ]; then
+  cp -R "$root/docs/reference" "$dir/docs"
+fi
+
 cat > "$dir/はじめに.txt" <<'TXT'
 Shark🦈 — ゲーム機で動く学習用プログラミング言語
 
@@ -64,7 +73,10 @@ Shark🦈 — ゲーム機で動く学習用プログラミング言語
   ./shark fmt examples/hello.shk      見た目を整える
 
 入れてもらうものはありません。日本語の字形も中に入っています。
-くわしくは README.md を読んでください。
+
+  docs/index.html                     関数の一覧（ブラウザで開く）
+  docs/guide.html                     言語の使い方
+  README.md                           作り方・組み込み方
 
 macOS で「開発元を確認できないため開けません」と言われたら、
 一度だけ次を打てば開けます。

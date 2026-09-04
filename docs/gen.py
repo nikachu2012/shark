@@ -13,6 +13,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
+import mdpage  # noqa: E402
 import shkdoc  # noqa: E402
 
 # Windows の端末は既定が UTF-8 ではない。Shark も、この道具の知らせも UTF-8 なので、
@@ -121,10 +122,43 @@ def render_page(page, pages):
 
 def nav(pages, here):
     links = ['<a href="index.html">リファレンス</a>']
+    mark = ' class="here"' if here == 'guide' else ''
+    links.append('<a href="guide.html"%s>言語</a>' % mark)
     for p in pages:
         mark = ' class="here"' if p['file'] == here else ''
         links.append('<a href="%s.html"%s>%s</a>' % (esc(p['file']), mark, esc(p['title'])))
     return '<nav>%s</nav>' % ' '.join(links)
+
+
+# --- 言語そのものの使い方（docs/reference.md）------------------------------
+# 中身は Markdown が正。ここは HTML に直して、リファレンスと同じ見た目で並べるだけ。
+# **ブラウザ版（web/dist）にも入る**ので、外へのリンクは作らない（tools/mdpage.py）
+def render_guide(root, pages):
+    path = os.path.join(root, 'docs/reference.md')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+
+    def link(href):
+        # 同じところに出しているページへは繋ぐ。それ以外（元のファイル）は文字のまま
+        if href.startswith('#'):
+            return href
+        name = os.path.basename(href)
+        if name == 'reference.md':
+            return 'guide.html'
+        for p in pages:
+            if name == p['file'] + '.md':
+                return p['file'] + '.html'
+        return None
+
+    body = [nav(pages, 'guide')]
+    # 見出しからの目次。長い文書なので、上から飛べるようにする
+    heads = [h for h in mdpage.headings(text) if h[0] == 2]
+    if heads:
+        body.append('<nav class="toc"><b>目次</b> ')
+        body.append(' '.join('<a href="#%s">%s</a>' % (esc(h[2]), esc(h[1])) for h in heads))
+        body.append('</nav>')
+    body.append(mdpage.render(text, link))
+    return frame('言語リファレンス', '\n'.join(body))
 
 
 def render_index(pages):
@@ -132,7 +166,7 @@ def render_index(pages):
     body.append('<h1>Shark リファレンス</h1>')
     body.append('<p class="lead">この処理系が持っている関数と型の一覧。'
                 '中身は <code>stdlib/*.shk</code>（宣言ファイル）から作っている。'
-                '言語そのものの使い方は <a href="../reference.md">docs/reference.md</a>。</p>')
+                '言語そのものの使い方は <a href="guide.html">言語リファレンス</a>。</p>')
 
     body.append('<h2>ライブラリ</h2>')
     body.append('<table class="toc"><tbody>')
@@ -197,6 +231,10 @@ body { margin: 0; background: var(--bg); color: var(--ink);
 main { max-width: 52em; margin: 0 auto; padding: 0 20px 72px; }
 a { color: var(--link); }
 
+nav.toc { margin: 0 0 28px; padding: 12px 14px; border: 1px solid var(--line);
+          border-radius: 8px; background: var(--mark); font-size: 14px; line-height: 2; }
+nav.toc b { margin-right: 8px; color: var(--dim); font-weight: 600; }
+nav.toc a { margin-right: 12px; white-space: nowrap; }
 nav { margin: 0 -20px 28px; padding: 10px 20px; border-bottom: 1px solid var(--line);
       font-size: 13px; line-height: 2.1; }
 nav a { margin-right: 14px; text-decoration: none; color: var(--dim); }
@@ -245,6 +283,15 @@ table.toc th { text-align: left; font-weight: 600; padding: 5px 14px 5px 0;
 table.toc td { padding: 5px 0; color: var(--dim); }
 table.toc td.n { text-align: right; white-space: nowrap; padding-left: 14px; }
 
+/* 言語リファレンス（guide.html。Markdown から作ったところ）*/
+main > table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14px; }
+main > table th, main > table td { border: 1px solid var(--line); padding: 6px 10px;
+                                   text-align: left; vertical-align: top; }
+main > table th { background: var(--mark); font-weight: 600; white-space: nowrap; }
+main > ul, main > ol { padding-left: 1.4em; }
+main > ul li, main > ol li { margin: 3px 0; }
+hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+
 ul.index { columns: 3 12em; list-style: none; margin: 12px 0; padding: 0;
            font-family: var(--mono); font-size: 12.5px; line-height: 1.9; }
 ul.index a { text-decoration: none; }
@@ -262,6 +309,8 @@ def build(root, out_dir, stdlib='stdlib'):
     for page in pages:
         with open(os.path.join(out_dir, page['file'] + '.html'), 'w', encoding='utf-8', newline='\n') as f:
             f.write(render_page(page, pages))
+    with open(os.path.join(out_dir, 'guide.html'), 'w', encoding='utf-8', newline='\n') as f:
+        f.write(render_guide(root, pages))
     return pages
 
 
@@ -298,7 +347,7 @@ def main():
     pages = build(ROOT, out_dir, stdlib)
     total, no_ex, drift = report(ROOT, pages)
     print('%s に %d ページ（%d 件、例つき %d 件）'
-          % (os.path.relpath(out_dir, ROOT), len(pages) + 1, total, total - no_ex))
+          % (os.path.relpath(out_dir, ROOT), len(pages) + 2, total, total - no_ex))
     return 1 if drift else 0
 
 

@@ -5,6 +5,9 @@
 #
 # 配るのは web/serve.sh の役目。ここは作るところまでしかしない。
 # 要るもの: Emscripten（emcc）。入っていなければ入れ方を出して止まる。
+#
+# 出るもの: プレイグラウンド一式と、説明（dist/docs/。docs/gen.py が作る）。
+# どちらも静的なので、そのまま配れる（web/serve.sh と Cloudflare Pages が同じものを見る）。
 set -e
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -100,6 +103,11 @@ emcc $CORE \
 cp "$here/index.html" "$here/app.js" "$here/lang.js" "$here/style.css" "$out/"
 python3 "$here/examples.py" "$root" "$here" "$out/examples.js"
 python3 "$here/api.py" "$root" "$out/api.js"
+
+# 説明（リファレンスと言語の使い方）も一緒に配る。中身は stdlib/*.shk の宣言と
+# docs/reference.md が正で、docs/gen.py が HTML にする。
+# 宣言と実装が食い違っていれば、ここで止まる（examples.py と同じ考え）
+python3 "$root/docs/gen.py" "$out/docs"
 
 # Monaco 本体と、そこへの道しるべ（ファイル名に版ごとの印が付くので、作るときに書き出す）
 rm -rf "$out/vendor"

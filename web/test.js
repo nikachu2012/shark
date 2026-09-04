@@ -851,6 +851,40 @@ createShark().then((M) => {
         onlyInApi.length === 0 && onlyInRuntime.length === 0,
         'api.js だけ: ' + onlyInApi.join(' ') + ' / 処理系だけ: ' + onlyInRuntime.join(' '));
 
+  // --- 画面の骨と app.js が食い違っていないか ---
+  // app.js が触る id が index.html に無いと、そこだけ静かに動かなくなる
+  {
+    const app = fs.readFileSync(path.join(__dirname, 'dist/app.js'), 'utf8');
+    const html = fs.readFileSync(path.join(__dirname, 'dist/index.html'), 'utf8');
+    const have = new Set([...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+    const want = new Set([...app.matchAll(/\$\('([^']+)'\)/g)].map((m) => m[1]));
+    const missing = [...want].filter((id) => !have.has(id));
+    check('app.js が触るところが、ぜんぶ画面にある', missing.length === 0, missing.join(' '));
+  }
+
+  // --- 説明（docs/）も一緒に配れているか ---
+  {
+    const docs = path.join(__dirname, 'dist/docs');
+    const need = ['index.html', 'guide.html', 'ui.html', 'style.css'];
+    const missing = need.filter((f) => !fs.existsSync(path.join(docs, f)));
+    check('説明（docs/）も一緒に入っている', missing.length === 0, missing.join(' '));
+    if (missing.length === 0) {
+      // 外（リポジトリの中）へのリンクが残っていると、配ったところで切れる
+      let outward = [];
+      for (const f of fs.readdirSync(docs)) {
+        if (!f.endsWith('.html')) continue;
+        const text = fs.readFileSync(path.join(docs, f), 'utf8');
+        for (const m of text.matchAll(/href="([^"#][^"]*)"/g)) {
+          const href = m[1];
+          if (href.startsWith('data:') || href.startsWith('http')) continue;
+          if (!fs.existsSync(path.join(docs, href.split('#')[0]))) outward.push(f + ' → ' + href);
+        }
+      }
+      check('説明の中のリンクが、ぜんぶ配ったものの中で閉じている',
+            outward.length === 0, outward.slice(0, 5).join(' / '));
+    }
+  }
+
   // --- 見た目を整える（core/fmt_src.cpp。shark fmt と同じもの）---
   {
     const messy = 'func main()->int{\nvar n=1+2;\n  if n>2 {\nprint(n);\n}\nreturn 0;\n}\n';

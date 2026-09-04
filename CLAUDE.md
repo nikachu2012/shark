@@ -13,7 +13,8 @@ Shark🦈 — ゲーム機で動くプログラミング学習用ゲームの中
 ```
 make                # shark と sharkvm を作る（外部依存なし。FreeType だけ任意で自動検出）
 make test           # tests/ を走らせる（sh tests/run.sh。memcheck / bytecheck / imecheck / uicheck も含む）
-make docs           # stdlib/ の宣言から docs/reference/ に HTML を作り、実装と突き合わせる
+make docs           # stdlib/ の宣言と docs/reference.md から docs/reference/ に HTML を作り、
+                    # 実装と突き合わせる（make web は同じものを web/dist/docs/ にも入れる）
 make docs-check     # 宣言ファイルの例をぜんぶ本物の shark で動かす（python3 tools/runex.py）
 make embed          # ゲームに組み込む例（examples/embed/game と play_stage）
 make dist           # 配れる形に包む（dist/shark-<機種>.tar.gz。中身は tools/package.sh）
@@ -106,7 +107,8 @@ assets/     同梱するもの。fonts/ に Noto Sans JP（OFL 1.1）。
 
 - `core/prelude.h` — `stdlib/prelude.shk` と `stdlib/prelude_ui.shk`（Shark 自身で
   書いた並べ替えと `ui.run`）から `tools/prelude.py` が作る。直すのは .shk の側
-- `docs/reference/`・`web/dist/` — `make docs` / `make web` が作る（clean で消える）
+- `docs/reference/`・`web/dist/` — `make docs` / `make web` が作る（clean で消える）。
+  `make web` はプレイグラウンドと**説明**（`web/dist/docs/`）を一緒に出す
 
 ### stdlib/ の宣言ファイル
 

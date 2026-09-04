@@ -44,6 +44,7 @@
         <option value="1024">1024 MB</option>
       </select>
     </label>
+    <button id="btn-docs" title="関数の一覧と、言語の使い方（書きながら見られます）">説明</button>
     <button id="btn-share" title="いまの内容を URL にする">共有</button>
     <button id="btn-help" title="つかいかた">?</button>
   </div>
@@ -94,6 +95,22 @@
   <span id="st-version" class="dim"></span>
 </footer>
 
+<!-- 説明の小窓。書くところにかぶせずに置けるので、**動かしながら読める**。
+     中身は同じところに配ってある docs/（make web が入れる） -->
+<section id="docs" class="win hidden" aria-label="説明">
+  <div class="win-head" id="docs-head">
+    <span class="win-title">説明</span>
+    <span class="win-space"></span>
+    <button id="docs-back" class="ghost" title="ひとつ前へ">←</button>
+    <button id="docs-home" class="ghost" title="いちばん上へ">⌂</button>
+    <a id="docs-tab" class="ghost" href="docs/" target="_blank" rel="noopener"
+       title="別のタブで開く">↗</a>
+    <button id="docs-close" class="ghost" title="閉じる">×</button>
+  </div>
+  <iframe id="docs-frame" title="説明" src=""></iframe>
+  <div class="win-grip" id="docs-grip" title="大きさを変える"></div>
+</section>
+
 <div id="help" class="overlay hidden">
   <div class="help-box">
     <button class="close" id="help-close" aria-label="閉じる">×</button>
@@ -105,7 +122,13 @@
       <li><b>実行</b> … <code>main</code>（または並べた文）を動かす</li>
       <li><b>型検査</b> … 動かさずに、誤りだけを見る</li>
       <li><b>テスト</b> … <code>test_</code> で始まる関数を順に走らせる</li>
+      <li><b>整える</b> … 見た目を整える（<code>shark fmt</code> と同じもの）。
+          <kbd>Shift</kbd> + <kbd>Alt</kbd> + <kbd>F</kbd> でも同じ</li>
       <li><b>止める</b> … 途中でやめる。止まらない繰り返しでも画面は固まりません</li>
+      <li><b>説明</b> … 関数の一覧と、言語の使い方を<b>小窓</b>で出します
+          （<kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>I</kbd>）。書きながら読めて、
+          頭をつかめば動かせ、右下の角で大きさを変えられます。
+          ここに入っているので、繋がっていなくても読めます</li>
     </ul>
 
     <h3>ターミナル</h3>
@@ -114,7 +137,8 @@
     <ul>
       <li><code>input()</code> は<b>打たれるまで待ちます</b>。そのまま打って <kbd>Enter</kbd></li>
       <li>ボタンを押さずに、<code>run</code> <code>check</code> <code>test</code>
-          <code>explain E0102</code> <code>modules</code> と打っても動きます（<code>help</code> で一覧）</li>
+          <code>fmt</code> <code>explain E0102</code> <code>modules</code>
+          と打っても動きます（<code>help</code> で一覧）</li>
       <li><kbd>Ctrl</kbd> + <kbd>C</kbd> … 止める　/　<kbd>Ctrl</kbd> + <kbd>D</kbd> … 入力の終わり（<code>none</code> になる）</li>
       <li><kbd>Ctrl</kbd> + <kbd>L</kbd> … 流れを消す　/　<kbd>↑</kbd> <kbd>↓</kbd> … 打った覚え</li>
     </ul>
@@ -124,6 +148,7 @@
       <li><kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>.</kbd> … 止める</li>
       <li><kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>Space</kbd> … 入力候補を出す</li>
       <li><kbd>F12</kbd> … 定義へ飛ぶ　/　<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> … 関数を探す</li>
+      <li><kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>I</kbd> … 説明の小窓を出す・消す</li>
       <li><kbd>F1</kbd> … 書くところでできることを並べる</li>
     </ul>
     <h3>入力補完</h3>
