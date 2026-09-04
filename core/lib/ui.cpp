@@ -1667,23 +1667,11 @@ static NativeStatus u_load_png(VM& vm, Value* a, int n, Value& out) {
 }
 
 // --- 貼る -----------------------------------------------------------------
-// 絵を今の描き先に貼る。透けているところは下地が残る。
-// 大きさを渡すと、その大きさに伸ばす（いちばん近い画素を取る。輪郭がぼけない）
-static NativeStatus u_draw(VM& vm, Value* a, int n, Value& out) {
-  if (!need_open(vm)) return N_Panic;
-  Value* src = A(a, 0);
-  if (!is_canvas(vm, *src)) {
-    vm.panic(vm.L("絵ではありません", "not a canvas"));
-    return N_Panic;
-  }
-  InstObj* o = as_inst(*src);
-  int sw = (int)o->fields[CF_W].i, sh = (int)o->fields[CF_H].i;
-  const uint32_t* sp = (const uint32_t*)as_str(o->fields[CF_Px])->s.data();
-  int dx = (int)A(a, 1)->i, dy = (int)A(a, 2)->i;
-  int dw = n >= 5 ? (int)A(a, 3)->i : sw;
-  int dh = n >= 5 ? (int)A(a, 4)->i : sh;
-  if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0) { out = mk_void(); return N_Ok; }
-  // 同じ絵に貼ろうとしても、読みながら書くことになるだけなので止めない
+// 画素の並びを今の描き先に貼る。透けているところは下地が残る。
+// 大きさを渡すと、その大きさに伸ばす（いちばん近い画素を取る。輪郭がぼけない）。
+// 部品の側（ui.image）からも呼ぶので、絵そのものではなく画素と大きさで受ける
+static void blit_scaled(const uint32_t* sp, int sw, int sh, int dx, int dy, int dw, int dh) {
+  if (!sp || dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0) return;
   for (int y = 0; y < dh; y++) {
     int ty = dy + y;
     if (ty < g_cy0 || ty > g_cy1) continue;
@@ -1698,6 +1686,23 @@ static NativeStatus u_draw(VM& vm, Value* a, int n, Value& out) {
       *p = (c >> 24) ? over(*p, c) : c;
     }
   }
+}
+
+static NativeStatus u_draw(VM& vm, Value* a, int n, Value& out) {
+  if (!need_open(vm)) return N_Panic;
+  Value* src = A(a, 0);
+  if (!is_canvas(vm, *src)) {
+    vm.panic(vm.L("絵ではありません", "not a canvas"));
+    return N_Panic;
+  }
+  InstObj* o = as_inst(*src);
+  int sw = (int)o->fields[CF_W].i, sh = (int)o->fields[CF_H].i;
+  const uint32_t* sp = (const uint32_t*)as_str(o->fields[CF_Px])->s.data();
+  int dx = (int)A(a, 1)->i, dy = (int)A(a, 2)->i;
+  int dw = n >= 5 ? (int)A(a, 3)->i : sw;
+  int dh = n >= 5 ? (int)A(a, 4)->i : sh;
+  // 同じ絵に貼ろうとしても、読みながら書くことになるだけなので止めない
+  blit_scaled(sp, sw, sh, dx, dy, dw, dh);
   out = mk_void();
   return N_Ok;
 }
@@ -2344,6 +2349,13 @@ static const Str& w_str(const Value& v, int i) {
   return i < o->fields.size() && o->fields[i].k == V_Obj && o->fields[i].o->kind == O_Str
              ? as_str(o->fields[i])->s : kNone;
 }
+// 画素の並び（bytes）。文字（string）とは持ち物の種類が違うので、こちらで読む
+static const Str& w_bytes(const Value& v, int i) {
+  static const Str kNone;
+  InstObj* o = as_inst(v);
+  return i < o->fields.size() && o->fields[i].k == V_Obj && o->fields[i].o->kind == O_Bytes
+             ? as_str(o->fields[i])->s : kNone;
+}
 static int64_t w_field(const Value& v, int i) {
   InstObj* o = as_inst(v);
   return i < o->fields.size() ? o->fields[i].i : 0;
@@ -2584,6 +2596,9 @@ static int64_t g_hit_val = 0;
 static double g_hit_valf = 0;   // 小数を持つ部品のときの、新しい値
 static Value g_hit_list;        // いくつも選べる一覧の、新しい番号の並び
 static Str g_hit_text;
+// カーソルが乗っている絵（ui.image）の中の位置。乗っていなければ -1。
+// 絵に描く道具（お絵かき）は、これと ui.mouse() で書ける
+static int g_point_x = -1, g_point_y = -1;
 static bool g_click_seen = false;   // この回にどこかが押されたか（焦点を外すのに使う）
 static Str g_focus_next;
 static bool g_edited = false;      // この回、ref で受けた部品が変数を書き換えたか
@@ -2706,6 +2721,7 @@ static void ui_reset_widgets() {
   g_hit_text.clear();
   g_hit_val = 0;
   g_hit_valf = 0;
+  g_point_x = g_point_y = -1;
 }
 
 
@@ -2842,6 +2858,10 @@ static Box intrinsic(const Value& v, int wrap_w) {
     case WK_Drag:
       b.w = num_w() + field_pad_x() * 2;
       b.h = line_h(1) + field_pad_y() * 2;
+      break;
+    case WK_Image:
+      b.w = (int)w_a(v);
+      b.h = (int)w_b(v);
       break;
     case WK_Divider: b.w = 0; b.h = ui_unit() / 2 + 1; break;   // 幅は置くときに決まる
     case WK_Space: b.h = (int)w_a(v); break;
@@ -4965,6 +4985,26 @@ static void place_drag(const Value& v, int x, int y, const Box& b) {
   g_cy1 = ky1;
 }
 
+// 絵を出す部品（ui.image）。大きさを決めていなければ、絵そのものの大きさで出す。
+// 名札を渡してあれば押されたことも返り、カーソルが乗っている間は
+// **絵の中のどこか**（ui.point_x / ui.point_y）が分かる
+static void place_image(const Value& v, int x, int y, const Box& b) {
+  int sw = (int)w_a(v), sh = (int)w_b(v);
+  const Str& px = w_bytes(v, WF_Px);
+  if (sw <= 0 || sh <= 0 || px.size() < (int)((size_t)sw * (size_t)sh * sizeof(uint32_t))) return;
+  blit_scaled((const uint32_t*)px.data(), sw, sh, x, y, b.w, b.h);
+  if (!inside(x, y, b.w, b.h)) return;
+  // 絵の中の位置（伸ばしてあれば、そのぶん戻して数える）
+  g_point_x = b.w > 0 ? (g_mx - x) * sw / b.w : 0;
+  g_point_y = b.h > 0 ? (g_my - y) * sh / b.h : 0;
+  if (g_point_x >= sw) g_point_x = sw - 1;
+  if (g_point_y >= sh) g_point_y = sh - 1;
+  if (w_id(v).size() > 0 || w_act(v)) {
+    g_cursor_want = SCUR_Hand;
+    if (g_mpress[0]) hit(v, 1);
+  }
+}
+
 // --- カーソルを合わせたときに出す説明（.tooltip）--------------------------
 // 部品を置くたびに「いまカーソルが乗っているもの」を控えておき、
 // ぜんぶ置き終わってから、いちばん上に描く（menu と同じ扱い）
@@ -5175,6 +5215,7 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
     case WK_Tabs: place_tabs(v, cx, cy, cb); break;
     case WK_Number: place_number(v, cx, cy, cb); break;
     case WK_Drag: place_drag(v, cx, cy, cb); break;
+    case WK_Image: place_image(v, cx, cy, cb); break;
     case WK_Space: break;
     case WK_Divider: {
       uint32_t c = w_field(v, WF_Fg) >= 0 ? w_fg(v) : blend(g_bg, g_fg, 0.3);
@@ -5259,6 +5300,42 @@ static NativeStatus u_button(VM& vm, Value* a, int n, Value& out) {
   return make_widget(vm, WK_Button, as_str(*A(a, 0))->s, as_str(*A(a, 1))->s, 0, 0, 0, 0, out)
              ? N_Ok : N_Panic;
 }
+// 絵を出す部品。画素の並びは**そのまま借りる**（写さない）ので、
+// 毎こま作り直しても重くならない（絵を書き換えれば、写しはそのときに起きる）
+static bool make_image(VM& vm, const Str& id, Value* img, Value& out, Value* action) {
+  if (!is_canvas(vm, *img)) {
+    vm.panic(vm.L("絵ではありません", "not a canvas"));
+    return false;
+  }
+  InstObj* o = as_inst(*img);
+  int64_t w = o->fields[CF_W].i, h = o->fields[CF_H].i;
+  if (!make_widget(vm, WK_Image, Str(), id, w, h, 0, 0, out, action)) return false;
+  widget_put(as_inst(out), WF_Px, val_retain(o->fields[CF_Px]));
+  return true;
+}
+static NativeStatus u_image(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_image(vm, Str(), A(a, 0), out, 0) ? N_Ok : N_Panic;
+}
+static NativeStatus u_image_id(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_image(vm, as_str(*A(a, 0))->s, A(a, 1), out, 0) ? N_Ok : N_Panic;
+}
+static NativeStatus u_image_fn(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_image(vm, Str(), A(a, 1), out, A(a, 0)) ? N_Ok : N_Panic;
+}
+static NativeStatus u_point_x(VM& vm, Value* a, int n, Value& out) {
+  (void)vm; (void)a; (void)n;
+  out = mk_int(g_point_x);
+  return N_Ok;
+}
+static NativeStatus u_point_y(VM& vm, Value* a, int n, Value& out) {
+  (void)vm; (void)a; (void)n;
+  out = mk_int(g_point_y);
+  return N_Ok;
+}
+
 // 中身に部品を入れた形。ラベルの代わりに、その部品をボタンの真ん中に置く
 static NativeStatus u_button_w(VM& vm, Value* a, int n, Value& out) {
   (void)n;
@@ -5739,6 +5816,7 @@ static NativeStatus show_at(VM& vm, Value* a, int x, int y, Value& out) {
   g_last_x = x;
   g_last_y = y;
   g_tip_text.clear();
+  g_point_x = g_point_y = -1;   // 絵の上に乗っていれば、置くときに入る
   g_row_axis = false;   // いちばん外は縦並びとみなす（ui.spacer の向き）
   g_click_seen = g_mpress[0];
   g_focus_next = g_focus;
@@ -6044,6 +6122,11 @@ void register_ui(Registry& r) {
   r.add("ui.button", u_button_fn, tw, ts, tact);
   r.add("ui.button", u_button_w, tw, tw, ts);
   r.add("ui.button", u_button_w_fn, tw, tw, tact);
+  r.add("ui.image", u_image, tw, tcv);
+  r.add("ui.image", u_image_id, tw, ts, tcv);
+  r.add("ui.image", u_image_fn, tw, tact, tcv);
+  r.add("ui.point_x", u_point_x, ti);
+  r.add("ui.point_y", u_point_y, ti);
   r.add("ui.checkbox", u_checkbox_fn, tw, ts, tact, tb);
   r.add("ui.slider", u_slider_fn, tw, tact, ti, ti, ti);
   // 並べたものから選ぶ部品。並べる文字は list<string> で渡す

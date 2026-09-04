@@ -1540,6 +1540,56 @@ func stack(children: list<Widget>) -> Widget;
 func scroll(children: list<Widget>) -> Widget;
 func scroll(id: string, children: list<Widget>) -> Widget;
 
+/// 絵を出す部品。ui.canvas() や ui.load_png() で作った絵を、そのまま置く。
+///
+/// 大きさを決めなければ絵そのものの大きさで、`.width(n)` `.height(n)` を書けば
+/// その大きさに伸ばす（いちばん近い画素を取るので、輪郭がぼけない）。
+/// 透けているところは下地が残るので、ui.stack で重ねられる。
+///
+/// **カーソルが乗っている間は、絵の中のどこかが ui.point_x() / ui.point_y() で分かる。**
+/// 名札か関数を渡しておくと、押されたことも返る。この2つと Canvas のメソッドで、
+/// お絵かき（キャンバス）が書ける。
+///
+/// ```
+/// var paper = ui.canvas(160, 120, ui.rgb(255, 255, 255));
+/// // view の中で
+/// ui.image("paper", paper)
+/// // 押されている間、乗っているところに点を打つ
+/// if ui.mouse(0) && ui.point_x() >= 0 { paper.set(ui.point_x(), ui.point_y(), sumi); }
+/// ```
+///
+/// 引数:
+///   image   出す絵
+///   id      名札（押されたことを受け取るとき）
+///   action  押されたときに呼ぶ関数（名札の代わり）
+///
+/// 例:
+///   ui.open(80, 60);
+///   var e = ui.canvas(20, 10, ui.rgb(255, 0, 0));
+///   _ = ui.show(ui.image(e), 0, 0);
+///   print(f"{ui.get(0, 0)} {ui.get(20, 0)}");   // 16711680 0
+func image(image: Canvas) -> Widget;
+func image(id: string, image: Canvas) -> Widget;
+func image(action: func() -> void, image: Canvas) -> Widget;
+
+/// カーソルが乗っている絵（ui.image）の、**絵の中での横の位置**。乗っていなければ -1。
+///
+/// 伸ばして出していても、絵そのものの画素で数えた位置が返る。
+///
+/// 例:
+///   ui.open(80, 60);
+///   _ = ui.show(ui.image(ui.canvas(20, 10)), 40, 40);
+///   print(ui.point_x());   // -1（カーソルは乗っていない）
+func point_x() -> int;
+
+/// カーソルが乗っている絵（ui.image）の、**絵の中での縦の位置**。乗っていなければ -1。
+///
+/// 例:
+///   ui.open(80, 60);
+///   _ = ui.show(ui.image(ui.canvas(20, 10)), 40, 40);
+///   print(ui.point_y());   // -1
+func point_y() -> int;
+
 /// セパレータ（区切り線）。置ける幅いっぱいに引く。
 ///
 /// 例:

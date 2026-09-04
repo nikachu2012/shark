@@ -135,6 +135,21 @@ func main() -> int {
   _ = ui.show(ui.listbox(ref picked, ["さめ", "まぐろ", "いわし"]), 0, 0);
   print(f"{picked} {ui.chosen()}");
 
+  // --- 絵を出す部品（ui.image）---
+  ui.open(120, 80);
+  ui.clear(0);
+  var e = ui.canvas(20, 10, red);
+  _ = ui.show(ui.image(e), 0, 0);
+  print(f"{ui.get(0, 0)} {ui.get(19, 9)} {ui.get(20, 10)}");
+  // 大きさを書けば、そのぶんに伸ばす
+  ui.clear(0);
+  _ = ui.show(ui.image(e).width(40).height(20), 0, 0);
+  print(f"{ui.get(39, 19)} {ui.get(40, 20)}");
+  // カーソルの乗っていないところでは、絵の中の位置は無い
+  ui.clear(0);
+  _ = ui.show(ui.image(e), 40, 40);
+  print(f"{ui.point_x()} {ui.point_y()}");
+
   ui.close();
   return 0;
 }

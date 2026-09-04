@@ -638,6 +638,20 @@ struct FilterCase : Case {
   }
 };
 
+// --- 絵を出す部品（ui.image）----------------------------------------------
+// 乗っているところが絵の中のどこかで分かり、名札を渡してあれば押せる
+struct ImageCase : Case {
+  int steps() { return 6; }
+  void act(int step) {
+    if (step == 0) fake::hover(10, 6);
+    else if (step == 2) fake::click(10, 6);
+  }
+  void done(int step, const Str& line) {
+    if (step == 1) expect_line("乗っているところが、絵の中のどこかで分かる", line, " 10 6");
+    if (step == 3) expect_line("名札があれば押せる", line, "img 10 6");
+  }
+};
+
 // --- ゆっくり回しても落ちない ---------------------------------------------
 // 1行に満たない送りを何度も受け取る（トラックパッドをゆっくり動かしたとき）。
 // 端数を持ち越さないと、毎回切り捨てられて**いつまでも動かない**
@@ -1036,6 +1050,24 @@ int main() {
             "  return 0;\n"
             "}\n");
     run("入力欄に入れてよい字（.filter）", src.c_str(), &filter);
+  }
+
+  ImageCase image;
+  {
+    Str src("import std.ui;\n"
+            "var paper = ui.canvas(40, 20, ui.rgb(250, 250, 250));\n"
+            "func main() -> int {\n"
+            "  ui.font_builtin();\n"
+            "  ui.open(\"t\", 200, 120);\n"
+            "  while ui.poll() {\n"
+            "    ui.clear(0);\n"
+            "    var hit = ui.show(ui.image(\"img\", paper), 0, 0);\n"
+            "    print(f\"{hit} {ui.point_x()} {ui.point_y()}\");\n"
+            "    ui.present();\n"
+            "  }\n"
+            "  return 0;\n"
+            "}\n");
+    run("絵を出す部品（ui.image）", src.c_str(), &image);
   }
 
   TipCase tip;
