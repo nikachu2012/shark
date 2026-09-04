@@ -924,6 +924,44 @@ void clipboard_set(const char* s) {
   CloseClipboard_();
 }
 
+// --- 機種のファイル選び ---------------------------------------------------
+// comdlg32 の GetOpenFileNameW / GetSaveFileNameW を、実行時に取りに行く
+// （作るときに繋ぐ .lib を増やさないため。窓と同じやり方）
+bool pick_file(bool save, const char* title, const char* name, Str* out) {
+  HMODULE dll = LoadLibraryW(L"comdlg32.dll");
+  if (!dll) return false;
+  typedef BOOL(WINAPI * PickFn)(OPENFILENAMEW*);
+  PickFn fn = (PickFn)GetProcAddress(dll, save ? "GetSaveFileNameW" : "GetOpenFileNameW");
+  if (!fn) { FreeLibrary(dll); return false; }
+
+  wchar_t buf[1024];
+  buf[0] = 0;
+  if (save && name && name[0]) {
+    Wide w(name);
+    const wchar_t* p = w.get();
+    int i = 0;
+    for (; p[i] && i < 1023; i++) buf[i] = p[i];
+    buf[i] = 0;
+  }
+  Wide wtitle(title ? title : "");
+
+  OPENFILENAMEW o;
+  memset(&o, 0, sizeof o);
+  o.lStructSize = sizeof o;
+  o.hwndOwner = g.win;
+  o.lpstrFile = buf;
+  o.nMaxFile = 1024;
+  o.lpstrTitle = (title && title[0]) ? wtitle.get() : 0;
+  o.Flags = OFN_NOCHANGEDIR | OFN_EXPLORER;
+  if (save) o.Flags |= OFN_OVERWRITEPROMPT;
+  else o.Flags |= OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+  BOOL ok = fn(&o);
+  FreeLibrary(dll);
+  if (!ok) return false;
+  *out = from_wide(buf);
+  return true;
+}
+
 }  // namespace win
 
 // Windows は「離した」も出せる。
@@ -936,7 +974,8 @@ const PlatformScreen kWinScreen = {win::screen_scale,  win::open,  win::close,
                                    win::clipboard_get, win::clipboard_set,
                                    win::set_redraw,
                                    win::set_cursor,    win::set_resizable,
-                                   false};   // 刻みはこちらで作る（眠って起きる）
+                                   false,    // 刻みはこちらで作る（眠って起きる）
+                                   win::pick_file};
 
 const PlatformScreen* win_screen() { return win::load() ? &kWinScreen : 0; }
 

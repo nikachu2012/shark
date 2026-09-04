@@ -726,6 +726,43 @@ void clipboard_set(const char* s) {
   ((signed char (*)(Obj, Sel, Obj, Obj))msgSend)(pb, S("setString:forType:"), nsstr(s), pb_type());
 }
 
+// --- 機種のファイル選び ---------------------------------------------------
+// NSOpenPanel / NSSavePanel を出す。出しているあいだは OS が回すので、
+// こちらのこまは止まる（選ぶか取りやめるまで返らない）
+bool pick_file(bool save, const char* title, const char* name, Str* out) {
+  if (!load()) return false;
+  // 画面のある席にいなければ、選び窓は出せない（窓を開くときと同じ見方）
+  if (cgSession) {
+    void* d = cgSession();
+    if (!d) return false;
+    if (cfRelease) cfRelease(d);
+  }
+  // 窓を開かずに呼ばれることもある。そのときは、ここで下ごしらえする
+  if (!g.app) {
+    g.app = send(C("NSApplication"), "sharedApplication");
+    if (!g.app) return false;
+    ((void (*)(Obj, Sel, long))msgSend)(g.app, S("setActivationPolicy:"), 0);   // Regular
+  }
+  sendb(g.app, "activateIgnoringOtherApps:", true);   // 選び窓を前に出す
+  Obj panel = save ? send(C("NSSavePanel"), "savePanel") : send(C("NSOpenPanel"), "openPanel");
+  if (!panel) return false;
+  if (title && title[0]) sendv1(panel, "setTitle:", nsstr(title));
+  if (save) {
+    if (name && name[0]) sendv1(panel, "setNameFieldStringValue:", nsstr(name));
+  } else {
+    sendb(panel, "setCanChooseFiles:", true);
+    sendb(panel, "setCanChooseDirectories:", false);
+    sendb(panel, "setAllowsMultipleSelection:", false);
+  }
+  if (sendl(panel, "runModal") != 1) return false;   // 取りやめ（OK は 1）
+  Obj url = send(panel, "URL");
+  if (!url) return false;
+  const char* c = utf8(send(url, "path"));
+  if (!c) return false;
+  *out = Str(c);
+  return true;
+}
+
 bool text_state(Str* confirmed, Str* marked) {
   if (!g_text_on || !g_sink) return false;
   Obj str = send(g_sink, "string");
@@ -822,7 +859,8 @@ const PlatformScreen kMacScreen = {mac::screen_scale,  mac::open,           mac:
                                   mac::text_selection, mac::text_select,
                                   mac::text_replace,  mac::clipboard_get,  mac::clipboard_set,
                                   mac::set_redraw,    mac::set_cursor,     mac::set_resizable,
-                                  false};   // 刻みはこちらで作る（眠って起きる）
+                                  false,    // 刻みはこちらで作る（眠って起きる）
+                                  mac::pick_file};
 
 const PlatformScreen* mac_screen() { return mac::load() ? &kMacScreen : 0; }
 

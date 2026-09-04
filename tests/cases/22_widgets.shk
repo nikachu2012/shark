@@ -167,6 +167,12 @@ func main() -> int {
   _ = ui.show(ui.color(ref iro), 0, 0);
   print(f"{iro == ui.rgb(80, 160, 220)} {ui.get(2, 6) == iro}");   // 見本がその色で出る
 
+  // --- 機種のファイル選び ---
+  // 画面が無いところでは出せないので、いつも「値なし」
+  var got = ui.pick_file() ?? "";
+  var where = ui.pick_save("memo.txt") ?? "";
+  print(f"[{got}] [{where}]");
+
   ui.close();
   return 0;
 }

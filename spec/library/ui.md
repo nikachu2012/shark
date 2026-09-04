@@ -472,6 +472,25 @@ ui.input_off();                      // やめる
 
 どちらも無くてよい。無ければ、打たれた文字（`SEV_Text`）をそのまま入れる。
 
+## 機種のファイル選び
+
+`ui.pick_file()` は OS の選び窓を出して、選ばれた**道（パス）**を返す
+（保存する先は `ui.pick_save([title, ]name)`）。取りやめたときと、選び窓を
+持たない機種では値なし（`string?`）。返るのはただの道なので、そのあとは
+`std.file` でふつうに読み書きする。
+
+**出しているあいだ、プログラムは止まる。**OS が窓を持っているので、こまも進まない。
+
+| 出し先 | 出るもの |
+|---|---|
+| macOS | `NSOpenPanel` / `NSSavePanel`（AppKit を実行時に取りに行く） |
+| Windows | `GetOpenFileNameW` / `GetSaveFileNameW`（comdlg32 を実行時に取りに行く） |
+| Linux | 机まわりの選び窓（`zenity`、無ければ `kdialog`） |
+| ブラウザ・画面なし | 出せないので、いつも値なし |
+
+移植層では `PlatformScreen::pick_file`（無ければ 0）。持っていない機種は
+そのままでよく、`ui.pick_file()` が値なしを返すだけになる。
+
 ## 取り出す
 
 `ui.to_png()` で、いまの面を PNG にして返す。

@@ -531,6 +531,41 @@ bool poll(ScreenEvent* out) {
   return true;
 }
 
+// --- 機種のファイル選び ---------------------------------------------------
+// X11 そのものは選び窓を持たない。GUI の道具（GTK・Qt）に繋ぐと作るときの
+// 手間が増えるので、**机まわりが持っている選び窓**（zenity / kdialog）に任せる。
+// どちらも無ければ false（ui.pick_file は「値なし」を返す）
+Str chomp(const Str& s) {
+  int n = s.size();
+  while (n > 0 && (s[n - 1] == '\n' || s[n - 1] == '\r')) n--;
+  return s.sub(0, n);
+}
+
+bool pick_file(bool save, const char* title, const char* name, Str* out) {
+  int code = 0;
+  Str o, e;
+  Vec<Str> z;
+  z.push(Str("--file-selection"));
+  if (save) { z.push(Str("--save")); z.push(Str("--confirm-overwrite")); }
+  if (title && title[0]) { z.push(Str("--title")); z.push(Str(title)); }
+  if (save && name && name[0]) { z.push(Str("--filename")); z.push(Str(name)); }
+  if (o_run("zenity", z, &code, &o, &e) && code == 0) {
+    Str got = chomp(o);
+    if (got.size() > 0) { *out = got; return true; }
+  }
+  Vec<Str> k;
+  k.push(Str(save ? "--getsavefilename" : "--getopenfilename"));
+  k.push(Str((save && name && name[0]) ? name : "."));
+  if (title && title[0]) { k.push(Str("--title")); k.push(Str(title)); }
+  o.clear();
+  e.clear();
+  if (o_run("kdialog", k, &code, &o, &e) && code == 0) {
+    Str got = chomp(o);
+    if (got.size() > 0) { *out = got; return true; }
+  }
+  return false;
+}
+
 }  // namespace x11
 
 // X11 は「離した」も出せる
@@ -540,7 +575,8 @@ const PlatformScreen kX11Screen = {x11::screen_scale, x11::open, x11::close,
                                   0, 0, 0, 0, 0, 0, 0,   // 文字入力と切り貼りはまだ持たない
                                   0,                     // set_redraw（X11 は止まらないので要らない）
                                   x11::set_cursor,   x11::set_resizable,
-                                  false};   // 刻みはこちらで作る（眠って起きる）
+                                  false,    // 刻みはこちらで作る（眠って起きる）
+                                  x11::pick_file};
 
 const PlatformScreen* x11_screen() { return x11::load() ? &kX11Screen : 0; }
 

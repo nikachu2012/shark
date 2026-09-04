@@ -1298,6 +1298,29 @@ static NativeStatus u_has_ime(VM& vm, Value* a, int n, Value& out) {
 }
 
 
+// --------------------------------------------------------- 機種のファイル選び
+// OS の選び窓を出して、選ばれた道（パス）を返す。出しているあいだ、
+// プログラムは止まる（OS が窓を持っているため）。
+// 選び窓を持たない機種と、取りやめたときは「値なし」
+static NativeStatus pick(VM& vm, bool save, const Str& title, const Str& name, Value& out) {
+  (void)vm;
+  const PlatformScreen* s = platform().screen;
+  Str got;
+  if (!s || !s->pick_file || !s->pick_file(save, title.c_str(), name.c_str(), &got)) {
+    out = mk_none();
+    return N_Ok;
+  }
+  out = mk_str(got);
+  return N_Ok;
+}
+static NativeStatus u_pick_file(VM& vm, Value* a, int n, Value& out) {
+  return pick(vm, false, n >= 1 ? as_str(*A(a, 0))->s : Str(), Str(), out);
+}
+static NativeStatus u_pick_save(VM& vm, Value* a, int n, Value& out) {
+  if (n >= 2) return pick(vm, true, as_str(*A(a, 0))->s, as_str(*A(a, 1))->s, out);
+  return pick(vm, true, Str(), n >= 1 ? as_str(*A(a, 0))->s : Str(), out);
+}
+
 // ------------------------------------------------------------------ 取り出す
 // PNG にして返す。外の圧縮の道具に頼らないよう、zlib の「そのまま入れる」
 // 形（stored）だけを使う。縮まないが、どの読み手でも開ける
@@ -6372,6 +6395,11 @@ void register_ui(Registry& r) {
   r.add("ui.menu_close", u_menu_close, tv);
   r.add("ui.menu_open", u_menu_open, tb);
 
+  r.add("ui.pick_file", u_pick_file, t.optional_of(ts));
+  r.add("ui.pick_file", u_pick_file, t.optional_of(ts), ts);
+  r.add("ui.pick_save", u_pick_save, t.optional_of(ts));
+  r.add("ui.pick_save", u_pick_save, t.optional_of(ts), ts);
+  r.add("ui.pick_save", u_pick_save, t.optional_of(ts), ts, ts);
   r.add("ui.to_png", u_to_png, tby);
 
   r.add("ui.font", u_font_size, tb, ti);

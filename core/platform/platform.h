@@ -226,6 +226,16 @@ struct PlatformScreen {
   // true なら ui.frame() が刻限の少し手前で起きて、これを避ける
   // （spec/library/ui.md「こまの速さ」）。きっかけを自分で作れる機種は false
   bool host_paced;
+
+  // --- 機種のファイル選び。無ければ 0 -----------------------------------
+  //
+  // std.ui の ui.pick_file() / ui.pick_save() から呼ぶ。OS の窓を出して、
+  // 選ばれたら true と、そのパスを out に返す。取りやめたら false。
+  // **選んでいるあいだプログラムは止まる**（OS が窓を持つあいだ返らない）。
+  //   save   保存する先を選ぶなら true。false なら開くものを選ぶ
+  //   title  窓の名札（0 でもよい）
+  //   name   保存のとき、はじめに入れておく名前（0 でもよい）
+  bool (*pick_file)(bool save, const char* title, const char* name, Str* out);
 };
 
 // --- 必須 ----------------------------------------------------------------

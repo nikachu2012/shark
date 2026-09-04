@@ -22,7 +22,8 @@
 #if defined(_WIN32)
 #include <windows.h>
 
-#include <imm.h>   // 変換つきの文字入力（screen_win.inc）。繋ぐ .lib は要らない
+#include <imm.h>      // 変換つきの文字入力（screen_win.inc）。繋ぐ .lib は要らない
+#include <commdlg.h>   // ファイル選び（screen_win.inc）。GetProcAddress で呼ぶので .lib は要らない
 
 #include <direct.h>
 #include <io.h>
@@ -809,6 +810,15 @@ void s_set_resizable(bool on) {
 void s_set_cursor(int kind) {
   if (g_active && g_active->set_cursor) g_active->set_cursor(kind);
 }
+// ファイル選びは、窓を開いていなくても出せる出し先がある（macOS と Windows はそう）
+bool s_pick_file(bool save, const char* title, const char* name, Str* out) {
+  if (g_active && g_active->pick_file) return g_active->pick_file(save, title, name, out);
+  if (ui_off()) return false;
+  if (const PlatformScreen* m = mac_screen()) if (m->pick_file) return m->pick_file(save, title, name, out);
+  if (const PlatformScreen* w = win_screen()) if (w->pick_file) return w->pick_file(save, title, name, out);
+  if (const PlatformScreen* x = x11_screen()) if (x->pick_file) return x->pick_file(save, title, name, out);
+  return false;
+}
 
 // 画面の細かさ。**開く前にも呼べる**ので、まだ選んでいなければ開けそうな順に尋ねる。
 // 窓を開かないと決まっているとき（SHARK_UI=off）は 1。見えない面に細かさは無い
@@ -841,6 +851,7 @@ struct ScreenInit {
     kScreen.set_cursor = s_set_cursor;
     kScreen.set_resizable = s_set_resizable;
     kScreen.host_paced = false;   // 刻みはこちらで作る（眠って起きる）
+    kScreen.pick_file = s_pick_file;
   }
 };
 ScreenInit g_screen_init;

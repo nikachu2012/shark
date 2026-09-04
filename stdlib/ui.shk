@@ -804,6 +804,55 @@ func menu_close() -> void;
 ///   print(ui.menu_open());   // true
 func menu_open() -> bool;
 
+// --------------------------------------------------------- 機種のファイル選び
+
+/// 機種のファイル選び（開く）。OS の選び窓を出して、選ばれた**道（パス）**を返す。
+///
+/// 取りやめたときと、選び窓を持たない機種では「値なし」。
+/// 返るのはただの道なので、そのあとは std.file でふつうに読める。
+///
+/// **出しているあいだ、プログラムは止まる**（OS が窓を持っているため）。
+/// 出せるかどうかは機種による。窓（macOS・Windows）は OS のものを出し、
+/// Linux では机まわりの選び窓（zenity か kdialog）に任せる。
+/// ブラウザと、画面の無いところ（SHARK_UI=off）では、いつも「値なし」。
+///
+/// 引数:
+///   title   選び窓の名札（省ける）
+///
+/// 例（動かさない）:
+///   import std.ui;
+///   import std.file;
+///
+///   if var path = ui.pick_file("絵をえらぶ") {
+///     if var data = file.read_bytes(path) {
+///       if var e = ui.load_png(data) { ui.draw(e, 0, 0); }
+///     }
+///   }
+///
+/// 例:
+///   ui.open(40, 20);
+///   var got = ui.pick_file() ?? "";
+///   print(f"[{got}]");   // []（画面が無いので出せない）
+func pick_file() -> string?;
+func pick_file(title: string) -> string?;
+
+/// 機種のファイル選び（保存する先）。選ばれた道（パス）を返す。
+///
+/// ui.pick_file と同じだが、**引数1つの形は名札ではなく「はじめに入れておく名前」**。
+/// 名札も決めたいときは2つ渡す。すでにあるファイルを選ぶと、OS が上書きを確かめる。
+///
+/// 引数:
+///   name    はじめに入れておくファイルの名前（省ける）
+///   title   選び窓の名札（名前と両方渡すときは、こちらが先）
+///
+/// 例:
+///   ui.open(40, 20);
+///   var where = ui.pick_save("memo.txt") ?? "";
+///   print(f"[{where}]");   // []（画面が無いので出せない）
+func pick_save() -> string?;
+func pick_save(name: string) -> string?;
+func pick_save(title: string, name: string) -> string?;
+
 // ------------------------------------------------------------------ 取り出す
 
 /// 今の面を PNG にして返す。
