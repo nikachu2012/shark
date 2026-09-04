@@ -7,6 +7,8 @@ var gain = 12;
 var hex = "1F";
 var word = "himitsu";
 var picked: list<int> = [0, 2];
+var hiraku = true;
+var iro = ui.rgb(80, 160, 220);
 
 // 塗られている点の数。描けているかを数で見るのに使う
 func hits(x0: int, y0: int, x1: int, y1: int) -> int {
@@ -149,6 +151,21 @@ func main() -> int {
   ui.clear(0);
   _ = ui.show(ui.image(e), 40, 40);
   print(f"{ui.point_x()} {ui.point_y()}");
+
+  // --- 折りたためる木（ui.tree）---
+  ui.open(160, 100);
+  ui.clear(0);
+  _ = ui.show(ui.tree("え", ref hiraku, [ui.label("なか").background(blue)]), 0, 0);
+  var opened = hits(0, 0, 160, 100);
+  hiraku = false;
+  ui.clear(0);
+  _ = ui.show(ui.tree("え", ref hiraku, [ui.label("なか").background(blue)]), 0, 0);
+  print(f"{opened > hits(0, 0, 160, 100)}");   // 閉じると、中身のぶんが減る
+
+  // --- 色の入力（ui.color）---
+  ui.clear(0);
+  _ = ui.show(ui.color(ref iro), 0, 0);
+  print(f"{iro == ui.rgb(80, 160, 220)} {ui.get(2, 6) == iro}");   // 見本がその色で出る
 
   ui.close();
   return 0;

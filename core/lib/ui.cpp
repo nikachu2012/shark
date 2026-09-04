@@ -906,6 +906,14 @@ static Vec<Str> g_undo, g_redo;            // 変わる前の中身
 static Vec<int> g_undo_at, g_redo_at;      // そのときのカーソル
 static int64_t g_undo_last = 0;            // 最後に控えた刻限
 // 続けて押したときの数え（2回で語、3回で行、4回でぜんぶ）
+// 色を選ぶ板（ui.color）。出しているのはどの部品か、と、いま選んでいる色み
+static Str g_color_id;
+static int g_color_x = 0, g_color_y = 0;
+static double g_color_h = 0, g_color_s = 0, g_color_v = 0;
+static uint32_t g_color_keep = 0;   // 開いたときの色（透けぶんを持ち越す）
+static int g_color_drag = 0;        // 1 = 四角をつかんでいる、2 = 色みの帯
+static bool g_color_moved = false;  // この回、板の中で色が動いたか
+
 // 巻物（ui.scroll）の、いま隠しているぶん。部品ごとに名札で覚える
 static Vec<Str> g_sc_id;
 static Vec<int> g_sc_px, g_sc_to;
@@ -2628,7 +2636,8 @@ static void write_var_num(VM& vm, int slot, int64_t n, bool as_bool) {
 static void hit(const Value& v, int64_t val) {
   int slot = w_var(v);
   if (slot >= 0 && g_vm) {
-    write_var_num(*g_vm, slot, val, w_kind(v) == WK_Checkbox);
+    int k = w_kind(v);
+    write_var_num(*g_vm, slot, val, k == WK_Checkbox || k == WK_Tree);
     g_edited = true;
   }
   g_hit_id = w_id(v);
@@ -2713,6 +2722,9 @@ static void ui_reset_widgets() {
   g_tip_prev.clear();
   g_tip_since = 0;
   g_menu_min_w = 0;
+  g_color_id.clear();
+  g_color_drag = 0;
+  g_color_moved = false;
   g_dragging = false;
   g_want_caret = -1;
   g_want_id.clear();
@@ -2863,6 +2875,10 @@ static Box intrinsic(const Value& v, int wrap_w) {
       b.w = (int)w_a(v);
       b.h = (int)w_b(v);
       break;
+    case WK_Color:
+      b.h = line_h(1) + field_pad_y() * 2;
+      b.w = b.h + field_pad_x() * 2 + text_px_width(Str("#000000"), 1);
+      break;
     case WK_Divider: b.w = 0; b.h = ui_unit() / 2 + 1; break;   // 幅は置くときに決まる
     case WK_Space: b.h = (int)w_a(v); break;
     // 空き場所。**並んでいる向き**にだけ場所を取る（横並びなら横、縦並びなら縦）。
@@ -2890,6 +2906,22 @@ static Box intrinsic(const Value& v, int wrap_w) {
         b.w += c.w;
         if (c.h > b.h) b.h = c.h;
         if (i + 1 < k->v.size()) b.w += gap_x();
+      }
+      break;
+    }
+    // 折りたためる木。見出しの1行と、開いていれば中身のぶん
+    case WK_Tree: {
+      int ind = box_w() + mark_gap();
+      b.w = ind + text_px_width(w_text(v), 1);
+      b.h = mark_row_h();
+      if (w_a(v) != 0) {
+        RowAxis axis(false);
+        ListObj* k = w_kids(v);
+        for (int i = 0; i < k->v.size(); i++) {
+          Box c = measure(k->v[i], wrap_w > ind ? wrap_w - ind : 0);
+          if (c.w + ind > b.w) b.w = c.w + ind;
+          b.h += gap_y() + c.h;
+        }
       }
       break;
     }
@@ -3338,6 +3370,11 @@ static void menu_hit() {
 // 三角のしるし。▼ は上が広く、▲ は下が広い
 static void tri_down(int x, int y, int w, uint32_t c) {
   for (int i = 0; i * 2 < w; i++) span(x + i, y + i, w - i * 2, c);
+}
+// 右を向いた三角（閉じている木のしるし）。tri_down を横に倒したもの
+static void tri_right(int x, int y, int w, uint32_t c) {
+  for (int i = 0; i * 2 < w; i++)
+    for (int j = i; j < w - i; j++) put(x + i, y + j, c);
 }
 static void tri_up(int x, int y, int w, uint32_t c) {
   int rows = (w + 1) / 2;
@@ -5046,6 +5083,215 @@ static int yy_place(const Value& child, int cy, int ch, int h, int def) {
   return cy;
 }
 
+// --- 色を選ぶ（ui.color）--------------------------------------------------
+// 見本を押すと、色を選ぶ板が下に出る。板は部品より**上に描き**、出ているあいだの
+// 押しは板が先に受け取る（メニューと同じ扱い）。
+// 色そのものを持つのは書く人で、板が覚えるのは「いま開いているのはどれか」だけ
+static int color_sq() { return ui_unit() * 12; }        // 濃さ・明るさの四角
+static int color_bar() { return ui_unit() * 3 / 2; }    // 色みの帯の幅
+static int color_gap() { return ui_unit() / 2; }
+static int color_w() { return color_sq() + color_gap() + color_bar() + pad_x() * 2; }
+static int color_h() { return color_sq() + pad_y() * 2; }
+
+// 色み（0〜360）・濃さ・明るさ（0〜1）から色を作る
+static uint32_t hsv_rgb(double h, double sat, double val) {
+  while (h < 0) h += 360;
+  while (h >= 360) h -= 360;
+  if (sat < 0) sat = 0;
+  if (sat > 1) sat = 1;
+  if (val < 0) val = 0;
+  if (val > 1) val = 1;
+  double c = val * sat;
+  double hh = h / 60.0;
+  double t = hh - (double)(int)(hh / 2) * 2 - 1;
+  if (t < 0) t = -t;
+  double xx = c * (1 - t);
+  double m = val - c;
+  double r = 0, g = 0, b = 0;
+  int i = (int)hh;
+  if (i == 0) { r = c; g = xx; }
+  else if (i == 1) { r = xx; g = c; }
+  else if (i == 2) { g = c; b = xx; }
+  else if (i == 3) { g = xx; b = c; }
+  else if (i == 4) { r = xx; b = c; }
+  else { r = c; b = xx; }
+  int R = (int)((r + m) * 255 + 0.5), G = (int)((g + m) * 255 + 0.5), B = (int)((b + m) * 255 + 0.5);
+  if (R > 255) R = 255;
+  if (G > 255) G = 255;
+  if (B > 255) B = 255;
+  return ((uint32_t)R << 16) | ((uint32_t)G << 8) | (uint32_t)B;
+}
+
+static void rgb_hsv(uint32_t col, double* h, double* sat, double* val) {
+  double r = (double)((col >> 16) & 0xff) / 255.0;
+  double g = (double)((col >> 8) & 0xff) / 255.0;
+  double b = (double)(col & 0xff) / 255.0;
+  double mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+  double mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+  double d = mx - mn;
+  double hh = 0;
+  if (d > 0) {
+    if (mx == r) hh = 60 * ((g - b) / d);
+    else if (mx == g) hh = 60 * (2 + (b - r) / d);
+    else hh = 60 * (4 + (r - g) / d);
+    if (hh < 0) hh += 360;
+  }
+  *h = hh;
+  *sat = mx > 0 ? d / mx : 0;
+  *val = mx;
+}
+
+// 色を 16 進で。#RRGGBB の形（見本のとなりに出す）
+static Str color_hex(uint32_t c) {
+  Str out("#");
+  Str body = str_from_uint_base((uint64_t)(c & 0xffffffu), 16, true);
+  for (int i = body.size(); i < 6; i++) out.push('0');
+  out += body;
+  return out;
+}
+
+// 板が出ているあいだ、押し・引きを先に受け取る（ui.show の初めに呼ぶ）
+static void color_hit() {
+  g_color_moved = false;
+  if (g_color_id.size() == 0) return;
+  int x = g_color_x, y = g_color_y, w = color_w(), h = color_h();
+  int sq = color_sq();
+  int sx = x + pad_x(), sy = y + pad_y();
+  int bx = sx + sq + color_gap(), bw = color_bar();
+  bool in_panel = inside(x, y, w, h);
+  if (g_mpress[0]) {
+    if (!in_panel) { g_color_id.clear(); g_color_drag = 0; return; }   // 外を押したら閉じる
+    if (inside(sx, sy, sq, sq)) g_color_drag = 1;
+    else if (inside(bx, sy, bw, sq)) g_color_drag = 2;
+    g_mpress[0] = false;      // 板の上の押しは、板が使い切る
+  }
+  if (!g_mb[0]) g_color_drag = 0;
+  if (in_panel || g_color_drag) g_cursor_want = SCUR_Hand;
+  // つかんでいるあいだは、外へ出ても付いてくる（つまみと同じ）
+  if (g_color_drag == 1 && sq > 1) {
+    double ss = (double)(g_mx - sx) / (double)(sq - 1);
+    double vv = 1.0 - (double)(g_my - sy) / (double)(sq - 1);
+    g_color_s = ss < 0 ? 0 : (ss > 1 ? 1 : ss);
+    g_color_v = vv < 0 ? 0 : (vv > 1 ? 1 : vv);
+    g_color_moved = true;
+  } else if (g_color_drag == 2 && sq > 1) {
+    double hh = (double)(g_my - sy) / (double)(sq - 1);
+    if (hh < 0) hh = 0;
+    if (hh > 1) hh = 1;
+    g_color_h = hh * 359.9;
+    g_color_moved = true;
+  }
+  if (g_press[SKEY_Escape]) { g_color_id.clear(); g_color_drag = 0; }
+}
+
+// 板を描く（ui.show の終わり、メニューの手前）
+static void color_draw() {
+  if (g_color_id.size() == 0) return;
+  int x = g_color_x, y = g_color_y, w = color_w(), h = color_h();
+  int sq = color_sq();
+  int sx = x + pad_x(), sy = y + pad_y();
+  int bx = sx + sq + color_gap(), bw = color_bar();
+  fill_round(x, y, w, h, ui_unit() / 2, blend(g_bg, g_fg, 0.12));
+  stroke_round(x, y, w, h, ui_unit() / 2, 1, blend(g_bg, g_fg, 0.45));
+  // 濃さ（横）と明るさ（縦）の四角
+  for (int j = 0; j < sq; j++) {
+    double vv = 1.0 - (double)j / (double)(sq - 1);
+    for (int i = 0; i < sq; i++) {
+      double ss = (double)i / (double)(sq - 1);
+      put(sx + i, sy + j, hsv_rgb(g_color_h, ss, vv));
+    }
+  }
+  // 色みの帯
+  for (int j = 0; j < sq; j++) {
+    uint32_t c = hsv_rgb((double)j / (double)(sq - 1) * 359.9, 1.0, 1.0);
+    span(bx, sy + j, bw, c);
+  }
+  // いまの場所のしるし。明るいところでは黒、暗いところでは白で描く
+  int px = sx + (int)(g_color_s * (sq - 1) + 0.5);
+  int py = sy + (int)((1.0 - g_color_v) * (sq - 1) + 0.5);
+  uint32_t ring = g_color_v > 0.6 && g_color_s < 0.6 ? 0x000000u : 0xffffffu;
+  for (int i = -3; i <= 3; i++) {
+    if (i > -2 && i < 2) continue;
+    put(px + i, py, ring);
+    put(px, py + i, ring);
+  }
+  int hy = sy + (int)(g_color_h / 359.9 * (sq - 1) + 0.5);
+  span(bx - 2, hy, bw + 4, 0xffffffu);
+}
+
+// 折りたためる木（ui.tree）。見出しを押すと開け閉めし、開いていれば中身を
+// 1段下げて縦に並べる。開いているかどうかは**書く人が持つ**（ほかの部品と同じ）
+static void place_tree(const Value& v, int x, int y, const Box& b) {
+  bool open = w_a(v) != 0;
+  int ind = box_w() + mark_gap();
+  int head_h = mark_row_h();
+  bool over = inside(x, y, b.w, head_h);
+  if (over) g_cursor_want = SCUR_Hand;
+  // 開け閉めのしるし。開いていれば下、閉じていれば右を向く
+  int aw = arrow_w();
+  uint32_t mark = blend(g_bg, w_fg(v), over ? 1.0 : 0.75);
+  if (open) tri_down(x + (box_w() - aw) / 2, y + (head_h - aw / 2) / 2, aw, mark);
+  else tri_right(x + (box_w() - aw / 2) / 2, y + (head_h - aw) / 2, aw, mark);
+  put_text(x + ind, text_y_mid(y, head_h, 1), w_text(v), 1, w_fg(v));
+  if (over && g_mpress[0]) hit(v, open ? 0 : 1);
+  if (!open) return;
+
+  RowAxis axis(false);
+  ListObj* k = w_kids(v);
+  int yy = y + head_h;
+  int cw = b.w - ind;
+  if (cw < 1) cw = 1;
+  for (int i = 0; i < k->v.size(); i++) {
+    int hh = measure(k->v[i], cw).h;
+    yy += gap_y();
+    place(k->v[i], x + ind, yy, cw, hh);
+    yy += hh;
+  }
+}
+
+// 色の入力（ui.color）。見本と 16 進を出し、押すと選ぶ板が下に出る
+static void place_color(const Value& v, int x, int y, const Box& b) {
+  uint32_t c = (uint32_t)w_a(v);
+  Str key = widget_key(v, x, y);
+  bool open = g_color_id.size() > 0 && g_color_id == key;
+  bool over = inside(x, y, b.w, b.h);
+  if (over) g_cursor_want = SCUR_Hand;
+
+  // 板で動かされていれば、その色にする（1こま遅れない）
+  if (open && g_color_moved) {
+    uint32_t nv = hsv_rgb(g_color_h, g_color_s, g_color_v) | (g_color_keep & 0xff000000u);
+    if (nv != c) hit(v, (int64_t)nv);
+    c = nv;
+  }
+
+  int rad = (int)w_field(v, WF_Radius);
+  if (rad < 0) rad = ui_unit() / 4;
+  uint32_t edge = blend(g_bg, open ? g_accent : g_fg, open ? 1.0 : (over ? 0.7 : 0.4));
+  int sw = b.h;                        // 見本は正方形
+  fill_round(x, y, b.w, b.h, rad, blend(g_bg, g_fg, 0.08));
+  fill_round(x + 1, y + 1, sw - 2, b.h - 2, rad, c);
+  stroke_round(x, y, b.w, b.h, rad, 1, edge);
+  put_text(x + sw + field_pad_x(), text_y_mid(y, b.h, 1), color_hex(c), 1, w_fg(v));
+
+  if (over && g_mpress[0]) {
+    if (open) {
+      g_color_id.clear();
+    } else {
+      g_color_id = key;
+      g_color_x = x;
+      g_color_y = y + b.h + 2;
+      if (g_color_x + color_w() > g_w) g_color_x = g_w - color_w();
+      if (g_color_y + color_h() > g_h) g_color_y = y - color_h() - 2;
+      if (g_color_x < 0) g_color_x = 0;
+      if (g_color_y < 0) g_color_y = 0;
+      rgb_hsv(c, &g_color_h, &g_color_s, &g_color_v);
+      g_color_keep = c;
+      g_color_drag = 0;
+    }
+    g_mpress[0] = false;   // この押しは見本が使い切る
+  }
+}
+
 // 巻物（ui.scroll）。中身は縦に並び、はみ出したぶんは右の帯で送る。
 // 覚えているのは「いま隠しているぶん」だけで、中身は毎回作り直されたままでよい
 static int sc_slot(const Str& id) {
@@ -5258,6 +5504,8 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
       break;
     }
     case WK_Scroll: place_scroll(v, cx, cy, cb); break;
+    case WK_Tree: place_tree(v, cx, cy, cb); break;
+    case WK_Color: place_color(v, cx, cy, cb); break;
     case WK_Grid: {
       ListObj* k = w_kids(v);
       int cols = grid_cols(v);
@@ -5775,6 +6023,50 @@ static NativeStatus u_center(VM& vm, Value* a, int n, Value& out) {
   o->fields[WF_Align] = mk_int(WA_Center);
   return N_Ok;
 }
+// 色の入力。色そのものを持つのは書く人（ref か名札）
+static NativeStatus u_color(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_widget(vm, WK_Color, Str(), as_str(*A(a, 0))->s, (int64_t)to_color(A(a, 1)->i),
+                     0, 0, 0, out) ? N_Ok : N_Panic;
+}
+static NativeStatus u_color_fn(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_widget(vm, WK_Color, Str(), Str(), (int64_t)to_color(A(a, 1)->i), 0, 0, 0, out,
+                     A(a, 0)) ? N_Ok : N_Panic;
+}
+static NativeStatus u_color_ref(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  int slot = 0;
+  Value* p = 0;
+  if (!ref_slot(vm, a, 0, "ui.color", &slot, &p)) return N_Panic;
+  if (!make_widget(vm, WK_Color, Str(), Str(), (int64_t)to_color(p->i), 0, 0, 0, out))
+    return N_Panic;
+  set_var_slot(out, slot);
+  return N_Ok;
+}
+
+// 折りたためる木。開いているかどうかは書く人が持つ（ref か名札）
+static NativeStatus u_tree(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_widget(vm, WK_Tree, as_str(*A(a, 0))->s, as_str(*A(a, 1))->s,
+                     A(a, 2)->b ? 1 : 0, 0, 0, A(a, 3), out) ? N_Ok : N_Panic;
+}
+static NativeStatus u_tree_fn(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_widget(vm, WK_Tree, as_str(*A(a, 0))->s, Str(), A(a, 2)->b ? 1 : 0, 0, 0,
+                     A(a, 3), out, A(a, 1)) ? N_Ok : N_Panic;
+}
+static NativeStatus u_tree_ref(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  int slot = 0;
+  Value* p = 0;
+  if (!ref_slot(vm, a, 1, "ui.tree", &slot, &p)) return N_Panic;
+  if (!make_widget(vm, WK_Tree, as_str(*A(a, 0))->s, Str(), p->b ? 1 : 0, 0, 0, A(a, 2), out))
+    return N_Panic;
+  set_var_slot(out, slot);
+  return N_Ok;
+}
+
 // 重ね置き。中身を同じところに重ねる（絵の上に字を出す、など）
 static NativeStatus u_stack(VM& vm, Value* a, int n, Value& out) {
   (void)n;
@@ -5802,6 +6094,7 @@ static NativeStatus show_at(VM& vm, Value* a, int x, int y, Value& out) {
   Value* view = A(a, 0);
   g_lang_ja = (vm.lang() == LANG_JA);
   menu_hit();          // メニューが出ていれば、押しはそちらが先に受ける
+  color_hit();         // 色を選ぶ板も同じ（出ていなければ何もしない）
   g_hit_id.clear();
   g_hit_text.clear();
   g_hit_val = 0;
@@ -5839,7 +6132,8 @@ static NativeStatus show_at(VM& vm, Value* a, int x, int y, Value& out) {
   // 押しは受け取った部品が使い切る。こうすると、同じ回にもう一度 ui.show() しても
   // 二度は効かない（ui.run が、状態を変えたあとすぐ描き直すのに要る）
   if (g_hit_any) { g_mpress[0] = false; g_mpress[2] = false; }
-  tip_draw();          // 説明と一覧は、部品の上に描く
+  color_draw();        // 色の板・説明・一覧は、部品の上に描く
+  tip_draw();
   menu_draw();
   out = mk_str(g_hit_id);
   return N_Ok;
@@ -6113,6 +6407,8 @@ void register_ui(Registry& r) {
   r.add("ui.row", u_row, tw, tlw);
   r.add("ui.grid", u_grid, tw, ti, tlw);
   r.add("ui.center", u_center, tw, tlw);
+  r.add("ui.color", u_color, tw, ts, ti);
+  r.add("ui.tree", u_tree, tw, ts, ts, tb, tlw);
   r.add("ui.stack", u_stack, tw, tlw);
   r.add("ui.scroll", u_scroll, tw, tlw);
   r.add("ui.scroll", u_scroll_id, tw, ts, tlw);
@@ -6122,6 +6418,10 @@ void register_ui(Registry& r) {
   r.add("ui.button", u_button_fn, tw, ts, tact);
   r.add("ui.button", u_button_w, tw, tw, ts);
   r.add("ui.button", u_button_w_fn, tw, tw, tact);
+  r.add("ui.tree", u_tree_fn, tw, ts, tact, tb, tlw);
+  r.add("ui.color", u_color_fn, tw, tact, ti);
+  r.mark_ref_var(r.add("ui.color", u_color_ref, tw, ti), 0);
+  r.mark_ref_var(r.add("ui.tree", u_tree_ref, tw, ts, tb, tlw), 1);
   r.add("ui.image", u_image, tw, tcv);
   r.add("ui.image", u_image_id, tw, ts, tcv);
   r.add("ui.image", u_image_fn, tw, tact, tcv);

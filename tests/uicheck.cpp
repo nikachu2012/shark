@@ -652,6 +652,44 @@ struct ImageCase : Case {
   }
 };
 
+// --- 色を選ぶ（ui.color）--------------------------------------------------
+// 見本を押すと板が出て、四角の中を引くと色が変わる。外を押すと閉じる
+struct ColorCase : Case {
+  int sq, sx, sy;
+  ColorCase() {
+    sq = kUnit * 12;
+    sx = kUnit * 5 / 8;                            // 板の内側の余白（pad_x）
+    sy = (kLineH + kFPadY * 2) + 2 + kPadY;        // 見本の下 + pad_y
+  }
+  int steps() { return 12; }
+  void act(int step) {
+    if (step == 0) fake::click(5, 6);                       // 見本を押して板を出す
+    else if (step == 2) fake::mouse(sx, sy, 0, true);   // 四角の左上（白）
+    else if (step == 4) fake::hover(sx + sq - 2, sy + 1);       // 右上（いちばん濃い）
+    else if (step == 6) fake::mouse(sx + sq - 2, sy + 1, 0, false);
+    else if (step == 8) fake::click(150, 110);              // 外を押して閉じる
+  }
+  void done(int step, const Str& line) {
+    if (step == 3) expect_line("四角の左上は白い", line, "16777215");
+    if (step == 5) expect_true("右へ引くと濃くなる", line != Str("16777215"));
+    if (step == 9)
+      expect_true("外を押すと板が閉じる", fake::at(sx + sq / 2, sy + sq / 2) == 0);
+  }
+};
+
+// --- 折りたためる木（ui.tree）---------------------------------------------
+struct TreeCase : Case {
+  int steps() { return 8; }
+  void act(int step) {
+    if (step == 0) fake::click(5, 5);      // 見出しを押して開く
+    else if (step == 4) fake::click(5, 5);   // もう一度押して閉じる
+  }
+  void done(int step, const Str& line) {
+    if (step == 1) expect_line("押すと開く", line, "true");
+    if (step == 5) expect_line("もう一度押すと閉じる", line, "false");
+  }
+};
+
 // --- ゆっくり回しても落ちない ---------------------------------------------
 // 1行に満たない送りを何度も受け取る（トラックパッドをゆっくり動かしたとき）。
 // 端数を持ち越さないと、毎回切り捨てられて**いつまでも動かない**
@@ -1068,6 +1106,42 @@ int main() {
             "  return 0;\n"
             "}\n");
     run("絵を出す部品（ui.image）", src.c_str(), &image);
+  }
+
+  ColorCase color;
+  {
+    Str src("import std.ui;\n"
+            "var col = ui.rgb(80, 160, 220);\n"
+            "func main() -> int {\n"
+            "  ui.font_builtin();\n"
+            "  ui.open(\"t\", 200, 120);\n"
+            "  while ui.poll() {\n"
+            "    ui.clear(0);\n"
+            "    _ = ui.show(ui.color(ref col), 0, 0);\n"
+            "    print(f\"{col}\");\n"
+            "    ui.present();\n"
+            "  }\n"
+            "  return 0;\n"
+            "}\n");
+    run("色を選ぶ（ui.color）", src.c_str(), &color);
+  }
+
+  TreeCase tree;
+  {
+    Str src("import std.ui;\n"
+            "var open = false;\n"
+            "func main() -> int {\n"
+            "  ui.font_builtin();\n"
+            "  ui.open(\"t\", 200, 120);\n"
+            "  while ui.poll() {\n"
+            "    ui.clear(0);\n"
+            "    _ = ui.show(ui.tree(\"え\", ref open, [ui.label(\"なか\")]), 0, 0);\n"
+            "    print(f\"{open}\");\n"
+            "    ui.present();\n"
+            "  }\n"
+            "  return 0;\n"
+            "}\n");
+    run("折りたためる木（ui.tree）", src.c_str(), &tree);
   }
 
   TipCase tip;

@@ -542,6 +542,7 @@ ui.run("かうんた", 420, 300, view, update);
 | `ui.drag` | ドラッグ入力（引いて変える欄） | `.border` / `.radius` | ボーダー・角丸 |
 | `.filter` | バリデーション（入れてよい字） | `.decimals` | 小数の桁 |
 | `ui.image` | イメージビュー（キャンバス） | `ui.point_x` / `ui.point_y` | 絵の中のカーソル位置 |
+| `ui.color` | カラーピッカー | `ui.tree` | ツリービュー（折りたたみ） |
 
 **値を持つ部品は、変数を `ref` で渡すのがいちばん短い。**動いたらその変数が
 直に書き換わるので、名札も `update()` も `ui.value()` も要らない。
@@ -553,6 +554,8 @@ ui.run("かうんた", 420, 300, view, update);
 | `ui.radio` | `ui.radio(label, ref v, mine)` | `ui.radio(label, f, on)` | `ui.radio(label, id, on)` |
 | `ui.slider` | `ui.slider(ref v, lo, hi)` | `ui.slider(f, v, lo, hi)` | `ui.slider(id, v, lo, hi)` |
 | `ui.drag` | `ui.drag(ref v, lo, hi)` | `ui.drag(f, v, lo, hi)` | `ui.drag(id, v, lo, hi)` |
+| `ui.color` | `ui.color(ref c)` | `ui.color(f, c)` | `ui.color(id, c)` |
+| `ui.tree` | `ui.tree(label, ref open, kids)` | `ui.tree(label, f, open, kids)` | `ui.tree(label, id, open, kids)` |
 | `ui.number` | `ui.number(ref v, lo, hi)` | `ui.number(f, v, lo, hi)` | `ui.number(id, v, lo, hi)` |
 | `ui.field` | `ui.field(ref value)` | — | `ui.field(id, value)` |
 | `ui.textarea` | `ui.textarea(ref value)` | — | `ui.textarea(id, value)` |
@@ -693,6 +696,8 @@ Shark にはその記法が無く、入れるとなると構文・型検査・`r
 | `ui.col(kids)` / `ui.row(kids)` / `ui.grid(cols, kids)` / `ui.center(kids)` | 中身のものが返る | — |
 | `ui.stack(kids)` / `ui.scroll([id, ]kids)` | 中身のものが返る | — |
 | `ui.image([id, ]絵)` | 名札があれば、押されたとき | `ui.point_x()` / `ui.point_y()` が絵の中の位置 |
+| `ui.color(id, c)` | 板で色を動かしたとき | `ui.value()` が新しい色 |
+| `ui.tree(label, id, open, kids)` | 見出しを押したとき | `ui.value()` が 1（開く）か 0（閉じる） |
 
 **部品は状態を持たない。**値は呼んだ側が持ち、毎回渡し直す。
 

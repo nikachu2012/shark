@@ -1540,6 +1540,49 @@ func stack(children: list<Widget>) -> Widget;
 func scroll(children: list<Widget>) -> Widget;
 func scroll(id: string, children: list<Widget>) -> Widget;
 
+/// 色の入力（カラーピッカー）。見本と 16 進を出し、**押すと色を選ぶ板が下に出る。**
+///
+/// 板には濃さ・明るさの四角と、色みの帯がある。どちらもつかんで動かせて、
+/// 動かすたびに色が変わる。板の外を押すか esc で閉じる。
+///
+/// **変数を ref で渡すのがいちばん短い。**動かすたびに、その変数が書き換わる。
+/// 名札の形なら、新しい色は ui.value() で受け取る（ui.rgb() と同じ数）。
+/// 透けぶん（ui.rgba の a）は、渡された色のものをそのまま持ち越す。
+///
+/// 引数:
+///   value   いまの色（ref なら、書き換える先の変数）
+///   id      名札（ref の代わりに渡す）
+///
+/// 例:
+///   ui.open(200, 120);
+///   var iro = ui.rgb(80, 160, 220);
+///   _ = ui.show(ui.color(ref iro));
+///   print(iro == ui.rgb(80, 160, 220));   // true（まだ選んでいない）
+func color(id: string, value: int) -> Widget;
+func color(action: func() -> void, value: int) -> Widget;
+func color(ref value: int) -> Widget;
+
+/// 折りたためる木（ツリービュー）。見出しを押すと、中身が出たり隠れたりする。
+///
+/// **開いているかどうかは書く人が持つ**（ほかの部品と同じ）。ref で渡した bool が
+/// 押すたびに入れ替わり、名札の形なら ui.show() がその名札を返す。
+/// 中身はただの部品の並びなので、木の中に木を入れれば何段でも深くできる。
+///
+/// 引数:
+///   label     見出しの文字
+///   open      いま開いているか（ref なら、書き換える先の変数）
+///   children  開いているときに、1段下げて縦に並べる部品
+///   id        名札（ref の代わりに渡す）
+///
+/// 例:
+///   ui.open(160, 100);
+///   var hiraku = true;
+///   _ = ui.show(ui.tree("さかな", ref hiraku, [ui.label("さめ"), ui.label("まぐろ")]));
+///   print(hiraku);   // true
+func tree(label: string, id: string, open: bool, children: list<Widget>) -> Widget;
+func tree(label: string, action: func() -> void, open: bool, children: list<Widget>) -> Widget;
+func tree(label: string, ref open: bool, children: list<Widget>) -> Widget;
+
 /// 絵を出す部品。ui.canvas() や ui.load_png() で作った絵を、そのまま置く。
 ///
 /// 大きさを決めなければ絵そのものの大きさで、`.width(n)` `.height(n)` を書けば
