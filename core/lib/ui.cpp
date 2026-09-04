@@ -2063,7 +2063,7 @@ enum WidgetField {
   WF_Fg, WF_Bg, WF_Pad, WF_Wid, WF_Hei, WF_WidFr, WF_HeiFr, WF_Align, WF_Act, WF_Tip,
   WF_Hint, WF_Var,
   WF_Border, WF_BorderW, WF_Radius, WF_Flags, WF_Fa, WF_Fb, WF_Fc, WF_Opt, WF_Px, WF_VAlign,
-  WF_Dec, WF_Count
+  WF_Dec, WF_Sel, WF_Count
 };
 enum WidgetAlign { WA_Left = 0, WA_Center, WA_Right };
 // 縦の寄せ方。-1（指定なし）のときは、置く側の決めた既定になる
@@ -2160,6 +2160,7 @@ static bool make_widget(VM& vm, int kind, const Str& text, const Str& id, int64_
   o->fields.push(mk_bytes(Str())); // 画像の画素（ui.image）
   o->fields.push(mk_int(-1));      // 縦の寄せ方（.valign）。-1 は指定なし
   o->fields.push(mk_int(-1));      // 出す小数の桁（.decimals）。-1 は限りの広さから決める
+  o->fields.push(mk_list());       // いくつも選べる一覧で、選ばれている番号
   return true;
 }
 
@@ -2275,6 +2276,11 @@ NativeStatus n_widget_border_w(VM& vm, Value* a, int n, Value& out) {
   widget_put(o, WF_Border, mk_int((int64_t)to_color(val_deref(&a[1])->i)));
   widget_put(o, WF_BorderW, mk_int(t < 0 ? 0 : t));
   return N_Ok;
+}
+// 入力欄に入れてよい字（.filter）
+NativeStatus n_widget_filter(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return widget_with_str(vm, a, WF_Opt, as_str(*val_deref(&a[1]))->s, out);
 }
 // 出す小数の桁（.decimals）。書かなければ、限りの広さから決まる
 NativeStatus n_widget_decimals(VM& vm, Value* a, int n, Value& out) {
@@ -2576,6 +2582,7 @@ static Value g_hit_action;  // その部品が持っていた関数（無けれ�
 static bool g_hit_any = false;   // 名札が無くても、何か押されたか
 static int64_t g_hit_val = 0;
 static double g_hit_valf = 0;   // 小数を持つ部品のときの、新しい値
+static Value g_hit_list;        // いくつも選べる一覧の、新しい番号の並び
 static Str g_hit_text;
 static bool g_click_seen = false;   // この回にどこかが押されたか（焦点を外すのに使う）
 static Str g_focus_next;
@@ -2617,6 +2624,10 @@ static void hit(const Value& v, int64_t val) {
   if (Value* a = w_act(v)) g_hit_action = val_retain(*a);
 }
 
+// いくつも選べる一覧で、押された番号を入り切りしたとき。
+// ref なら、その var に**新しい並び**を入れ直す（もとの並びは変えない）
+static void hit_multi(const Value& v, int i);
+
 // 小数を持つ部品が動いたとき。ref なら、その var に小数を入れ直す
 static void hit_f(const Value& v, double val) {
   int slot = w_var(v);
@@ -2635,6 +2646,8 @@ static void hit_f(const Value& v, double val) {
 
 static void ui_reset_widgets() {
   clear_hit_action();
+  val_release(g_hit_list);
+  g_hit_list = mk_void();   // 空の並びを作って持ち続けない（ui.chosen がその場で作る）
   val_release(g_last_view);
   g_last_view = mk_void();
   g_has_view = false;
@@ -2754,6 +2767,7 @@ static void grid_axes(const Value& v, int avail_w, int avail_h, Vec<int>& cw, Ve
 static int opt_count(const Value& v);          // 下（並べる文字）で定義
 static const Str& opt_at(const Value& v, int i);
 static int opt_widest(const Value& v);
+static bool is_multi(const Value& v);          // 下（一覧）で定義
 
 // 中身そのものの大きさ（余白も指定も入れない）。
 // wrap_w が正なら、文字（ui.label）はその幅で折り返して測る
@@ -2774,10 +2788,18 @@ static Box intrinsic(const Value& v, int wrap_w) {
       }
       break;
     }
-    case WK_Button:
-      b.w = text_px_width(w_text(v), 1) + pad_x() * 2;
-      b.h = line_h(1) + pad_y() * 2;
+    case WK_Button: {
+      ListObj* k = w_kids(v);
+      if (k->v.size() > 0) {   // 中身に部品を入れた形（ui.button(部品, 名札)）
+        Box c = measure(k->v[0], wrap_w > 0 ? wrap_w - pad_x() * 2 : 0);
+        b.w = c.w + pad_x() * 2;
+        b.h = c.h + pad_y() * 2;
+      } else {
+        b.w = text_px_width(w_text(v), 1) + pad_x() * 2;
+        b.h = line_h(1) + pad_y() * 2;
+      }
       break;
+    }
     // 高さは、字の行と印のどちらも収まるぶん。字の高さだけにすると、
     // 字の見た目のまんなかに合わせた印が下からはみ出すことがある
     case WK_Checkbox:
@@ -2803,6 +2825,7 @@ static Box intrinsic(const Value& v, int wrap_w) {
       int rows = (int)w_b(v);
       if (rows < 1) rows = 1;
       b.w = opt_widest(v) + field_pad_x() * 2 + bar_w();
+      if (is_multi(v)) b.w += line_h(1) + mark_gap();   // レ点のぶん
       b.h = line_h(1) + (rows - 1) * line_pitch(1) + field_pad_y() * 2;
       break;
     }
@@ -3056,9 +3079,23 @@ static void place_button(const Value& v, int x, int y, const Box& b) {
   span(x + 1, y, b.w - 2, edge);
   span(x + 1, y + b.h - 1, b.w - 2, edge);
   for (int i = 1; i < b.h - 1; i++) { put(x, y + i, edge); put(x + b.w - 1, y + i, edge); }
-  // 決め打ちで広げたときは、ラベルを真ん中に置く
-  int tw = text_px_width(w_text(v), 1);
-  put_text(x + (b.w - tw) / 2, text_y_mid(y, b.h, 1), w_text(v), 1, w_fg(v));
+  // 中身に部品を入れてあれば、それを真ん中に置く（ui.button(部品, 名札)）
+  ListObj* k = w_kids(v);
+  if (k->v.size() > 0) {
+    Box cb = measure(k->v[0], b.w);
+    int cx = x + (b.w - cb.w) / 2, cy = y + (b.h - cb.h) / 2;
+    // 中身に押されたことを二重に数えさせない（押しを受けるのはボタン）
+    int smx = g_mx, smy = g_my;
+    g_mx = -1000000;
+    g_my = -1000000;
+    place(k->v[0], cx, cy, cb.w, cb.h);
+    g_mx = smx;
+    g_my = smy;
+  } else {
+    // 決め打ちで広げたときは、ラベルを真ん中に置く
+    int tw = text_px_width(w_text(v), 1);
+    put_text(x + (b.w - tw) / 2, text_y_mid(y, b.h, 1), w_text(v), 1, w_fg(v));
+  }
   if (over && g_mpress[0]) hit(v, 1);
 }
 
@@ -3345,6 +3382,72 @@ static void menu_draw() {
   }
 }
 
+// --- 入れてよい字（.filter）-----------------------------------------------
+// 決まった呼び名（"digit" "hex" …）か、正規表現の字の組（"[0-9A-F]" "[^ ]"）か、
+// 並べた字そのもの（"0123456789.-"）で決める。1字ずつ見るので、打っている
+// 途中の「まだ形になっていない」中身でも困らない
+static bool class_has(const Str& spec, int cp) {
+  int i = 1;                       // 先頭の [ を飛ばす
+  bool neg = false;
+  if (i < spec.size() && spec[i] == '^') { neg = true; i++; }
+  bool found = false;
+  int end = spec.size() - 1;       // 末尾の ]
+  while (i < end) {
+    int lo = 0;
+    int adv = utf8_decode(spec, i, &lo);
+    if (adv <= 0) break;
+    i += adv;
+    int hi = lo;
+    if (i + 1 < end && spec[i] == '-') {
+      int nx = 0;
+      int a2 = utf8_decode(spec, i + 1, &nx);
+      if (a2 > 0) { hi = nx; i += 1 + a2; }
+    }
+    if (cp >= lo && cp <= hi) found = true;
+  }
+  return neg ? !found : found;
+}
+
+static bool filter_allows(const Str& spec, int cp) {
+  if (spec.size() == 0) return true;
+  if (spec == "digit") return cp >= '0' && cp <= '9';
+  if (spec == "bin") return cp == '0' || cp == '1';
+  if (spec == "oct") return cp >= '0' && cp <= '7';
+  if (spec == "hex")
+    return (cp >= '0' && cp <= '9') || (cp >= 'a' && cp <= 'f') || (cp >= 'A' && cp <= 'F');
+  if (spec == "alpha") return (cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z');
+  if (spec == "alnum")
+    return (cp >= '0' && cp <= '9') || (cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z');
+  if (spec == "ascii") return cp >= 0x20 && cp < 0x7f;
+  if (spec.size() >= 2 && spec[0] == '[' && spec[spec.size() - 1] == ']')
+    return class_has(spec, cp);
+  // 並べた字そのもの
+  int at = 0;
+  while (at < spec.size()) {
+    int c = 0;
+    int adv = utf8_decode(spec, at, &c);
+    if (adv <= 0) break;
+    if (c == cp) return true;
+    at += adv;
+  }
+  return false;
+}
+
+// 通らない字を落とした中身。改行は（複数行の入力欄のために）そのまま通す
+static Str filter_keep(const Str& spec, const Str& text) {
+  if (spec.size() == 0) return text;
+  Str out;
+  int at = 0;
+  while (at < text.size()) {
+    int cp = 0;
+    int adv = utf8_decode(text, at, &cp);
+    if (adv <= 0) break;
+    if (cp == '\n' || filter_allows(spec, cp)) out.append(text.data() + at, adv);
+    at += adv;
+  }
+  return out;
+}
+
 // マウスの位置が、何文字目にあたるか（from 文字目から右へ数える）
 static int char_at_x(const Str& s, int from, int x0, int mx) {
   int n = utf8_len(s);
@@ -3614,6 +3717,8 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
     }
     Str conf;
     input_frame(tx, ty, line_h(1), text, &conf, &marked);
+    // 入れてよい字だけ通す（.filter）。落とした字は、次の回に受け皿へも入れ直される
+    conf = filter_keep(w_str(v, WF_Opt), conf);
     if (g_press[SKEY_Enter] && !was_composing) g_focus_next.clear();
     if (!(conf == text)) {   // 打たれて変わった。変わる前の姿を控える
       int st1 = 0, ln1 = 0;
@@ -4019,6 +4124,7 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
     if (cr > shown - 1) cr = shown - 1;
     Str conf;
     input_frame(tx, ty + cr * lp, lh, text, &conf, &marked, true);
+    conf = filter_keep(w_str(v, WF_Opt), conf);           // 入れてよい字だけ通す（.filter）
     if (!(conf == text)) undo_push(id, text, g_acaret);   // 変わる前の姿を控える
     text = conf;
     // 受け皿ができた最初の回。押されたところにカーソルを合わせる
@@ -4222,6 +4328,56 @@ static Str widget_key(const Value& v, int x, int y) {
   return k;
 }
 
+// いくつも選べる一覧（ui.listbox の list<int> を渡す形）で、その番号が選ばれているか
+static bool is_multi(const Value& v) {
+  return (w_field(v, WF_Flags) & WFL_Multi) != 0;
+}
+static ListObj* chosen_of(const Value& v) {
+  InstObj* o = as_inst(v);
+  if (WF_Sel >= o->fields.size()) return 0;
+  Value& f = o->fields[WF_Sel];
+  return (f.k == V_Obj && f.o->kind == O_List) ? as_list(f) : 0;
+}
+static bool is_chosen(const Value& v, int i) {
+  ListObj* c = chosen_of(v);
+  if (!c) return false;
+  for (int j = 0; j < c->v.size(); j++) if (c->v[j].i == i) return true;
+  return false;
+}
+// 押された番号を入り切りした、新しい並び（もとの順は変えず、足すときは末尾へ）
+static Value chosen_toggled(const Value& v, int i) {
+  Value out = mk_list();
+  ListObj* c = chosen_of(v);
+  bool had = false;
+  if (c) {
+    for (int j = 0; j < c->v.size(); j++) {
+      if (c->v[j].i == i) { had = true; continue; }
+      as_list(out)->v.push(mk_int(c->v[j].i));
+    }
+  }
+  if (!had) as_list(out)->v.push(mk_int(i));
+  return out;
+}
+
+static void hit_multi(const Value& v, int i) {
+  Value next = chosen_toggled(v, i);
+  val_release(g_hit_list);
+  g_hit_list = val_retain(next);
+  int slot = w_var(v);
+  if (slot >= 0 && g_vm && slot < g_vm->globals.size()) {
+    val_release(g_vm->globals[slot]);
+    g_vm->globals[slot] = val_retain(next);
+    g_edited = true;
+  }
+  val_release(next);
+  g_hit_id = w_id(v);
+  g_hit_val = i;
+  g_hit_valf = (double)i;
+  g_hit_any = true;
+  clear_hit_action();
+  if (Value* a = w_act(v)) g_hit_action = val_retain(*a);
+}
+
 static int64_t clamp_i(int64_t v, int64_t lo, int64_t hi) {
   if (hi < lo) hi = lo;
   return v < lo ? lo : (v > hi ? hi : v);
@@ -4288,6 +4444,7 @@ static void place_combo(const Value& v, int x, int y, const Box& b) {
 // 押して焦点が来ているあいだは上下の矢印でも選べる
 static void place_list(const Value& v, int x, int y, const Box& b) {
   int n = opt_count(v);
+  bool multi = is_multi(v);
   int idx = (int)w_a(v);
   Str key = widget_key(v, x, y);
   bool over = inside(x, y, b.w, b.h);
@@ -4359,9 +4516,12 @@ static void place_list(const Value& v, int x, int y, const Box& b) {
   if (over && g_mpress[0] && !on_bar) {
     g_focus_next = key;
     int pick = g_my < ty ? top : (g_my - ty + cur) / (lp > 0 ? lp : 1);
-    if (pick >= 0 && pick < n && pick != idx) hit(v, pick);
+    if (pick >= 0 && pick < n) {
+      if (multi) hit_multi(v, pick);        // いくつも選べる形は、押すたびに入り切り
+      else if (pick != idx) hit(v, pick);
+    }
   }
-  if (focused && n > 0 && (g_press[SKEY_Up] || g_press[SKEY_Down])) {
+  if (focused && n > 0 && !multi && (g_press[SKEY_Up] || g_press[SKEY_Down])) {
     int next = idx + (g_press[SKEY_Down] ? 1 : -1);
     if (next < 0) next = 0;
     if (next >= n) next = n - 1;
@@ -4397,13 +4557,21 @@ static void place_list(const Value& v, int x, int y, const Box& b) {
   for (int r = top; r < n && r - top <= shown; r++) {
     int ry = ty + (r - top) * lp - off;
     bool hot = inside(x + 1, ry - 1, b.w - 2, lp);
-    if (r == idx)
+    bool on = multi ? is_chosen(v, r) : r == idx;
+    if (on)
       for (int k = ry - 1; k <= ry + lh; k++)
         span(tx - 2, k, row_w + 4, blend(g_bg, g_accent, 0.5));
     else if (hot)
       for (int k = ry - 1; k <= ry + lh; k++)
         span(tx - 2, k, row_w + 4, blend(g_bg, g_accent, 0.2));
-    put_text(tx, ry, opt_at(v, r), 1, w_fg(v));
+    // いくつも選べる形は、選んだものにレ点を付ける（1つだけの形と見分けがつく）
+    if (multi) {
+      int mw = lh;
+      if (on) check_mark(tx, ry, mw, w_fg(v));
+      put_text(tx + mw + mark_gap(), ry, opt_at(v, r), 1, w_fg(v));
+    } else {
+      put_text(tx, ry, opt_at(v, r), 1, w_fg(v));
+    }
   }
   if (over) g_cursor_want = SCUR_Hand;
   if (has_bar) {   // 入りきらないときの帯。つまんで動かせる
@@ -5091,6 +5259,23 @@ static NativeStatus u_button(VM& vm, Value* a, int n, Value& out) {
   return make_widget(vm, WK_Button, as_str(*A(a, 0))->s, as_str(*A(a, 1))->s, 0, 0, 0, 0, out)
              ? N_Ok : N_Panic;
 }
+// 中身に部品を入れた形。ラベルの代わりに、その部品をボタンの真ん中に置く
+static NativeStatus u_button_w(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  Value kids = mk_list();
+  as_list(kids)->v.push(val_retain(*A(a, 0)));
+  bool ok = make_widget(vm, WK_Button, Str(), as_str(*A(a, 1))->s, 0, 0, 0, &kids, out);
+  val_release(kids);
+  return ok ? N_Ok : N_Panic;
+}
+static NativeStatus u_button_w_fn(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  Value kids = mk_list();
+  as_list(kids)->v.push(val_retain(*A(a, 0)));
+  bool ok = make_widget(vm, WK_Button, Str(), Str(), 0, 0, 0, &kids, out, A(a, 1));
+  val_release(kids);
+  return ok ? N_Ok : N_Panic;
+}
 // 関数を渡す形。押されたら、その関数が呼ばれる（名札は要らない）
 static NativeStatus u_button_fn(VM& vm, Value* a, int n, Value& out) {
   (void)n;
@@ -5177,12 +5362,12 @@ static NativeStatus u_textarea_ref(VM& vm, Value* a, int n, Value& out) {
 }
 // 伏せ字の入力欄。中身は ui.field と同じ持ち方で、出すときだけ * になる
 static NativeStatus u_password(VM& vm, Value* a, int n, Value& out) {
-  (void)n;
-  return make_widget(vm, WK_Field, as_str(*A(a, 1))->s, as_str(*A(a, 0))->s, -1, 1, 0, 0, out)
-             ? N_Ok : N_Panic;
+  // show を渡した形は、その間だけ**そのまま出す**（伏せない）
+  bool masked = !(n >= 3 && A(a, 2)->b);
+  return make_widget(vm, WK_Field, as_str(*A(a, 1))->s, as_str(*A(a, 0))->s, -1, masked ? 1 : 0,
+                     0, 0, out) ? N_Ok : N_Panic;
 }
 static NativeStatus u_password_ref(VM& vm, Value* a, int n, Value& out) {
-  (void)n;
   Value* p = val_deref(&a[0]);
   int slot = var_slot(vm, p);
   if (slot < 0) {
@@ -5195,7 +5380,8 @@ static NativeStatus u_password_ref(VM& vm, Value* a, int n, Value& out) {
                   "ui.password(ref ...) takes a string var"));
     return N_Panic;
   }
-  if (!make_widget(vm, WK_Field, as_str(*p)->s, var_field_id(slot), 0, 1, 0, 0, out))
+  bool masked = !(n >= 2 && A(a, 1)->b);
+  if (!make_widget(vm, WK_Field, as_str(*p)->s, var_field_id(slot), 0, masked ? 1 : 0, 0, 0, out))
     return N_Panic;
   set_var_slot(out, slot);
   return N_Ok;
@@ -5237,6 +5423,25 @@ static NativeStatus u_list(VM& vm, Value* a, int n, Value& out) {
 static NativeStatus u_list_fn(VM& vm, Value* a, int n, Value& out) {
   int64_t rows = n >= 4 ? A(a, 3)->i : kListRows;
   return make_options(vm, WK_List, a, 0, 1, 2, rows < 1 ? 1 : rows, out, true);
+}
+// いくつも選べる一覧。番号の並び（list<int>）で「いま選ばれているもの」を渡す
+static bool make_multi(VM& vm, const Str& id, Value* opts, Value* chosen, int64_t rows,
+                       Value& out, Value* action) {
+  if (!make_widget(vm, WK_List, Str(), id, -1, rows, 0, opts, out, action)) return false;
+  InstObj* o = as_inst(out);
+  widget_put(o, WF_Flags, mk_int(w_field(out, WF_Flags) | WFL_Multi));
+  widget_put(o, WF_Sel, val_retain(*chosen));
+  return true;
+}
+static NativeStatus u_list_multi(VM& vm, Value* a, int n, Value& out) {
+  int64_t rows = n >= 4 ? A(a, 3)->i : kListRows;
+  return make_multi(vm, as_str(*A(a, 0))->s, A(a, 1), A(a, 2), rows < 1 ? 1 : rows, out, 0)
+             ? N_Ok : N_Panic;
+}
+static NativeStatus u_list_multi_fn(VM& vm, Value* a, int n, Value& out) {
+  int64_t rows = n >= 4 ? A(a, 3)->i : kListRows;
+  return make_multi(vm, Str(), A(a, 1), A(a, 2), rows < 1 ? 1 : rows, out, A(a, 0))
+             ? N_Ok : N_Panic;
 }
 static NativeStatus u_tabs(VM& vm, Value* a, int n, Value& out) {
   (void)n;
@@ -5423,6 +5628,16 @@ static NativeStatus u_drag_ref(VM& vm, Value* a, int n, Value& out) {
   set_var_slot(out, slot);
   return N_Ok;
 }
+// いくつも選べる一覧を ref で受ける形。押されるたびに、その var の並びが入れ替わる
+static NativeStatus u_list_multi_ref(VM& vm, Value* a, int n, Value& out) {
+  int slot = 0;
+  Value* p = 0;
+  if (!ref_slot(vm, a, 0, "ui.listbox", &slot, &p)) return N_Panic;
+  int64_t rows = n >= 3 ? A(a, 2)->i : kListRows;
+  if (!make_multi(vm, Str(), A(a, 1), p, rows < 1 ? 1 : rows, out, 0)) return N_Panic;
+  set_var_slot(out, slot);
+  return N_Ok;
+}
 // 並べたものから選ぶ形（選ぶ・一覧・タブ）。番号を ref で受ける
 static NativeStatus make_options_ref(VM& vm, int kind, Value* a, int64_t rows, Value& out) {
   int slot = 0;
@@ -5584,6 +5799,12 @@ static NativeStatus u_show_at(VM& vm, Value* a, int n, Value& out) {
 static NativeStatus u_value(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)a; (void)n;
   out = mk_int(g_hit_val);
+  return N_Ok;
+}
+static NativeStatus u_chosen(VM& vm, Value* a, int n, Value& out) {
+  (void)vm; (void)a; (void)n;
+  out = (g_hit_list.k == V_Obj && g_hit_list.o->kind == O_List) ? val_retain(g_hit_list)
+                                                               : mk_list();
   return N_Ok;
 }
 static NativeStatus u_float_value(VM& vm, Value* a, int n, Value& out) {
@@ -5804,7 +6025,9 @@ void register_ui(Registry& r) {
   r.mark_ref0_var(r.add("ui.textarea", u_textarea_ref, tw, ts, ti));
   // 伏せ字の入力欄
   r.add("ui.password", u_password, tw, ts, ts);
+  r.add("ui.password", u_password, tw, ts, ts, tb);
   r.mark_ref0_var(r.add("ui.password", u_password_ref, tw, ts));
+  r.mark_ref0_var(r.add("ui.password", u_password_ref, tw, ts, tb));
   r.add("ui.space", u_space, tw, ti);
   r.add("ui.spacer", u_spacer, tw);
   r.add("ui.spacer", u_spacer, tw, ti);
@@ -5819,6 +6042,8 @@ void register_ui(Registry& r) {
   Vec<Type*> no_params;
   Type* tact = t.func_type(no_params, tv);   // func() -> void
   r.add("ui.button", u_button_fn, tw, ts, tact);
+  r.add("ui.button", u_button_w, tw, tw, ts);
+  r.add("ui.button", u_button_w_fn, tw, tw, tact);
   r.add("ui.checkbox", u_checkbox_fn, tw, ts, tact, tb);
   r.add("ui.slider", u_slider_fn, tw, tact, ti, ti, ti);
   // 並べたものから選ぶ部品。並べる文字は list<string> で渡す
@@ -5831,6 +6056,11 @@ void register_ui(Registry& r) {
   r.add("ui.listbox", u_list, tw, ts, tls, ti, ti);
   r.add("ui.listbox", u_list_fn, tw, tact, tls, ti);
   r.add("ui.listbox", u_list_fn, tw, tact, tls, ti, ti);
+  // いくつも選べる形（選ばれている番号を list<int> で渡す）
+  r.add("ui.listbox", u_list_multi, tw, ts, tls, tli);
+  r.add("ui.listbox", u_list_multi, tw, ts, tls, tli, ti);
+  r.add("ui.listbox", u_list_multi_fn, tw, tact, tls, tli);
+  r.add("ui.listbox", u_list_multi_fn, tw, tact, tls, tli, ti);
   r.add("ui.tabs", u_tabs, tw, ts, tls, ti);
   r.add("ui.tabs", u_tabs_fn, tw, tact, tls, ti);
   r.add("ui.number", u_number, tw, ts, ti, ti, ti);
@@ -5854,6 +6084,8 @@ void register_ui(Registry& r) {
   r.mark_ref_var(r.add("ui.combo", u_combo_ref, tw, ti, tls), 0);
   r.mark_ref_var(r.add("ui.listbox", u_list_ref, tw, ti, tls), 0);
   r.mark_ref_var(r.add("ui.listbox", u_list_ref, tw, ti, tls, ti), 0);
+  r.mark_ref_var(r.add("ui.listbox", u_list_multi_ref, tw, tli, tls), 0);
+  r.mark_ref_var(r.add("ui.listbox", u_list_multi_ref, tw, tli, tls, ti), 0);
   r.mark_ref_var(r.add("ui.tabs", u_tabs_ref, tw, ti, tls), 0);
   r.add("ui.edited", u_edited, tb);
   r.add("ui.has_action", u_has_action, tb);
@@ -5862,6 +6094,7 @@ void register_ui(Registry& r) {
   r.add("ui.show", u_show_at, ts, tw, ti, ti);
   r.add("ui.value", u_value, ti);
   r.add("ui.float_value", u_float_value, tf);
+  r.add("ui.chosen", u_chosen, tli);
   r.add("ui.text_value", u_text_value, ts);
   r.add("ui.theme", u_theme, tv, ti, ti, ti);
   r.enable_module("std.ui");

@@ -4,6 +4,9 @@ import std.ui;
 // ref で受ける部品に渡す変数（一番外側の var でなければならない）
 var vol = 0.25;
 var gain = 12;
+var hex = "1F";
+var word = "himitsu";
+var picked: list<int> = [0, 2];
 
 // 塗られている点の数。描けているかを数で見るのに使う
 func hits(x0: int, y0: int, x1: int, y1: int) -> int {
@@ -11,6 +14,18 @@ func hits(x0: int, y0: int, x1: int, y1: int) -> int {
   for var y in range(y0, y1) {
     for var x in range(x0, x1) {
       if ui.get(x, y) != 0 { n += 1; }
+    }
+  }
+  return n;
+}
+
+// 字の色で塗られた点の数。下地の上に出た字だけを数える
+func fgs(x0: int, y0: int, x1: int, y1: int) -> int {
+  var n = 0;
+  var fg = ui.rgb(230, 230, 230);
+  for var y in range(y0, y1) {
+    for var x in range(x0, x1) {
+      if ui.get(x, y) == fg { n += 1; }
     }
   }
   return n;
@@ -91,6 +106,34 @@ func main() -> int {
   ui.clear(0);
   var hit = ui.show(ui.drag("g", gain, -20, 20), 0, 0);
   print(f"[{hit}]");
+
+  // --- 入れてよい字（.filter）---
+  // 打っていないので中身は変わらないが、通らない字は落ちる形で持っている
+  ui.open(160, 40);
+  ui.clear(0);
+  _ = ui.show(ui.field(ref hex).filter("hex"), 0, 0);
+  print(hex);
+
+  // --- あいことばを、見せる・伏せる ---
+  ui.clear(0);
+  _ = ui.show(ui.password(ref word), 0, 0);
+  var masked = fgs(0, 0, 160, 20);
+  ui.clear(0);
+  _ = ui.show(ui.password(ref word, true), 0, 0);
+  var shown_pix = fgs(0, 0, 160, 20);
+  print(f"{word} {masked != shown_pix}");   // 中身はそのまま、見た目だけ変わる
+
+  // --- 中身に部品を入れたボタン ---
+  ui.open(160, 60);
+  ui.clear(0);
+  _ = ui.show(ui.button(ui.label("なかみ"), "b"), 0, 0);
+  print(f"{ui.get(2, 2) != 0} {hits(0, 0, 160, 30) > 0}");
+
+  // --- いくつも選べる一覧 ---
+  ui.open(160, 100);
+  ui.clear(0);
+  _ = ui.show(ui.listbox(ref picked, ["さめ", "まぐろ", "いわし"]), 0, 0);
+  print(f"{picked} {ui.chosen()}");
 
   ui.close();
   return 0;

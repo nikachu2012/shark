@@ -540,13 +540,14 @@ ui.run("かうんた", 420, 300, view, update);
 | `ui.col` / `ui.row` | 縦・横の並び | `.placeholder` | プレースホルダ |
 | `ui.stack` | 重ね置き（ZStack） | `ui.scroll` | スクロールビュー |
 | `ui.drag` | ドラッグ入力（引いて変える欄） | `.border` / `.radius` | ボーダー・角丸 |
+| `.filter` | バリデーション（入れてよい字） | `.decimals` | 小数の桁 |
 
 **値を持つ部品は、変数を `ref` で渡すのがいちばん短い。**動いたらその変数が
 直に書き換わるので、名札も `update()` も `ui.value()` も要らない。
 
 | | ref を渡す | 関数を渡す | 名札を渡す |
 |---|---|---|---|
-| `ui.button` | — | `ui.button(label, f)` | `ui.button(label, id)` |
+| `ui.button` | — | `ui.button(label\|部品, f)` | `ui.button(label\|部品, id)` |
 | `ui.checkbox` | `ui.checkbox(label, ref on)` | `ui.checkbox(label, f, on)` | `ui.checkbox(label, id, on)` |
 | `ui.radio` | `ui.radio(label, ref v, mine)` | `ui.radio(label, f, on)` | `ui.radio(label, id, on)` |
 | `ui.slider` | `ui.slider(ref v, lo, hi)` | `ui.slider(f, v, lo, hi)` | `ui.slider(id, v, lo, hi)` |
@@ -557,6 +558,7 @@ ui.run("かうんた", 420, 300, view, update);
 | `ui.password` | `ui.password(ref value)` | — | `ui.password(id, value)` |
 | `ui.combo` | `ui.combo(ref i, options)` | `ui.combo(f, options, i)` | `ui.combo(id, options, i)` |
 | `ui.listbox` | `ui.listbox(ref i, options)` | `ui.listbox(f, options, i)` | `ui.listbox(id, options, i)` |
+| `ui.listbox`（いくつも） | `ui.listbox(ref picked, options)` | `ui.listbox(f, options, picked)` | `ui.listbox(id, options, picked)` |
 | `ui.tabs` | `ui.tabs(ref i, labels)` | `ui.tabs(f, labels, i)` | `ui.tabs(id, labels, i)` |
 
 ```shark
@@ -677,12 +679,13 @@ Shark にはその記法が無く、入れるとなると構文・型検査・`r
 | `ui.field(ref value)` | 返らない（変数を直に書き換える） | 渡した変数がそのまま新しい文字 |
 | `ui.textarea(id, value[, rows])` | 打たれたとき | `ui.text_value()` が新しい文字 |
 | `ui.textarea(ref value[, rows])` | 返らない（変数を直に書き換える） | 渡した変数がそのまま新しい文字 |
-| `ui.password(...)` | `ui.field` と同じ | 同じ（伏せるのは**出すときだけ**） |
+| `ui.password(...[, show])` | `ui.field` と同じ | 同じ（伏せるのは**出すときだけ**。`show` の間は伏せない） |
 | `ui.radio(label, id, on)` | 押されたとき | `ui.value()` が 1 |
 | `ui.number(id, v, lo, hi)` | 数が変わったとき | `ui.value()` が新しい数（`lo`〜`hi`） |
 | `ui.drag(id, v, lo, hi)` | 引かれた・打たれたとき | `ui.value()`（小数なら `ui.float_value()`） |
 | `ui.combo(id, options, i)` | 一覧から選ばれたとき | `ui.value()` が選ばれた番号 |
 | `ui.listbox(id, options, i[, rows])` | 選ばれたとき | `ui.value()` が選ばれた番号 |
+| `ui.listbox(id, options, picked[, rows])` | 入り切りしたとき | `ui.value()` が押された番号、`ui.chosen()` が新しい並び |
 | `ui.tabs(id, labels, i)` | 別のタブが押されたとき | `ui.value()` が押された番号 |
 | `ui.label(text)` | 返らない | — |
 | `ui.space(h)` / `ui.spacer([size])` / `ui.divider()` | 返らない | — |

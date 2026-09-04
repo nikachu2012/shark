@@ -965,8 +965,22 @@ func label(text: string) -> Widget;
 ///   ui.open(120, 40);
 ///   _ = ui.show(ui.button("ふやす", func() -> void { n += 1; }));
 ///   print(n);   // 0（まだ押していない）
+/// **中身に部品を渡すと、その部品をボタンの真ん中に置く。**
+/// 絵や、字といくつかを並べたものを、まるごと押せるようにできる。
+/// 中身は押しを受け取らない（受け取るのはボタン）。
+///
+/// ```
+/// ui.button(ui.row([ui.image(icon), ui.label("ひらく")]), "open")
+/// ```
+///
+/// 例:
+///   ui.open(160, 60);
+///   _ = ui.show(ui.button(ui.label("なかみ"), "b"), 0, 0);
+///   print(ui.get(2, 2) != 0);   // true
 func button(label: string, id: string) -> Widget;
 func button(label: string, action: func() -> void) -> Widget;
+func button(child: Widget, id: string) -> Widget;
+func button(child: Widget, action: func() -> void) -> Widget;
 
 /// チェックボックス。入切のチェック。
 ///
@@ -1226,21 +1240,34 @@ func textarea(id: string, value: string, rows: int) -> Widget;
 /// 中身の持ち方も受け取り方も ui.field と同じで、**出すときだけ**1字を1つの
 /// `*` に置き換える。ui.text_value() や渡した変数には、打たれた字がそのまま入る。
 ///
+/// **show を渡すと、そのあいだは伏せずにそのまま出す。**
+/// 入切のチェックと組にすれば、「あいことばを見せる」が変数1つで書ける。
+///
+/// ```
+/// ui.col([ui.password(ref word, seen), ui.checkbox("見せる", ref seen)])
+/// ```
+///
 /// 引数:
 ///   value   いま入っている文字（ref なら、書き換える先の変数）
+///   show    true のあいだは伏せずに出す。省くと伏せる
 ///   id      名札（ref の代わりに渡す）
 ///
 /// 注意:
 ///   右で押したときのメニューに、**コピーと切り取りは出ない**（中身が持ち出せてしまうため）。
-///   貼り付けとすべて選ぶは出る。
+///   貼り付けとすべて選ぶは出る。見せているあいだも同じ。
 ///
 /// 例:
 ///   ui.open(160, 40);
 ///   var word = "さめ";
 ///   _ = ui.show(ui.password(ref word));
 ///   print(word);   // さめ
+///   var seen = true;
+///   _ = ui.show(ui.password(ref word, seen));   // 伏せずに出す
+///   print(word);   // さめ
 func password(ref value: string) -> Widget;
 func password(id: string, value: string) -> Widget;
+func password(ref value: string, show: bool) -> Widget;
+func password(id: string, value: string, show: bool) -> Widget;
 
 /// プルダウン（コンボボックス）。押すと一覧が出て、その中の1つを選ぶ。
 ///
@@ -1302,12 +1329,33 @@ func combo(ref index: int, options: list<string>) -> Widget;
 ///   var sel = 0;
 ///   _ = ui.show(ui.listbox(ref sel, sakana_na, 3));
 ///   print(sakana_na[sel]);   // さめ
+/// **いくつも選べる形**は、選ばれている番号の並び（`list<int>`）を渡す。
+/// 押すたびにその1つが入り切りし、選ばれたものにはレ点が付く。
+/// ref なら渡した並びが入れ替わり、名札の形なら ui.chosen() で新しい並びを受け取る。
+///
+/// ```
+/// ui.listbox(ref picked, sakana)        // picked（list<int>）が直に書き換わる
+/// ui.listbox("s", sakana, picked)       // ui.show() が "s" を返す → ui.chosen()
+/// ```
+///
+/// 例:
+///   ui.open(160, 100);
+///   var sakana = ["さめ", "まぐろ", "いわし"];
+///   var picked: list<int> = [0, 2];
+///   _ = ui.show(ui.listbox(ref picked, sakana));
+///   print(picked);   // [0, 2]（まだ押していない）
 func listbox(id: string, options: list<string>, index: int) -> Widget;
 func listbox(id: string, options: list<string>, index: int, rows: int) -> Widget;
 func listbox(action: func() -> void, options: list<string>, index: int) -> Widget;
 func listbox(action: func() -> void, options: list<string>, index: int, rows: int) -> Widget;
 func listbox(ref index: int, options: list<string>) -> Widget;
 func listbox(ref index: int, options: list<string>, rows: int) -> Widget;
+func listbox(id: string, options: list<string>, chosen: list<int>) -> Widget;
+func listbox(id: string, options: list<string>, chosen: list<int>, rows: int) -> Widget;
+func listbox(action: func() -> void, options: list<string>, chosen: list<int>) -> Widget;
+func listbox(action: func() -> void, options: list<string>, chosen: list<int>, rows: int) -> Widget;
+func listbox(ref chosen: list<int>, options: list<string>) -> Widget;
+func listbox(ref chosen: list<int>, options: list<string>, rows: int) -> Widget;
 
 /// タブ（の見出し）。**出すのは見出しだけ**で、中身は書く人が選んで返す。
 ///
@@ -1596,6 +1644,19 @@ func text_value() -> string;
 ///   if ui.show(ui.slider("mix", mix, 0.0, 1.0)) == "mix" { mix = ui.float_value(); }
 ///   print(mix);   // 0.25
 func float_value() -> float;
+
+/// いくつも選べる一覧が動いたときの、**新しい番号の並び**。
+///
+/// ui.value() は押された番号を返すが、こちらは押したあとに選ばれているものぜんぶ。
+/// ref で受けている形なら、変数が直に書き換わるので、こちらは読まなくてよい。
+///
+/// 例:
+///   ui.open(160, 100);
+///   var sakana = ["さめ", "まぐろ"];
+///   var picked: list<int> = [];
+///   if ui.show(ui.listbox("s", sakana, picked)) == "s" { picked = ui.chosen(); }
+///   print(picked);   // []
+func chosen() -> list<int>;
 
 /// 部品の色を決める。
 ///
@@ -1943,6 +2004,26 @@ class Widget {
   ///   _ = ui.show(ui.drag(ref t, 0.0, 1.0).decimals(3), 0, 0);
   ///   print(t);   // 0.5
   func decimals(n: int) -> Widget;
+
+  /// 入力欄（ui.field / ui.textarea）に**入れてよい字**を決める。
+  ///
+  /// 通らない字は入らない。1字ずつ見るので、打っている途中の
+  /// 「まだ形になっていない」中身でも困らない。書き方は3つ。
+  ///
+  /// | 書き方 | |
+  /// |---|---|
+  /// | 決まった呼び名 | `"digit"` `"bin"` `"oct"` `"hex"` `"alpha"` `"alnum"` `"ascii"` |
+  /// | 正規表現の字の組 | `"[0-9A-F]"` `"[^ ]"`（`^` で「その字以外」、`-` で範囲） |
+  /// | 並べた字そのもの | `"0123456789.-"` |
+  ///
+  /// 改行はいつでも通る（複数行の入力欄のため）。
+  ///
+  /// 例:
+  ///   ui.open(160, 40);
+  ///   var hex = "1F";
+  ///   _ = ui.show(ui.field(ref hex).filter("hex"), 0, 0);
+  ///   print(hex);   // 1F
+  func filter(spec: string) -> Widget;
 
   /// ツールチップ。カーソルを合わせたときに出す説明。
   ///

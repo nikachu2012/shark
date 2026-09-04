@@ -606,6 +606,38 @@ struct ScrollCase : Case {
   }
 };
 
+// --- いくつも選べる一覧 ---------------------------------------------------
+// 押すたびに入り切りが変わり、ref で渡した並びが入れ替わる
+struct MultiListCase : Case {
+  int steps() { return 8; }
+  void act(int step) {
+    if (step == 0) fake::click(20, kFPadY + 2);                   // 1つめを入れる
+    else if (step == 2) fake::click(20, kFPadY + kLineH + 4);     // 2つめも入れる
+    else if (step == 4) fake::click(20, kFPadY + 2);              // 1つめを外す
+  }
+  void done(int step, const Str& line) {
+    if (step == 1) expect_line("押すと選ばれる", line, "[0]");
+    if (step == 3) expect_line("もう1つ選べる", line, "[0, 1]");
+    if (step == 5) expect_line("もう一度押すと外れる", line, "[1]");
+  }
+};
+
+// --- 入力欄に入れてよい字（.filter）---------------------------------------
+struct FilterCase : Case {
+  int steps() { return 8; }
+  void act(int step) {
+    if (step == 0) fake::click(10, 6);      // 押して打てるようにする
+    else if (step == 2) fake::input("1");
+    else if (step == 4) fake::input("z");   // 16 進にない字は入らない
+    else if (step == 6) fake::input("F");
+  }
+  void done(int step, const Str& line) {
+    if (step == 3) expect_line("通る字は入る", line, "[1]");
+    if (step == 5) expect_line("通らない字は入らない", line, "[1]");
+    if (step == 7) expect_line("大文字も通る", line, "[1F]");
+  }
+};
+
 // --- ゆっくり回しても落ちない ---------------------------------------------
 // 1行に満たない送りを何度も受け取る（トラックパッドをゆっくり動かしたとき）。
 // 端数を持ち越さないと、毎回切り捨てられて**いつまでも動かない**
@@ -968,6 +1000,42 @@ int main() {
             "  return 0;\n"
             "}\n");
     run("巻物（送る・隠れたところは押せない）", src.c_str(), &scroll);
+  }
+
+  MultiListCase multi_list;
+  {
+    Str src("import std.ui;\n"
+            "var picked: list<int> = [];\n"
+            "func main() -> int {\n"
+            "  ui.font_builtin();\n"
+            "  ui.open(\"t\", 200, 120);\n"
+            "  while ui.poll() {\n"
+            "    ui.clear(0);\n"
+            "    _ = ui.show(ui.listbox(ref picked, [\"あ\", \"い\", \"う\"], 3), 0, 0);\n"
+            "    print(f\"{picked}\");\n"
+            "    ui.present();\n"
+            "  }\n"
+            "  return 0;\n"
+            "}\n");
+    run("いくつも選べる一覧", src.c_str(), &multi_list);
+  }
+
+  FilterCase filter;
+  {
+    Str src("import std.ui;\n"
+            "var hex = \"\";\n"
+            "func main() -> int {\n"
+            "  ui.font_builtin();\n"
+            "  ui.open(\"t\", 200, 120);\n"
+            "  while ui.poll() {\n"
+            "    ui.clear(0);\n"
+            "    _ = ui.show(ui.field(ref hex).filter(\"hex\"), 0, 0);\n"
+            "    print(f\"[{hex}]\");\n"
+            "    ui.present();\n"
+            "  }\n"
+            "  return 0;\n"
+            "}\n");
+    run("入力欄に入れてよい字（.filter）", src.c_str(), &filter);
   }
 
   TipCase tip;

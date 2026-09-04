@@ -45,6 +45,7 @@ NativeStatus n_widget_border(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_border_w(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_radius(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_decimals(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_filter(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_valign(VM& vm, Value* args, int n, Value& out);
 // Canvas（絵）のメソッド。書き換えるものは受け手を借りる（本体は lib/ui.cpp）
 NativeStatus n_canvas_width(VM& vm, Value* args, int n, Value& out);
@@ -178,6 +179,7 @@ void Checker::make_builtin_classes() {
         {"px", t_.t_bytes()},        // 画像の画素（ui.image）
         {"va", t_.t_int()},          // 縦の寄せ方。0=上 1=まんなか 2=下（-1 は指定なし）
         {"dec", t_.t_int()},         // 出す小数の桁（-1 は限りの広さから決める）
+        {"sel", t_.list_of(t_.t_int())},   // いくつも選べる一覧で、選ばれている番号
     };
     for (int i = 0; i < (int)(sizeof(wf) / sizeof(wf[0])); i++) {
       FieldInfo f;
@@ -207,6 +209,7 @@ void Checker::make_builtin_classes() {
         {"border", n_widget_border_w, t_.t_int(), t_.t_int()},
         {"radius", n_widget_radius, t_.t_int(), 0},
         {"decimals", n_widget_decimals, t_.t_int(), 0},
+        {"filter", n_widget_filter, t_.t_string(), 0},
     };
     for (int i = 0; i < (int)(sizeof(wm) / sizeof(wm[0])); i++) {
       FuncInfo* f = new_func(prog_);
