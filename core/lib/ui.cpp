@@ -894,6 +894,12 @@ static Str g_num_id, g_num_text;
 // 押しっぱなしで動かすものは、部品の外に出たとたん止まると使いにくい
 static Str g_slide_id;
 static bool g_sliding = false;
+
+// 引いて変える欄（ui.drag）。押したところと、そのときの値を覚えておく
+static Str g_dnum_id;
+static int g_dnum_x = 0;
+static bool g_dnum_moved = false;
+static double g_dnum_base = 0;
 // 取り消し帳。入力欄の中身を、変わる**前**の姿で控えておく
 static Str g_undo_id;                      // どの入力欄のものか
 static Vec<Str> g_undo, g_redo;            // 変わる前の中身
@@ -2057,7 +2063,7 @@ enum WidgetField {
   WF_Fg, WF_Bg, WF_Pad, WF_Wid, WF_Hei, WF_WidFr, WF_HeiFr, WF_Align, WF_Act, WF_Tip,
   WF_Hint, WF_Var,
   WF_Border, WF_BorderW, WF_Radius, WF_Flags, WF_Fa, WF_Fb, WF_Fc, WF_Opt, WF_Px, WF_VAlign,
-  WF_Count
+  WF_Dec, WF_Count
 };
 enum WidgetAlign { WA_Left = 0, WA_Center, WA_Right };
 // 縦の寄せ方。-1（指定なし）のときは、置く側の決めた既定になる
@@ -2153,6 +2159,7 @@ static bool make_widget(VM& vm, int kind, const Str& text, const Str& id, int64_
   o->fields.push(mk_str(Str()));   // こまかい指定（入力に通す字など）
   o->fields.push(mk_bytes(Str())); // 画像の画素（ui.image）
   o->fields.push(mk_int(-1));      // 縦の寄せ方（.valign）。-1 は指定なし
+  o->fields.push(mk_int(-1));      // 出す小数の桁（.decimals）。-1 は限りの広さから決める
   return true;
 }
 
@@ -2268,6 +2275,14 @@ NativeStatus n_widget_border_w(VM& vm, Value* a, int n, Value& out) {
   widget_put(o, WF_Border, mk_int((int64_t)to_color(val_deref(&a[1])->i)));
   widget_put(o, WF_BorderW, mk_int(t < 0 ? 0 : t));
   return N_Ok;
+}
+// 出す小数の桁（.decimals）。書かなければ、限りの広さから決まる
+NativeStatus n_widget_decimals(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  int64_t v = val_deref(&a[1])->i;
+  if (v < 0) v = 0;
+  if (v > 9) v = 9;
+  return widget_with(vm, a, WF_Dec, v, out);
 }
 // 角の丸み（.radius）。0 で四角に戻る
 NativeStatus n_widget_radius(VM& vm, Value* a, int n, Value& out) {
@@ -2560,6 +2575,7 @@ static Str g_hit_id;       // この回に押された部品の名札
 static Value g_hit_action;  // その部品が持っていた関数（無ければ値なし）
 static bool g_hit_any = false;   // 名札が無くても、何か押されたか
 static int64_t g_hit_val = 0;
+static double g_hit_valf = 0;   // 小数を持つ部品のときの、新しい値
 static Str g_hit_text;
 static bool g_click_seen = false;   // この回にどこかが押されたか（焦点を外すのに使う）
 static Str g_focus_next;
@@ -2595,6 +2611,23 @@ static void hit(const Value& v, int64_t val) {
   }
   g_hit_id = w_id(v);
   g_hit_val = val;
+  g_hit_valf = (double)val;
+  g_hit_any = true;
+  clear_hit_action();
+  if (Value* a = w_act(v)) g_hit_action = val_retain(*a);
+}
+
+// 小数を持つ部品が動いたとき。ref なら、その var に小数を入れ直す
+static void hit_f(const Value& v, double val) {
+  int slot = w_var(v);
+  if (slot >= 0 && g_vm && slot < g_vm->globals.size()) {
+    val_release(g_vm->globals[slot]);
+    g_vm->globals[slot] = mk_float(val);
+    g_edited = true;
+  }
+  g_hit_id = w_id(v);
+  g_hit_val = (int64_t)val;
+  g_hit_valf = val;
   g_hit_any = true;
   clear_hit_action();
   if (Value* a = w_act(v)) g_hit_action = val_retain(*a);
@@ -2631,6 +2664,10 @@ static void ui_reset_widgets() {
   g_num_text.clear();
   g_slide_id.clear();
   g_sliding = false;
+  g_dnum_id.clear();
+  g_dnum_x = 0;
+  g_dnum_moved = false;
+  g_dnum_base = 0;
   g_sc_id.clear();
   g_sc_px.clear();
   g_sc_to.clear();
@@ -2655,6 +2692,7 @@ static void ui_reset_widgets() {
   g_hit_id.clear();
   g_hit_text.clear();
   g_hit_val = 0;
+  g_hit_valf = 0;
 }
 
 
@@ -2776,6 +2814,10 @@ static Box intrinsic(const Value& v, int wrap_w) {
     }
     case WK_Number:
       b.w = num_w() + field_pad_x() * 2 + step_w() * 2;
+      b.h = line_h(1) + field_pad_y() * 2;
+      break;
+    case WK_Drag:
+      b.w = num_w() + field_pad_x() * 2;
       b.h = line_h(1) + field_pad_y() * 2;
       break;
     case WK_Divider: b.w = 0; b.h = ui_unit() / 2 + 1; break;   // 幅は置くときに決まる
@@ -3041,6 +3083,15 @@ static void place_checkbox(const Value& v, int x, int y, const Box& b) {
 static Str widget_key(const Value& v, int x, int y);   // 下（並べる文字）で定義
 
 static void place_slider(const Value& v, int x, int y, const Box& b) {
+  // 小数の形（ui.slider(ref v: float, ...)）は、値も限りも WF_Fa/Fb/Fc の側にある
+  bool isf = (w_field(v, WF_Flags) & WFL_Float) != 0;
+  double flo = isf ? w_fieldf(v, WF_Fb) : 0, fhi = isf ? w_fieldf(v, WF_Fc) : 0;
+  double fval = isf ? w_fieldf(v, WF_Fa) : 0;
+  if (isf) {
+    if (!(fhi > flo)) fhi = flo + 1;
+    if (fval < flo) fval = flo;
+    if (fval > fhi) fval = fhi;
+  }
   int64_t lo = w_b(v), hi = w_c(v), val = w_a(v);
   if (hi <= lo) hi = lo + 1;
   if (val < lo) val = lo;
@@ -3059,16 +3110,23 @@ static void place_slider(const Value& v, int x, int y, const Box& b) {
     int rel = g_mx - x - knob / 2;
     if (rel < 0) rel = 0;
     if (rel > usable) rel = usable;
-    int64_t nv = lo + (int64_t)rel * (hi - lo) / usable;
-    hit(v, nv);
-    val = nv;                 // 描くのも新しいところ（1こま遅れない）
+    if (isf) {
+      double nv = flo + (fhi - flo) * (double)rel / (double)usable;
+      hit_f(v, nv);
+      fval = nv;
+    } else {
+      int64_t nv = lo + (int64_t)rel * (hi - lo) / usable;
+      hit(v, nv);
+      val = nv;               // 描くのも新しいところ（1こま遅れない）
+    }
   }
 
   // 描く
   int track_y = y + b.h / 2 - 1;
   span(x, track_y, tw, blend(g_bg, g_fg, 0.35));
   span(x, track_y + 1, tw, blend(g_bg, g_fg, 0.35));
-  int kx = x + (int)((val - lo) * usable / (hi - lo));
+  int kx = isf ? x + (int)((fval - flo) * usable / (fhi - flo) + 0.5)
+              : x + (int)((val - lo) * usable / (hi - lo));
   // 通ってきたところは差し色で塗って、どのあたりか分かるようにする
   span(x, track_y, kx - x, blend(g_bg, g_accent, 0.8));
   span(x, track_y + 1, kx - x, blend(g_bg, g_accent, 0.8));
@@ -4407,6 +4465,76 @@ static bool num_parse(const Str& s, int64_t* out) {
   return true;
 }
 
+// 小数も読む。「-」だけ・「1.」など打ちかけの形は false（打つ途中として通す側で見る）
+static bool num_parse_f(const Str& s, double* out) {
+  if (s.size() == 0) return false;
+  int i = 0;
+  bool neg = false;
+  if (s[0] == '-') { neg = true; i = 1; }
+  if (i >= s.size()) return false;
+  double n = 0;
+  bool any = false;
+  for (; i < s.size(); i++) {
+    if (s[i] == '.') break;
+    if (s[i] < '0' || s[i] > '9') return false;
+    n = n * 10 + (s[i] - '0');
+    any = true;
+  }
+  if (i < s.size() && s[i] == '.') {
+    i++;
+    double sc = 0.1;
+    for (; i < s.size(); i++) {
+      if (s[i] < '0' || s[i] > '9') return false;
+      n += (s[i] - '0') * sc;
+      sc /= 10;
+      any = true;
+    }
+  }
+  if (!any) return false;
+  *out = neg ? -n : n;
+  return true;
+}
+
+// 小数を桁を決めて書く。環境差を出さないよう、丸めるところまで自前でやる
+// （lib/format.cpp の fixed と同じ考え方）
+static Str num_text_f(double v, int dec) {
+  if (v != v) return Str("0");
+  bool neg = v < 0;
+  if (neg) v = -v;
+  if (dec < 0) dec = 0;
+  if (dec > 9) dec = 9;
+  double scale = 1;
+  for (int i = 0; i < dec; i++) scale *= 10;
+  double scaled = v * scale;
+  if (scaled >= 9.0e18) return str_from_float(neg ? -v : v);
+  int64_t ip = (int64_t)(scaled + 0.5);
+  Str digits = str_from_int(ip);
+  Str out;
+  if (dec == 0) {
+    out = digits;
+  } else {
+    while (digits.size() <= dec) digits = Str("0") + digits;
+    out = digits.sub(0, digits.size() - dec) + "." + digits.sub(digits.size() - dec, dec);
+  }
+  if (neg && !(ip == 0)) out = Str("-") + out;
+  return out;
+}
+
+// 出す小数の桁。書いてなければ（-1）、限りの広さから決める
+static int num_dec(const Value& v, double lo, double hi) {
+  int d = (int)w_field(v, WF_Dec);
+  if (d >= 0) return d > 9 ? 9 : d;
+  double w = hi - lo;
+  if (w <= 2.0) return 3;
+  if (w <= 20.0) return 2;
+  return 1;
+}
+
+static double clamp_d(double v, double lo, double hi) {
+  if (hi < lo) hi = lo;
+  return v < lo ? lo : (v > hi ? hi : v);
+}
+
 static void place_number(const Value& v, int x, int y, const Box& b) {
   int64_t val = w_a(v), lo = w_b(v), hi = w_c(v);
   Str key = widget_key(v, x, y);
@@ -4521,6 +4649,152 @@ static void place_number(const Value& v, int x, int y, const Box& b) {
     span(cx - mw / 2, cy, mw, mark);
     if (k == 1) for (int i = 0; i < mw; i++) put(cx, cy - mw / 2 + i, mark);
   }
+}
+
+// 引いて変える欄（ui.drag）。**押したまま横へ引くと数が変わり、
+// 動かさずに離すと打ち込みに入る**。狭いところに数をいくつも並べるのに向く。
+// 打ち込みは数の入力欄（place_number）と同じ覚え（g_num_id / g_num_text）を使う
+static void place_drag(const Value& v, int x, int y, const Box& b) {
+  bool isf = (w_field(v, WF_Flags) & WFL_Float) != 0;
+  double lo = isf ? w_fieldf(v, WF_Fb) : (double)w_b(v);
+  double hi = isf ? w_fieldf(v, WF_Fc) : (double)w_c(v);
+  double val = isf ? w_fieldf(v, WF_Fa) : (double)w_a(v);
+  if (hi < lo) hi = lo;
+  val = clamp_d(val, lo, hi);
+  int dec = isf ? num_dec(v, lo, hi) : 0;
+  Str key = widget_key(v, x, y);
+  bool focused = g_focus.size() > 0 && g_focus == key;
+  bool over = inside(x, y, b.w, b.h);
+  int ty = text_y_mid(y, b.h, 1);
+
+  // --- つかんで引く ---
+  bool mine = g_dnum_id.size() > 0 && g_dnum_id == key;
+  if (over && g_mpress[0] && !g_replay) {
+    g_dnum_id = key;
+    g_dnum_x = g_mx;
+    g_dnum_moved = false;
+    g_dnum_base = val;
+    mine = true;
+  }
+  if (mine && g_mb[0] && !g_replay) {
+    int dx = g_mx - g_dnum_x;
+    if (dx > 2 || dx < -2) g_dnum_moved = true;
+    if (g_dnum_moved) {
+      // 端から端までを 200 画素ぶんで。限りが無いに等しいときは 1 画素 1
+      double per = hi > lo ? (hi - lo) / 200.0 : 1.0;
+      double nv = g_dnum_base + dx * per;
+      if (!isf) nv = (double)(int64_t)(nv < 0 ? nv - 0.5 : nv + 0.5);
+      nv = clamp_d(nv, lo, hi);
+      if (nv != val) {
+        if (isf) hit_f(v, nv);
+        else hit(v, (int64_t)nv);
+        val = nv;
+      }
+      g_focus_next.clear();   // 引いている間は、打ち込みに入らない
+    }
+  }
+  if (mine && !g_mb[0]) {
+    // 動かさずに離したら、打ち込みに入る
+    if (!g_dnum_moved && over) {
+      g_focus_next = key;
+      if (!focused) {
+        g_num_id = key;
+        g_num_text = isf ? num_text_f(val, dec) : str_from_int((int64_t)val);
+      }
+    }
+    g_dnum_id.clear();
+    g_dnum_moved = false;
+  }
+  if (over || mine) g_cursor_want = (focused && !mine) ? SCUR_Text : SCUR_Hand;
+
+  // --- 打たれた ---
+  if (focused && !g_replay) {
+    if (!(g_num_id == key)) {
+      g_num_id = key;
+      g_num_text = isf ? num_text_f(val, dec) : str_from_int((int64_t)val);
+    }
+    Str next = g_num_text;
+    if (g_press[SKEY_Back] && next.size() > 0) next = next.sub(0, next.size() - 1);
+    for (int i = 0; i < g_typed.size(); i++) {
+      char c = g_typed[i];
+      bool digit = c >= '0' && c <= '9';
+      bool minus = c == '-' && next.size() == 0 && lo < 0;
+      bool dot = false;
+      if (c == '.' && isf) {
+        dot = true;
+        for (int j = 0; j < next.size(); j++) if (next[j] == '.') dot = false;
+      }
+      if (!digit && !minus && !dot) continue;   // 数にならない字は入れない
+      Str t = next;
+      t.push(c);
+      double nv = 0;
+      if (num_parse_f(t, &nv) && (nv < lo || nv > hi)) continue;
+      next = t;
+    }
+    if (g_press[SKEY_Enter]) g_focus_next.clear();
+    if (g_press[SKEY_Escape]) {
+      g_focus_next.clear();
+      next = isf ? num_text_f(val, dec) : str_from_int((int64_t)val);
+    }
+    g_num_text = next;
+    double nv = 0;
+    if (num_parse_f(next, &nv)) {
+      nv = clamp_d(nv, lo, hi);
+      if (nv != val) {
+        if (isf) hit_f(v, nv);
+        else hit(v, (int64_t)nv);
+      }
+    }
+    g_typed.clear();
+    g_press[SKEY_Back] = false;
+    g_press[SKEY_Enter] = false;
+  } else if (g_num_id.size() > 0 && g_num_id == key) {
+    g_num_id.clear();
+    g_num_text.clear();
+  }
+
+  Str shown = (focused && g_num_id == key) ? g_num_text
+                                           : (isf ? num_text_f(val, dec) : str_from_int((int64_t)val));
+
+  // --- 描く ---
+  int64_t bg = w_field(v, WF_Bg);
+  uint32_t face = bg >= 0 ? (uint32_t)bg : blend(g_bg, g_fg, over || focused ? 0.16 : 0.08);
+  uint32_t edge = blend(g_bg, focused ? g_accent : g_fg, focused ? 1.0 : (over ? 0.6 : 0.35));
+  int rad = (int)w_field(v, WF_Radius);
+  if (rad > 0) fill_round(x, y, b.w, b.h, rad, face);
+  else for (int i = 0; i < b.h; i++) span(x, y + i, b.w, face);
+  if (w_field(v, WF_Border) < 0) stroke_round(x, y, b.w, b.h, rad > 0 ? rad : 0, 1, edge);
+
+  // 限りのどのあたりかを、下地の帯で見せる（引く部品だと分かる）
+  if (hi > lo && !focused) {
+    int fillw = (int)((val - lo) * (b.w - 2) / (hi - lo));
+    for (int i = 1; i < b.h - 1; i++) span(x + 1, y + i, fillw, blend(face, g_accent, 0.22));
+  }
+  int tw = text_px_width(shown, 1);
+  int sx = x + (b.w - tw) / 2;
+  int kx0 = g_cx0, ky0 = g_cy0, kx1 = g_cx1, ky1 = g_cy1;
+  if (x + 1 > g_cx0) g_cx0 = x + 1;
+  if (x + b.w - 2 < g_cx1) g_cx1 = x + b.w - 2;
+  put_text(sx, ty, shown, 1, w_fg(v));
+  if (focused) {
+    int cw = caret_w();
+    for (int i = ty - 1; i <= ty + line_h(1); i++) span(sx + tw, i, cw, g_accent);
+  } else if (over) {
+    // 引けるしるし。左右に小さな三角
+    uint32_t m = blend(g_bg, g_fg, 0.5);
+    int aw = arrow_w() / 2;
+    if (aw < 2) aw = 2;
+    for (int i = 0; i < aw; i++) {
+      span(x + 2 + i, y + b.h / 2 - i, 1, m);
+      span(x + 2 + i, y + b.h / 2 + i, 1, m);
+      span(x + b.w - 3 - i, y + b.h / 2 - i, 1, m);
+      span(x + b.w - 3 - i, y + b.h / 2 + i, 1, m);
+    }
+  }
+  g_cx0 = kx0;
+  g_cy0 = ky0;
+  g_cx1 = kx1;
+  g_cy1 = ky1;
 }
 
 // --- カーソルを合わせたときに出す説明（.tooltip）--------------------------
@@ -4732,6 +5006,7 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
     case WK_List: place_list(v, cx, cy, cb); break;
     case WK_Tabs: place_tabs(v, cx, cy, cb); break;
     case WK_Number: place_number(v, cx, cy, cb); break;
+    case WK_Drag: place_drag(v, cx, cy, cb); break;
     case WK_Space: break;
     case WK_Divider: {
       uint32_t c = w_field(v, WF_Fg) >= 0 ? w_fg(v) : blend(g_bg, g_fg, 0.3);
@@ -4992,6 +5267,65 @@ static NativeStatus u_number_fn(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_number(vm, a, out, true);
 }
+// 小数を持つ部品（つまみ・引いて変える欄）を作る。値も限りも WF_Fa/Fb/Fc に置き、
+// WFL_Float を立てておく。WF_B は「出す小数の桁」で、-1 は限りの広さから決める
+static bool make_float_widget(VM& vm, int kind, const Str& id, double val, double lo, double hi,
+                              Value& out, Value* action) {
+  if (!(hi > lo)) hi = lo;
+  if (val < lo) val = lo;
+  if (val > hi) val = hi;
+  if (!make_widget(vm, kind, Str(), id, 0, 0, 0, 0, out, action)) return false;
+  InstObj* o = as_inst(out);
+  widget_put(o, WF_Flags, mk_int(WFL_Float));
+  widget_put(o, WF_Fa, mk_float(val));
+  widget_put(o, WF_Fb, mk_float(lo));
+  widget_put(o, WF_Fc, mk_float(hi));
+  return true;
+}
+
+static NativeStatus u_slider_f(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_float_widget(vm, WK_Slider, as_str(*A(a, 0))->s, A(a, 1)->f, A(a, 2)->f,
+                           A(a, 3)->f, out, 0) ? N_Ok : N_Panic;
+}
+static NativeStatus u_slider_f_fn(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_float_widget(vm, WK_Slider, Str(), A(a, 1)->f, A(a, 2)->f, A(a, 3)->f, out,
+                           A(a, 0)) ? N_Ok : N_Panic;
+}
+// 引いて変える欄。数の入力欄と同じ形（名札・関数・ref）で受ける
+static NativeStatus u_drag(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  int64_t lo = A(a, 2)->i, hi = A(a, 3)->i;
+  if (hi < lo) {
+    vm.panic(vm.L("引いて変える欄は、下より上を大きくします", "drag needs hi >= lo"));
+    return N_Panic;
+  }
+  int64_t val = clamp_i(A(a, 1)->i, lo, hi);
+  return make_widget(vm, WK_Drag, Str(), as_str(*A(a, 0))->s, val, lo, hi, 0, out)
+             ? N_Ok : N_Panic;
+}
+static NativeStatus u_drag_fn(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  int64_t lo = A(a, 2)->i, hi = A(a, 3)->i;
+  if (hi < lo) {
+    vm.panic(vm.L("引いて変える欄は、下より上を大きくします", "drag needs hi >= lo"));
+    return N_Panic;
+  }
+  int64_t val = clamp_i(A(a, 1)->i, lo, hi);
+  return make_widget(vm, WK_Drag, Str(), Str(), val, lo, hi, 0, out, A(a, 0)) ? N_Ok : N_Panic;
+}
+static NativeStatus u_drag_f(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_float_widget(vm, WK_Drag, as_str(*A(a, 0))->s, A(a, 1)->f, A(a, 2)->f, A(a, 3)->f,
+                           out, 0) ? N_Ok : N_Panic;
+}
+static NativeStatus u_drag_f_fn(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_float_widget(vm, WK_Drag, Str(), A(a, 1)->f, A(a, 2)->f, A(a, 3)->f, out,
+                           A(a, 0)) ? N_Ok : N_Panic;
+}
+
 // --- ref で受ける形 -------------------------------------------------------
 // 変数を ref で渡すと、動いたときに**その変数が直に書き換わる**。
 // 名札も update() も ui.value() も要らない。値を持つのは今までどおり書く人で、
@@ -5054,6 +5388,38 @@ static NativeStatus u_number_ref(VM& vm, Value* a, int n, Value& out) {
   }
   int64_t val = p->i < lo ? lo : (p->i > hi ? hi : p->i);
   if (!make_widget(vm, WK_Number, Str(), Str(), val, lo, hi, 0, out)) return N_Panic;
+  set_var_slot(out, slot);
+  return N_Ok;
+}
+// 小数を ref で受ける形（つまみ・引いて変える欄）
+static NativeStatus make_float_ref(VM& vm, int kind, const char* what, Value* a, Value& out) {
+  int slot = 0;
+  Value* p = 0;
+  if (!ref_slot(vm, a, 0, what, &slot, &p)) return N_Panic;
+  if (!make_float_widget(vm, kind, Str(), p->f, A(a, 1)->f, A(a, 2)->f, out, 0)) return N_Panic;
+  set_var_slot(out, slot);
+  return N_Ok;
+}
+static NativeStatus u_slider_f_ref(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_float_ref(vm, WK_Slider, "ui.slider", a, out);
+}
+static NativeStatus u_drag_f_ref(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_float_ref(vm, WK_Drag, "ui.drag", a, out);
+}
+static NativeStatus u_drag_ref(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  int slot = 0;
+  Value* p = 0;
+  if (!ref_slot(vm, a, 0, "ui.drag", &slot, &p)) return N_Panic;
+  int64_t lo = A(a, 1)->i, hi = A(a, 2)->i;
+  if (hi < lo) {
+    vm.panic(vm.L("引いて変える欄は、下より上を大きくします", "drag needs hi >= lo"));
+    return N_Panic;
+  }
+  if (!make_widget(vm, WK_Drag, Str(), Str(), clamp_i(p->i, lo, hi), lo, hi, 0, out))
+    return N_Panic;
   set_var_slot(out, slot);
   return N_Ok;
 }
@@ -5218,6 +5584,11 @@ static NativeStatus u_show_at(VM& vm, Value* a, int n, Value& out) {
 static NativeStatus u_value(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)a; (void)n;
   out = mk_int(g_hit_val);
+  return N_Ok;
+}
+static NativeStatus u_float_value(VM& vm, Value* a, int n, Value& out) {
+  (void)vm; (void)a; (void)n;
+  out = mk_float(g_hit_valf);
   return N_Ok;
 }
 static NativeStatus u_text_value(VM& vm, Value* a, int n, Value& out) {
@@ -5464,12 +5835,22 @@ void register_ui(Registry& r) {
   r.add("ui.tabs", u_tabs_fn, tw, tact, tls, ti);
   r.add("ui.number", u_number, tw, ts, ti, ti, ti);
   r.add("ui.number", u_number_fn, tw, tact, ti, ti, ti);
+  // 小数のつまみと、引いて変える欄
+  r.add("ui.slider", u_slider_f, tw, ts, tf, tf, tf);
+  r.add("ui.slider", u_slider_f_fn, tw, tact, tf, tf, tf);
+  r.add("ui.drag", u_drag, tw, ts, ti, ti, ti);
+  r.add("ui.drag", u_drag_fn, tw, tact, ti, ti, ti);
+  r.add("ui.drag", u_drag_f, tw, ts, tf, tf, tf);
+  r.add("ui.drag", u_drag_f_fn, tw, tact, tf, tf, tf);
   // 変数を ref で渡す形。動いたらその変数が直に書き換わるので、
   // 名札も update() も ui.value() も要らない
   r.mark_ref_var(r.add("ui.checkbox", u_checkbox_ref, tw, ts, tb), 1);
   r.mark_ref_var(r.add("ui.radio", u_radio_ref, tw, ts, ti, ti), 1);
   r.mark_ref_var(r.add("ui.slider", u_slider_ref, tw, ti, ti, ti), 0);
   r.mark_ref_var(r.add("ui.number", u_number_ref, tw, ti, ti, ti), 0);
+  r.mark_ref_var(r.add("ui.slider", u_slider_f_ref, tw, tf, tf, tf), 0);
+  r.mark_ref_var(r.add("ui.drag", u_drag_ref, tw, ti, ti, ti), 0);
+  r.mark_ref_var(r.add("ui.drag", u_drag_f_ref, tw, tf, tf, tf), 0);
   r.mark_ref_var(r.add("ui.combo", u_combo_ref, tw, ti, tls), 0);
   r.mark_ref_var(r.add("ui.listbox", u_list_ref, tw, ti, tls), 0);
   r.mark_ref_var(r.add("ui.listbox", u_list_ref, tw, ti, tls, ti), 0);
@@ -5480,6 +5861,7 @@ void register_ui(Registry& r) {
   r.add("ui.show", u_show, ts, tw);
   r.add("ui.show", u_show_at, ts, tw, ti, ti);
   r.add("ui.value", u_value, ti);
+  r.add("ui.float_value", u_float_value, tf);
   r.add("ui.text_value", u_text_value, ts);
   r.add("ui.theme", u_theme, tv, ti, ti, ti);
   r.enable_module("std.ui");

@@ -539,6 +539,7 @@ ui.run("かうんた", 420, 300, view, update);
 | `ui.spacer` | スペーサー | `.tooltip` | ツールチップ |
 | `ui.col` / `ui.row` | 縦・横の並び | `.placeholder` | プレースホルダ |
 | `ui.stack` | 重ね置き（ZStack） | `ui.scroll` | スクロールビュー |
+| `ui.drag` | ドラッグ入力（引いて変える欄） | `.border` / `.radius` | ボーダー・角丸 |
 
 **値を持つ部品は、変数を `ref` で渡すのがいちばん短い。**動いたらその変数が
 直に書き換わるので、名札も `update()` も `ui.value()` も要らない。
@@ -549,6 +550,7 @@ ui.run("かうんた", 420, 300, view, update);
 | `ui.checkbox` | `ui.checkbox(label, ref on)` | `ui.checkbox(label, f, on)` | `ui.checkbox(label, id, on)` |
 | `ui.radio` | `ui.radio(label, ref v, mine)` | `ui.radio(label, f, on)` | `ui.radio(label, id, on)` |
 | `ui.slider` | `ui.slider(ref v, lo, hi)` | `ui.slider(f, v, lo, hi)` | `ui.slider(id, v, lo, hi)` |
+| `ui.drag` | `ui.drag(ref v, lo, hi)` | `ui.drag(f, v, lo, hi)` | `ui.drag(id, v, lo, hi)` |
 | `ui.number` | `ui.number(ref v, lo, hi)` | `ui.number(f, v, lo, hi)` | `ui.number(id, v, lo, hi)` |
 | `ui.field` | `ui.field(ref value)` | — | `ui.field(id, value)` |
 | `ui.textarea` | `ui.textarea(ref value)` | — | `ui.textarea(id, value)` |
@@ -678,6 +680,7 @@ Shark にはその記法が無く、入れるとなると構文・型検査・`r
 | `ui.password(...)` | `ui.field` と同じ | 同じ（伏せるのは**出すときだけ**） |
 | `ui.radio(label, id, on)` | 押されたとき | `ui.value()` が 1 |
 | `ui.number(id, v, lo, hi)` | 数が変わったとき | `ui.value()` が新しい数（`lo`〜`hi`） |
+| `ui.drag(id, v, lo, hi)` | 引かれた・打たれたとき | `ui.value()`（小数なら `ui.float_value()`） |
 | `ui.combo(id, options, i)` | 一覧から選ばれたとき | `ui.value()` が選ばれた番号 |
 | `ui.listbox(id, options, i[, rows])` | 選ばれたとき | `ui.value()` が選ばれた番号 |
 | `ui.tabs(id, labels, i)` | 別のタブが押されたとき | `ui.value()` が押された番号 |
@@ -765,6 +768,7 @@ ui.label("さめ").color(ui.rgb(255, 200, 0)).background(ui.rgb(30, 30, 40)).pad
 | `.background(c)` | 下地の色。部品の後ろを塗る |
 | `.border(c[, w])` | 縁の色と太さ（画素）。太さを省くと 1 |
 | `.radius(n)` | 角の丸み（画素）。下地にも縁にも効く |
+| `.decimals(n)` | 小数を出すときの桁（`ui.slider` / `ui.drag` の float の形） |
 | `.padding(n)` | 内側の余白（画素） |
 | `.width(n)` / `.height(n)` | 大きさを決める。**int なら画素、float なら取り分**（下）。決めなければ中身から決まる |
 | `.align(a)` | 親がくれた幅の中で寄せる。`"left"` `"center"` `"right"` |

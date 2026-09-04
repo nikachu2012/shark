@@ -556,6 +556,56 @@ struct SliderDragCase : Case {
   }
 };
 
+// --- 引いて変える欄（ui.drag）---------------------------------------------
+// 押したまま横へ引くと数が変わり、動かさずに離すと打ち込みに入る
+struct DragNumCase : Case {
+  int steps() { return 12; }
+  void act(int step) {
+    if (step == 0) fake::mouse(20, 6, 0, true);          // つかむ
+    else if (step == 2) fake::hover(60, 6);              // 右へ 40 画素引く
+    else if (step == 4) fake::mouse(60, 6, 0, false);    // 離す
+    else if (step == 6) fake::click(20, 6);              // 動かさずに押して離す
+    else if (step == 8) fake::key(SKEY_Back, true);      // 打ち込みに入っている
+    else if (step == 9) fake::key(SKEY_Back, false);
+  }
+  void done(int step, const Str& line) {
+    // 限りは 0〜100。200 画素で端から端まで動くので、40 画素で 20 増える
+    if (step == 3) expect_line("引くと数が変わる", line, "d 70");
+    // 引いた数は残っている（70 の一桁を消せば 7）
+    if (step == 9) expect_line("動かさずに離すと、打ち込みに入る", line, "d 7");
+  }
+};
+
+// --- 小数のつまみ ---------------------------------------------------------
+// 値も限りも小数で持ち、動いた値は ui.float_value() で受け取る
+struct SliderFloatCase : Case {
+  int steps() { return 6; }
+  void act(int step) {
+    if (step == 0) fake::mouse(50, 5, 0, true);   // つまみをつかむ
+    else if (step == 2) fake::mouse(50, 5, 0, false);
+  }
+  void done(int step, const Str& line) {
+    if (step == 1) expect_line("つかんだところの小数になる", line, "s 0.53");
+  }
+};
+
+// --- 巻物（ui.scroll）-----------------------------------------------------
+// 車輪で送れて、**隠れているところは押せない**
+struct ScrollCase : Case {
+  int steps() { return 10; }
+  void act(int step) {
+    if (step == 0) fake::click(10, 100);                 // 巻物の外（何も起きない）
+    else if (step == 2) fake::click(10, 6);              // 1つめのボタン
+    else if (step == 4) { fake::hover(10, 20); fake::wheel(4); settle(); }
+    else if (step == 6) fake::click(10, 6);              // 送ったので、別のボタンが来ている
+  }
+  void done(int step, const Str& line) {
+    if (step == 1) expect_line("外を押しても何も起きない", line, " 0");
+    if (step == 3) expect_line("見えているものは押せる", line, "b0 1");
+    if (step == 7) expect_true("送ったあとは、別のものが来ている", line != Str("b0 1"));
+  }
+};
+
 // --- ゆっくり回しても落ちない ---------------------------------------------
 // 1行に満たない送りを何度も受け取る（トラックパッドをゆっくり動かしたとき）。
 // 端数を持ち越さないと、毎回切り捨てられて**いつまでも動かない**
@@ -870,6 +920,55 @@ int main() {
               "func update(hit: string) -> void { if hit == \"f\" { name = ui.text_value(); } }\n")
           .c_str(),
       &over);
+
+  DragNumCase drag_num;
+  run("引いて変える欄（ui.drag）",
+      program("ui.drag(\"d\", num, 0, 100)",
+              "var num = 50;\n"
+              "func update(hit: string) -> void { if hit == \"d\" { num = ui.value(); } }\n")
+          .c_str(),
+      &drag_num);
+
+  SliderFloatCase slider_f;
+  {
+    Str src("import std.ui;\n"
+            "var vol = 0.0;\n"
+            "func main() -> int {\n"
+            "  ui.font_builtin();\n"
+            "  ui.open(\"t\", 200, 120);\n"
+            "  while ui.poll() {\n"
+            "    ui.clear(0);\n"
+            "    var hit = ui.show(ui.slider(\"s\", vol, 0.0, 1.0), 0, 0);\n"
+            "    if hit == \"s\" { vol = ui.float_value(); }\n"
+            "    print(f\"{hit} {vol:.2f}\");\n"
+            "    ui.present();\n"
+            "  }\n"
+            "  return 0;\n"
+            "}\n");
+    run("小数のつまみ", src.c_str(), &slider_f);
+  }
+
+  ScrollCase scroll;
+  {
+    Str src("import std.ui;\n"
+            "func view() -> Widget {\n"
+            "  var rows: list<Widget> = [];\n"
+            "  for var i in range(12) { rows.push(ui.button(f\"b{i}\", f\"b{i}\")); }\n"
+            "  return ui.scroll(rows).height(40);\n"
+            "}\n"
+            "func main() -> int {\n"
+            "  ui.font_builtin();\n"
+            "  ui.open(\"t\", 200, 120);\n"
+            "  while ui.poll() {\n"
+            "    ui.clear(0);\n"
+            "    var hit = ui.show(view(), 0, 0);\n"
+            "    print(f\"{hit} {ui.value()}\");\n"
+            "    ui.present();\n"
+            "  }\n"
+            "  return 0;\n"
+            "}\n");
+    run("巻物（送る・隠れたところは押せない）", src.c_str(), &scroll);
+  }
 
   TipCase tip;
   run("説明（.tooltip）",

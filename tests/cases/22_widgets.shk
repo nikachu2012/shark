@@ -1,6 +1,10 @@
 // std.ui の上の層 — 飾り・重ね置き・巻物と、あとから足した部品（spec/library/ui.md）
 import std.ui;
 
+// ref で受ける部品に渡す変数（一番外側の var でなければならない）
+var vol = 0.25;
+var gain = 12;
+
 // 塗られている点の数。描けているかを数で見るのに使う
 func hits(x0: int, y0: int, x1: int, y1: int) -> int {
   var n = 0;
@@ -73,6 +77,20 @@ func main() -> int {
   ui.clear(0);
   _ = ui.show(ui.scroll("s", rows).height(30), 0, 0);
   print(ui.get(0, 0));
+
+  // --- 小数のつまみと、引いて変える欄 ---
+  ui.open(160, 60);
+  ui.clear(0);
+  _ = ui.show(ui.slider(ref vol, 0.0, 1.0), 0, 0);
+  print(f"{vol} {ui.float_value()}");            // まだ動かしていない
+  ui.clear(0);
+  _ = ui.show(ui.col([ui.drag(ref gain, -20, 20),
+                      ui.drag(ref vol, 0.0, 1.0).decimals(3)]), 0, 0);
+  print(f"{gain} {vol}");
+  // 名札の形は、動いていなければ空の名札が返る
+  ui.clear(0);
+  var hit = ui.show(ui.drag("g", gain, -20, 20), 0, 0);
+  print(f"[{hit}]");
 
   ui.close();
   return 0;

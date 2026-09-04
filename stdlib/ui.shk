@@ -1044,6 +1044,9 @@ func radio(label: string, ref value: int, mine: int) -> Widget;
 /// 名札の代わりに関数を渡すと、動かされている間その関数が呼ばれる
 /// （新しい数は、その中で ui.value() を読む）。
 ///
+/// **小数（float）でも同じに書ける。**値と限りを float で渡すと小数のつまみになり、
+/// 新しい値は ui.float_value() で受け取る（ref なら、その変数が直に書き換わる）。
+///
 /// 引数:
 ///   value   いまの数（ref なら、書き換える先の変数）
 ///   lo, hi  下と上
@@ -1054,9 +1057,47 @@ func radio(label: string, ref value: int, mine: int) -> Widget;
 ///   var vol = 40;
 ///   _ = ui.show(ui.slider(ref vol, 0, 100));
 ///   print(vol);   // 40（まだ動かしていない）
+///   var mix = 0.25;
+///   _ = ui.show(ui.slider(ref mix, 0.0, 1.0));
+///   print(mix);   // 0.25
 func slider(id: string, value: int, lo: int, hi: int) -> Widget;
 func slider(action: func() -> void, value: int, lo: int, hi: int) -> Widget;
 func slider(ref value: int, lo: int, hi: int) -> Widget;
+func slider(id: string, value: float, lo: float, hi: float) -> Widget;
+func slider(action: func() -> void, value: float, lo: float, hi: float) -> Widget;
+func slider(ref value: float, lo: float, hi: float) -> Widget;
+
+/// ドラッグ入力（引いて変える欄）。**押したまま横に引くと数が変わり、
+/// 動かさずに離すと打ち込みに入る。**
+///
+/// つまみほど場所を取らないので、数をいくつも並べるところ（座標・色・大きさ）に向く。
+/// 下地は、いま限りのどのあたりかを薄く見せる。
+///
+/// **int でも float でも同じに書ける。**float なら新しい値は ui.float_value() で
+/// 受け取り、出す桁は `.decimals(n)` で決められる（書かなければ限りの広さから決まる）。
+///
+/// 端から端までは 200 画素ぶん引くと届く。lo から hi の外には出られないのは
+/// 数の入力欄（ui.number）と同じ。
+///
+/// 引数:
+///   value   いまの数（ref なら、書き換える先の変数）
+///   lo, hi  下と上
+///   id      名札（ref の代わりに渡す）
+///
+/// 例:
+///   ui.open(120, 40);
+///   var x = 20;
+///   _ = ui.show(ui.drag(ref x, 0, 100));
+///   print(x);   // 20（まだ引いていない）
+///   var t = 0.5;
+///   _ = ui.show(ui.drag(ref t, 0.0, 1.0).decimals(2));
+///   print(t);   // 0.5
+func drag(id: string, value: int, lo: int, hi: int) -> Widget;
+func drag(action: func() -> void, value: int, lo: int, hi: int) -> Widget;
+func drag(ref value: int, lo: int, hi: int) -> Widget;
+func drag(id: string, value: float, lo: float, hi: float) -> Widget;
+func drag(action: func() -> void, value: float, lo: float, hi: float) -> Widget;
+func drag(ref value: float, lo: float, hi: float) -> Widget;
 
 /// 数の入力欄（スピンボックス）。**lo から hi の外には出られない。**
 ///
@@ -1544,6 +1585,18 @@ func value() -> int;
 ///   print(f"[{name}]");   // []
 func text_value() -> string;
 
+/// 小数を持つ部品が動いたときの、新しい値。
+///
+/// ui.value() の小数版。float で受け取る部品（ui.slider / ui.drag の float の形）で使う。
+/// ref で受けている形なら、変数が直に書き換わるので、こちらは読まなくてよい。
+///
+/// 例:
+///   ui.open(120, 40);
+///   var mix = 0.25;
+///   if ui.show(ui.slider("mix", mix, 0.0, 1.0)) == "mix" { mix = ui.float_value(); }
+///   print(mix);   // 0.25
+func float_value() -> float;
+
 /// 部品の色を決める。
 ///
 /// 3色だけ決めれば、部品の色はそこから作られる。
@@ -1879,6 +1932,17 @@ class Widget {
   ///                 .background(ui.rgb(0, 0, 255)), 0, 0);
   ///   print(f"{ui.get(0, 0)} {ui.get(20, 10)}");   // 0 255
   func radius(n: int) -> Widget;
+
+  /// 小数を出すときの桁（0〜9）。ui.slider / ui.drag の float の形に効く。
+  ///
+  /// 書かなければ、限りの広さから決まる（狭いほど細かく出す）。
+  ///
+  /// 例:
+  ///   ui.open(120, 40);
+  ///   var t = 0.5;
+  ///   _ = ui.show(ui.drag(ref t, 0.0, 1.0).decimals(3), 0, 0);
+  ///   print(t);   // 0.5
+  func decimals(n: int) -> Widget;
 
   /// ツールチップ。カーソルを合わせたときに出す説明。
   ///
