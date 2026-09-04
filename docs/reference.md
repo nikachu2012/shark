@@ -1189,6 +1189,8 @@ ui.text(8, 8, "こんにちは", ui.rgb(255, 255, 255));
   `ui.pressed()` で向きを覚えておくと、どの機種でも同じに動きます
 
 動く例が [examples/paint.shk](../examples/paint.shk)（下の層）と
+[examples/node_editor.shk](../examples/node_editor.shk)（下の層。ノードをつないで
+プログラムを作り、できた Shark のコードを並べて見せるもの）、
 [examples/counter.shk](../examples/counter.shk)（上の層）、
 [examples/widgets.shk](../examples/widgets.shk)（部品をぜんぶ出したもの）、
 [examples/breakout.shk](../examples/breakout.shk)（絵と透明を使ったブロック崩し）、

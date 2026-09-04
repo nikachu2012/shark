@@ -1,0 +1,1044 @@
+// node_editor.shk — ノードグラフを組み、Shark のコードへ落とすエディタ
+//
+//   ./shark run examples/node_editor.shk
+//
+// ノードを接続すると、その場で評価され、右のペインに **そのまま動く Shark の
+// コード** が生成される。図としての構造と、書いたときの姿を同時に見せる。
+//
+// 入出力には型がある。int の出力を bool の入力へは接続できない。
+// 拒んだ理由はステータスバーへ返す（言語の診断と同じ流儀）。
+//
+// std.ui の下層だけで書いてある。描画も当たり判定も自前で、
+// 曲線と端子は自前のアンチエイリアスで引く（aa_seg / aa_disc / aa_ring）。
+// 宣言的な上層は examples/counter.shk と widgets.shk を参照。
+//
+// 視点は独立して動く。ノードは無限の平面に置かれ、画面はその一部を覗いている。
+// 画面外のノードは、縁に色の点として残り、F でまとめて視界へ戻る。
+//
+// 画面を持たない環境（SHARK_UI=off など）では、初期グラフのコードを出力し、
+// node_editor.png を書き出す。
+import std.ui;
+import std.math;
+import std.file;
+
+// ---------------------------------------------------------------- ノードの定義
+const K_NUM = 0;    // 定数
+const K_ADD = 1;    // 加算
+const K_SUB = 2;    // 減算
+const K_MUL = 3;    // 乗算
+const K_DIV = 4;    // 除算
+const K_CMP = 5;    // 比較（a > b）
+const K_SEL = 6;    // 分岐（条件で真か偽の側を選ぶ）
+const K_OUT = 7;    // 出力（print）
+const K_COUNT = 8;
+
+// 入出力の型
+const T_INT = 0;
+const T_BOOL = 1;
+const T_ANY = 2;     // 出力ノードの入口。どちらでも受ける
+const T_NONE = 3;    // 出口を持たない
+
+func kind_name(k: int) -> string {
+  if k == K_NUM { return "定数"; }
+  if k == K_ADD { return "加算"; }
+  if k == K_SUB { return "減算"; }
+  if k == K_MUL { return "乗算"; }
+  if k == K_DIV { return "除算"; }
+  if k == K_CMP { return "比較"; }
+  if k == K_SEL { return "分岐"; }
+  return "出力";
+}
+
+func in_count(k: int) -> int {
+  if k == K_NUM { return 0; }
+  if k == K_OUT { return 1; }
+  if k == K_SEL { return 3; }
+  return 2;
+}
+
+// 本体に置く行数。定数ノードは値そのものを 1 行占める
+func rows(k: int) -> int {
+  if k == K_NUM { return 1; }
+  return in_count(k);
+}
+
+func in_name(k: int, i: int) -> string {
+  if k == K_OUT { return "値"; }
+  if k == K_SEL {
+    if i == 0 { return "条件"; }
+    if i == 1 { return "真"; }
+    return "偽";
+  }
+  if i == 0 { return "a"; }
+  return "b";
+}
+
+func in_type(k: int, i: int) -> int {
+  if k == K_OUT { return T_ANY; }
+  if k == K_SEL && i == 0 { return T_BOOL; }
+  return T_INT;
+}
+
+func out_type(k: int) -> int {
+  if k == K_OUT { return T_NONE; }
+  if k == K_CMP { return T_BOOL; }
+  return T_INT;
+}
+
+func type_name(t: int) -> string {
+  if t == T_BOOL { return "bool"; }
+  if t == T_ANY { return "any"; }
+  return "int";
+}
+
+func kind_color(k: int) -> int {
+  if k == K_NUM { return ui.rgb(46, 160, 108); }
+  if k == K_CMP { return ui.rgb(146, 104, 224); }
+  if k == K_SEL { return ui.rgb(220, 138, 46); }
+  if k == K_OUT { return ui.rgb(214, 66, 96); }
+  return ui.rgb(52, 120, 206);
+}
+
+func type_color(t: int) -> int {
+  if t == T_BOOL { return ui.rgb(196, 156, 252); }
+  if t == T_ANY { return ui.rgb(198, 202, 214); }
+  return ui.rgb(104, 190, 255);
+}
+
+// ---------------------------------------------------------------- グラフ
+// ノードは id で指す。並びが変わっても接続が壊れない。
+// 座標は無限平面の側（ワールド）で持ち、画面へは視点を足して写す。
+class Node {
+  public var id: int;
+  public var kind: int;
+  public var x: int;
+  public var y: int;
+  public var value: int;      // 定数ノードのみ使う
+  func init(id: int, kind: int, x: int, y: int, value: int) {
+    this.id = id;
+    this.kind = kind;
+    this.x = x;
+    this.y = y;
+    this.value = value;
+  }
+}
+
+// 接続。from_id の出力から、to_id の port 番目の入力へ
+class Link {
+  public var from_id: int;
+  public var to_id: int;
+  public var port: int;
+  func init(from_id: int, to_id: int, port: int) {
+    this.from_id = from_id;
+    this.to_id = to_id;
+    this.port = port;
+  }
+}
+
+var nodes: list<Node> = [];
+var links: list<Link> = [];
+var next_id: int = 1;
+
+func idx(id: int) -> int {
+  for var i in range(nodes.len()) {
+    if nodes[i].id == id { return i; }
+  }
+  return -1;
+}
+
+// その入力に刺さっている出力元の id。無ければ -1
+func src_of(to_id: int, port: int) -> int {
+  for var l in links {
+    if l.to_id == to_id && l.port == port { return l.from_id; }
+  }
+  return -1;
+}
+
+// a は入力をさかのぼって b に依存するか。循環の検出に使う
+func depends(a: int, b: int, depth: int) -> bool {
+  if depth > 64 { return true; }
+  if a == b { return true; }
+  for var l in links {
+    if l.to_id == a && depends(l.from_id, b, depth + 1) { return true; }
+  }
+  return false;
+}
+
+func disconnect(to_id: int, port: int) -> void {
+  var keep: list<Link> = [];
+  for var l in links {
+    if !(l.to_id == to_id && l.port == port) { keep.push(l); }
+  }
+  links = keep;
+}
+
+func delete_node(id: int) -> void {
+  var ns: list<Node> = [];
+  for var n in nodes {
+    if n.id != id { ns.push(n); }
+  }
+  nodes = ns;
+  var keep: list<Link> = [];
+  for var l in links {
+    if l.from_id != id && l.to_id != id { keep.push(l); }
+  }
+  links = keep;
+}
+
+// ---------------------------------------------------------------- 評価
+// bool は 0 と 1 で持つ。失敗したときは err に理由を残して 0 を返す。
+//
+// 1 つの出力は何本にも分岐できる。素直にたどると同じ枝を何度も計算するので、
+// **その回の結果は記憶する**。グラフが動いたら forget() で捨てる
+// （コード生成側の gen_names も同じ仕掛け）。
+var err: string = "";
+var vals: map<int, int> = {};
+var val_errs: map<int, string> = {};
+
+func forget() -> void {
+  vals = {};
+  val_errs = {};
+}
+
+func eval_in(id: int, port: int, depth: int) -> int {
+  var s = src_of(id, port);
+  if s < 0 {
+    err = "未接続の入力があります";
+    return 0;
+  }
+  return eval(s, depth + 1);
+}
+
+func eval(id: int, depth: int) -> int {
+  if var got = vals.get(id) {
+    if var e = val_errs.get(id) {
+      if e != "" { err = e; }
+    }
+    return got;
+  }
+  if depth > 64 {
+    err = "循環参照";
+    return 0;
+  }
+  var i = idx(id);
+  if i < 0 { return 0; }
+  var outer = err;
+  err = "";
+  var v = eval_kind(id, i, depth);
+  vals[id] = v;
+  val_errs[id] = err;
+  if err == "" { err = outer; }     // ここが健全なら、外側の言い分をそのまま残す
+  return v;
+}
+
+func eval_kind(id: int, i: int, depth: int) -> int {
+  var k = nodes[i].kind;
+  if k == K_NUM { return nodes[i].value; }
+  if k == K_OUT { return eval_in(id, 0, depth); }
+  var a = eval_in(id, 0, depth);
+  var b = eval_in(id, 1, depth);
+  if k == K_ADD { return a + b; }
+  if k == K_SUB { return a - b; }
+  if k == K_MUL { return a * b; }
+  if k == K_DIV {
+    if b == 0 {
+      err = "ゼロ除算";
+      return 0;
+    }
+    return a / b;
+  }
+  if k == K_CMP {
+    if a > b { return 1; }
+    return 0;
+  }
+  // 分岐。両側とも評価しておく（結線漏れをその場で示すため）
+  var c = eval_in(id, 2, depth);
+  if a != 0 { return b; }
+  return c;
+}
+
+// 表示上の型。出力ノードは、刺さっている側の型をそのまま見せる
+func shown_type(id: int) -> int {
+  var k = nodes[idx(id)].kind;
+  if k != K_OUT { return out_type(k); }
+  var s = src_of(id, 0);
+  if s < 0 { return T_ANY; }
+  return out_type(nodes[idx(s)].kind);
+}
+
+// そのノードの現在値。評価できなければ "?"
+func value_text(id: int) -> string {
+  err = "";
+  var v = eval(id, 0);
+  if err != "" { return "?"; }
+  if shown_type(id) == T_BOOL {
+    if v != 0 { return "true"; }
+    return "false";
+  }
+  return string(v);
+}
+
+// ---------------------------------------------------------------- コード生成
+var gen_names: map<int, string> = {};
+var gen_lines: list<string> = [];
+var gen_seq: int = 0;
+
+// そのノードの値を束ねた変数名を返す。必要な行は、その手前に積んでおく
+func gen_of(id: int, depth: int) -> string {
+  if depth > 64 { return "0"; }
+  if var got = gen_names.get(id) { return got; }
+  var n = nodes[idx(id)];
+  var a: list<string> = [];
+  for var p in range(in_count(n.kind)) {
+    var s = src_of(id, p);
+    if s < 0 { a.push("0"); } else { a.push(gen_of(s, depth + 1)); }
+  }
+  gen_seq += 1;
+  var name = f"n{gen_seq}";
+  if n.kind == K_NUM {
+    gen_lines.push(f"var {name} = {n.value};");
+  } else if n.kind == K_ADD {
+    gen_lines.push(f"var {name} = {a[0]} + {a[1]};");
+  } else if n.kind == K_SUB {
+    gen_lines.push(f"var {name} = {a[0]} - {a[1]};");
+  } else if n.kind == K_MUL {
+    gen_lines.push(f"var {name} = {a[0]} * {a[1]};");
+  } else if n.kind == K_DIV {
+    gen_lines.push(f"var {name} = {a[0]} / {a[1]};");
+  } else if n.kind == K_CMP {
+    gen_lines.push(f"var {name} = {a[0]} > {a[1]};");
+  } else {
+    gen_lines.push(f"var {name} = 0;");
+    gen_lines.push(f"if {a[0]} {{");
+    gen_lines.push(f"  {name} = {a[1]};");
+    gen_lines.push("} else {");
+    gen_lines.push(f"  {name} = {a[2]};");
+    gen_lines.push("}");
+  }
+  gen_names[id] = name;
+  return name;
+}
+
+func generate() -> void {
+  gen_names = {};
+  gen_lines = [];
+  gen_seq = 0;
+  var any = false;
+  for var n in nodes {
+    if n.kind != K_OUT { continue; }
+    any = true;
+    var s = src_of(n.id, 0);
+    if s < 0 {
+      gen_lines.push("// 出力ノードが未接続です");
+    } else {
+      gen_lines.push(f"print({gen_of(s, 0)});");
+    }
+  }
+  if !any { gen_lines.push("// 出力ノードを置くとコードが生成されます"); }
+}
+
+// 出力ノードが吐くもの。異常な行は先頭に "!" を付けて返す（色分けの目印）
+func out_lines() -> list<string> {
+  var out: list<string> = [];
+  for var n in nodes {
+    if n.kind != K_OUT { continue; }
+    var s = src_of(n.id, 0);
+    if s < 0 {
+      out.push("!未接続");
+      continue;
+    }
+    err = "";
+    var v = eval(s, 0);
+    if err != "" {
+      out.push(f"!{err}");
+    } else if out_type(nodes[idx(s)].kind) == T_BOOL {
+      if v != 0 { out.push("true"); } else { out.push("false"); }
+    } else {
+      out.push(string(v));
+    }
+  }
+  if out.len() == 0 { out.push("!出力ノードなし"); }
+  return out;
+}
+
+// 先頭の "!" を落とした、そのまま読める形
+func plain(s: string) -> string {
+  if s.starts_with("!") { return s.sub(1, s.len()); }
+  return s;
+}
+
+func code_text() -> string {
+  return "// node_editor が生成したコード\n" + gen_lines.join("\n") + "\n";
+}
+
+// ---------------------------------------------------------------- レイアウト
+var K: int = 1;         // 画素密度
+var W: int = 900;
+var H: int = 520;
+var TH: int = 8;        // 文字の高さ
+var ROW: int = 16;      // 入力 1 本ぶんの高さ
+var TITLE: int = 16;    // ヘッダ帯の高さ
+var NODE_W: int = 118;
+var PAL_W: int = 96;    // 左のパレット
+var CODE_W: int = 214;  // 右のペイン
+var BAR_H: int = 24;    // 下のステータスバー
+var CX0: int = 0;       // キャンバスの左端
+var CX1: int = 0;       // キャンバスの右端
+var CY1: int = 0;       // キャンバスの下端
+var WIRE_R: float = 1.7;   // 配線の半幅（画素）
+var PORT_R: float = 4.5;   // 端子の半径
+
+// 視点。ワールド座標に足すと画面座標になる
+var view_x: int = 0;
+var view_y: int = 0;
+
+func px(n: Node) -> int { return n.x + view_x; }
+func py(n: Node) -> int { return n.y + view_y; }
+func node_h(n: Node) -> int { return TITLE + rows(n.kind) * ROW + 4 * K; }
+func in_px(n: Node) -> int { return px(n); }
+func in_py(n: Node, i: int) -> int { return py(n) + TITLE + i * ROW + ROW / 2; }
+func out_px(n: Node) -> int { return px(n) + NODE_W; }
+func out_py(n: Node) -> int { return py(n) + TITLE + ROW / 2; }
+
+func near(ax: int, ay: int, bx: int, by: int, r: int) -> bool {
+  var dx = ax - bx;
+  var dy = ay - by;
+  return dx * dx + dy * dy <= r * r;
+}
+
+// グラフ全体が収まる位置へ視点を戻す
+func fit() -> void {
+  if nodes.len() == 0 {
+    view_x = CX0 + 40 * K;
+    view_y = 40 * K;
+    return;
+  }
+  var x0 = nodes[0].x;
+  var y0 = nodes[0].y;
+  var x1 = x0 + NODE_W;
+  var y1 = y0 + node_h(nodes[0]);
+  for var n in nodes {
+    if n.x < x0 { x0 = n.x; }
+    if n.y < y0 { y0 = n.y; }
+    if n.x + NODE_W > x1 { x1 = n.x + NODE_W; }
+    if n.y + node_h(n) > y1 { y1 = n.y + node_h(n); }
+  }
+  view_x = CX0 + ((CX1 - CX0) - (x1 - x0)) / 2 - x0;
+  view_y = (CY1 - (y1 - y0)) / 2 - y0;
+}
+
+// ---------------------------------------------------------------- 自前の階調描画
+// ui.line は 1 画素・階調なし。ここでは太さと縁の階調を自分で持つ。
+// ui.set は下地と混ぜずに置くので、混ぜたい 1 画素は ui.hline(x, y, 1, 色) で置く。
+// 濃度ごとの色は、ホスト呼び出しを削るため 33 段の表に焼いておく。
+var cov_key: int = -1;
+var cov_tab: list<int> = [];
+
+func cov_use(col: int) -> void {
+  if cov_key == col { return; }
+  cov_key = col;
+  cov_tab = [];
+  var r = ui.red(col);
+  var g = ui.green(col);
+  var b = ui.blue(col);
+  for var i in range(33) {
+    cov_tab.push(ui.rgba(r, g, b, i * 255 / 32));
+  }
+}
+
+func cov_put(x: int, y: int, cov: float) -> void {
+  if cov <= 0.03 { return; }
+  ui.hline(x, y, 1, cov_tab[int(math.clamp(cov, 0.0, 1.0) * 32.0)]);
+}
+
+// 線分 1 本。r は半幅。長い辺に沿って走り、各列で
+// 「芯（不透明）＋両縁（階調）」を置く。芯は不透明なので継ぎ目で重ねてよく、
+// 縁だけを半開区間にして、節で二重に混ざるのを避ける。
+func aa_seg(ax: float, ay: float, bx: float, by: float, r: float) -> void {
+  var solid = cov_tab[32];
+  var adx = math.abs(bx - ax);
+  var ady = math.abs(by - ay);
+  if adx < 0.001 && ady < 0.001 { return; }
+  if adx >= ady {
+    var x0 = ax;
+    var y0 = ay;
+    var x1 = bx;
+    var y1 = by;
+    if x0 > x1 {
+      x0 = bx;
+      y0 = by;
+      x1 = ax;
+      y1 = ay;
+    }
+    var m = (y1 - y0) / (x1 - x0);
+    var k = math.sqrt(1.0 + m * m);      // 縦の隔たり → 垂直距離 への換算
+    var core = (r - 0.5) * k;
+    var edge = (r + 0.5) * k;
+    var xi = math.round(x0);
+    var xe = math.round(x1);
+    for var x in range(xi, xe + 1) {
+      var yc = y0 + (float(x) - x0) * m;
+      var ca = math.ceil(yc - core);
+      var cb = math.floor(yc + core);
+      if cb >= ca { ui.vline(x, ca, cb - ca + 1, solid); }
+      if x == xe && xe > xi { continue; }        // 縁は半開区間で
+      for var y in range(math.ceil(yc - edge), ca) {
+        cov_put(x, y, r + 0.5 - math.abs(float(y) - yc) / k);
+      }
+      for var y in range(cb + 1, math.floor(yc + edge) + 1) {
+        cov_put(x, y, r + 0.5 - math.abs(float(y) - yc) / k);
+      }
+    }
+    return;
+  }
+  var x0 = ax;
+  var y0 = ay;
+  var x1 = bx;
+  var y1 = by;
+  if y0 > y1 {
+    x0 = bx;
+    y0 = by;
+    x1 = ax;
+    y1 = ay;
+  }
+  var m = (x1 - x0) / (y1 - y0);
+  var k = math.sqrt(1.0 + m * m);
+  var core = (r - 0.5) * k;
+  var edge = (r + 0.5) * k;
+  var yi = math.round(y0);
+  var ye = math.round(y1);
+  for var y in range(yi, ye + 1) {
+    var xc = x0 + (float(y) - y0) * m;
+    var ca = math.ceil(xc - core);
+    var cb = math.floor(xc + core);
+    if cb >= ca { ui.hline(ca, y, cb - ca + 1, solid); }
+    if y == ye && ye > yi { continue; }
+    for var x in range(math.ceil(xc - edge), ca) {
+      cov_put(x, y, r + 0.5 - math.abs(float(x) - xc) / k);
+    }
+    for var x in range(cb + 1, math.floor(xc + edge) + 1) {
+      cov_put(x, y, r + 0.5 - math.abs(float(x) - xc) / k);
+    }
+  }
+}
+
+// 塗った円
+func aa_disc(cx: float, cy: float, r: float, col: int) -> void {
+  cov_use(col);
+  for var y in range(math.floor(cy - r - 1.0), math.ceil(cy + r + 1.0) + 1) {
+    for var x in range(math.floor(cx - r - 1.0), math.ceil(cx + r + 1.0) + 1) {
+      var dx = float(x) - cx;
+      var dy = float(y) - cy;
+      cov_put(x, y, r + 0.5 - math.sqrt(dx * dx + dy * dy));
+    }
+  }
+}
+
+// 輪郭だけの円。t は線の半幅
+func aa_ring(cx: float, cy: float, r: float, t: float, col: int) -> void {
+  cov_use(col);
+  for var y in range(math.floor(cy - r - t - 1.0), math.ceil(cy + r + t + 1.0) + 1) {
+    for var x in range(math.floor(cx - r - t - 1.0), math.ceil(cx + r + t + 1.0) + 1) {
+      var dx = float(x) - cx;
+      var dy = float(y) - cy;
+      cov_put(x, y, t + 0.5 - math.abs(math.sqrt(dx * dx + dy * dy) - r));
+    }
+  }
+}
+
+// 配線。三次ベジエを折れ線に割り、太さつきで引く
+func wire(x0: int, y0: int, x1: int, y1: int, r: float, col: int) -> void {
+  cov_use(col);
+  var h = math.abs(x1 - x0) / 2;
+  if h < 30 * K { h = 30 * K; }
+  var span = math.abs(x1 - x0) + math.abs(y1 - y0) + h;
+  var steps = math.clamp(span / (7 * K), 10, 48);
+  var pxx = float(x0);
+  var pyy = float(y0);
+  for var i in range(1, steps + 1) {
+    var t = float(i) / float(steps);
+    var u = 1.0 - t;
+    var qx = u * u * u * float(x0) + 3.0 * u * u * t * float(x0 + h)
+        + 3.0 * u * t * t * float(x1 - h) + t * t * t * float(x1);
+    var qy = u * u * u * float(y0) + 3.0 * u * u * t * float(y0)
+        + 3.0 * u * t * t * float(y1) + t * t * t * float(y1);
+    aa_seg(pxx, pyy, qx, qy, r);
+    pxx = qx;
+    pyy = qy;
+  }
+}
+
+// ---------------------------------------------------------------- 操作
+var was_down: bool = false;
+var was_mid: bool = false;
+var drag_id: int = -1;      // 掴んで動かしているノード
+var drag_dx: int = 0;
+var drag_dy: int = 0;
+var wire_id: int = -1;      // 配線を引き出している元のノード
+var num_id: int = -1;       // 値を引っぱって変えているノード
+var num_base: int = 0;
+var num_mx: int = 0;
+var pan_on: bool = false;   // 視点を掴んでいるか
+var pan_mx: int = 0;
+var pan_my: int = 0;
+var pan_bx: int = 0;
+var pan_by: int = 0;
+var sel_id: int = -1;       // 選択中のノード
+var hit_id: int = -1;       // find_in が見つけた入力
+var hit_port: int = 0;
+var msg: string = "";       // ステータスバーへ流す一言
+var msg_t: int = 0;
+var spawn: int = 0;         // 追加位置をずらすための連番
+
+func say(s: string) -> void {
+  msg = s;
+  msg_t = 150;
+}
+
+func in_canvas(mx: int, my: int) -> bool {
+  return mx >= CX0 && mx < CX1 && my < CY1;
+}
+
+func node_at(mx: int, my: int) -> int {
+  for var i in range(nodes.len()) {
+    var n = nodes[nodes.len() - 1 - i];
+    if mx >= px(n) && mx < px(n) + NODE_W && my >= py(n) && my < py(n) + node_h(n) {
+      return n.id;
+    }
+  }
+  return -1;
+}
+
+func out_at(mx: int, my: int) -> int {
+  for var i in range(nodes.len()) {
+    var n = nodes[nodes.len() - 1 - i];
+    if out_type(n.kind) == T_NONE { continue; }
+    if near(out_px(n), out_py(n), mx, my, 9 * K) { return n.id; }
+  }
+  return -1;
+}
+
+func find_in(mx: int, my: int) -> bool {
+  for var i in range(nodes.len()) {
+    var n = nodes[nodes.len() - 1 - i];
+    for var p in range(in_count(n.kind)) {
+      if near(in_px(n), in_py(n, p), mx, my, 9 * K) {
+        hit_id = n.id;
+        hit_port = p;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+func connect(from_id: int, to_id: int, port: int) -> void {
+  disconnect(to_id, port);          // 入力は 1 本だけ
+  links.push(Link(from_id, to_id, port));
+}
+
+func try_connect(from_id: int, to_id: int, port: int) -> void {
+  if from_id == to_id {
+    say("自己接続は許可されていません");
+    return;
+  }
+  var ft = out_type(nodes[idx(from_id)].kind);
+  var to_kind = nodes[idx(to_id)].kind;
+  var tt = in_type(to_kind, port);
+  if tt != T_ANY && ft != tt {
+    say(f"型不一致: {type_name(ft)} を「{in_name(to_kind, port)}」（{type_name(tt)}）へは接続できません");
+    return;
+  }
+  if depends(from_id, to_id, 0) {
+    say("循環参照になるため接続できません");
+    return;
+  }
+  connect(from_id, to_id, port);
+  msg_t = 0;
+}
+
+func add_node(k: int) -> void {
+  var sx = CX0 + 24 * K + (spawn % 3) * 36 * K;
+  var sy = 24 * K + (spawn % 5) * 32 * K;
+  spawn += 1;
+  nodes.push(Node(next_id, k, sx - view_x, sy - view_y, 2));
+  sel_id = next_id;
+  next_id += 1;
+}
+
+// パレットの i 番目のボタン
+func pal_y(i: int) -> int { return 34 * K + i * (TH + 12 * K); }
+func pal_h() -> int { return TH + 8 * K; }
+
+func pal_hit(my: int) -> int {
+  for var i in range(K_COUNT) {
+    if my >= pal_y(i) && my < pal_y(i) + pal_h() { return i; }
+  }
+  return -1;
+}
+
+func pan_begin(mx: int, my: int) -> void {
+  pan_on = true;
+  pan_mx = mx;
+  pan_my = my;
+  pan_bx = view_x;
+  pan_by = view_y;
+}
+
+func on_press(mx: int, my: int) -> void {
+  if mx < PAL_W {
+    var k = pal_hit(my);
+    if k >= 0 { add_node(k); }
+    return;
+  }
+  if !in_canvas(mx, my) { return; }     // 右のペインと下のバーは読むだけ
+
+  var o = out_at(mx, my);
+  if o >= 0 {
+    wire_id = o;
+    return;
+  }
+  if find_in(mx, my) {
+    if src_of(hit_id, hit_port) >= 0 {
+      disconnect(hit_id, hit_port);
+      say("切断");
+    }
+    return;
+  }
+  var id = node_at(mx, my);
+  if id < 0 {
+    sel_id = -1;
+    pan_begin(mx, my);                 // 余白を掴んだら視点が動く
+    return;
+  }
+  sel_id = id;
+  var n = nodes[idx(id)];
+  if n.kind == K_NUM && my >= py(n) + TITLE {
+    num_id = id;                       // 値の行を横に引くと数が変わる
+    num_base = n.value;
+    num_mx = mx;
+    return;
+  }
+  drag_id = id;
+  drag_dx = mx - px(n);
+  drag_dy = my - py(n);
+}
+
+func on_release(mx: int, my: int) -> void {
+  if wire_id >= 0 {
+    if find_in(mx, my) { try_connect(wire_id, hit_id, hit_port); }
+    wire_id = -1;
+  }
+  drag_id = -1;
+  num_id = -1;
+  pan_on = false;
+}
+
+func on_drag(mx: int, my: int) -> void {
+  if pan_on {
+    view_x = pan_bx + (mx - pan_mx);
+    view_y = pan_by + (my - pan_my);
+  }
+  if drag_id >= 0 {
+    var i = idx(drag_id);
+    nodes[i].x = mx - drag_dx - view_x;
+    nodes[i].y = my - drag_dy - view_y;
+  }
+  if num_id >= 0 {
+    nodes[idx(num_id)].value = num_base + (mx - num_mx) / (4 * K);
+  }
+}
+
+func keys() -> void {
+  if ui.pressed("esc") || ui.pressed("q") { ui.quit(); }
+  if ui.pressed("f") || ui.pressed("home") {
+    fit();
+    say("全体表示");
+  }
+  if sel_id >= 0 && idx(sel_id) >= 0 {
+    if ui.pressed("delete") || ui.pressed("x") {
+      delete_node(sel_id);
+      sel_id = -1;
+      say("削除");
+      return;
+    }
+    var i = idx(sel_id);
+    if nodes[i].kind == K_NUM {
+      if ui.pressed("up") { nodes[i].value += 1; }
+      if ui.pressed("down") { nodes[i].value -= 1; }
+    }
+  }
+  if ui.pressed("c") {
+    if ui.set_clipboard(code_text()) {
+      say("コードをクリップボードへコピーしました");
+    } else {
+      say("この環境ではコピーできません");
+    }
+  }
+}
+
+// ---------------------------------------------------------------- 描画
+func draw_node(n: Node) -> void {
+  var x = px(n);
+  var y = py(n);
+  var h = node_h(n);
+  ui.fill_rect(x, y, NODE_W, h, ui.rgb(40, 43, 55));
+  ui.rect(x, y, NODE_W, h, ui.rgb(22, 24, 32));
+  ui.fill_rect(x, y, NODE_W, TITLE, kind_color(n.kind));
+  ui.text(x + 8 * K, y + (TITLE - TH) / 2, kind_name(n.kind), ui.rgb(255, 255, 255));
+
+  // 現在値をヘッダ右に。定数ノードは本体に出るので省く
+  if n.kind != K_NUM {
+    var v = value_text(n.id);
+    ui.text(x + NODE_W - 8 * K - ui.text_width(v), y + (TITLE - TH) / 2, v,
+            ui.rgb(16, 20, 26));
+  }
+
+  for var i in range(rows(n.kind)) {
+    var ry = y + TITLE + i * ROW;
+    if n.kind == K_NUM {
+      var s = string(n.value);
+      ui.text(x + (NODE_W - ui.text_width(s)) / 2, ry + (ROW - TH) / 2, s,
+              ui.rgb(240, 242, 248));
+      continue;
+    }
+    var t = in_type(n.kind, i);
+    var cy = ry + ROW / 2;
+    if src_of(n.id, i) >= 0 {
+      aa_disc(float(in_px(n)), float(cy), PORT_R * float(K), type_color(t));
+    } else {
+      aa_ring(float(in_px(n)), float(cy), PORT_R * float(K) - 1.0, 0.9 * float(K),
+              type_color(t));
+    }
+    ui.text(x + 14 * K, ry + (ROW - TH) / 2, in_name(n.kind, i), ui.rgb(178, 184, 198));
+  }
+
+  if out_type(n.kind) != T_NONE {
+    aa_disc(float(out_px(n)), float(out_py(n)), PORT_R * float(K),
+            type_color(out_type(n.kind)));
+  }
+  if n.id == sel_id {
+    ui.rect(x - 2 * K, y - 2 * K, NODE_W + 4 * K, h + 4 * K, ui.rgb(255, 206, 84));
+  }
+}
+
+// 画面の外にあるノードを、縁の点で知らせる
+func draw_offscreen() -> void {
+  for var n in nodes {
+    var x = px(n);
+    var y = py(n);
+    var h = node_h(n);
+    if x + NODE_W > CX0 && x < CX1 && y + h > 0 && y < CY1 { continue; }
+    var mx = math.clamp(x + NODE_W / 2, CX0 + 7 * K, CX1 - 7 * K);
+    var my = math.clamp(y + h / 2, 7 * K, CY1 - 7 * K);
+    aa_disc(float(mx), float(my), 3.5 * float(K), kind_color(n.kind));
+  }
+}
+
+func draw_palette() -> void {
+  ui.fill_rect(0, 0, PAL_W, H, ui.rgb(24, 26, 34));
+  ui.text(11 * K, 10 * K, "ノード", ui.rgb(112, 196, 255));
+  for var k in range(K_COUNT) {
+    var y = pal_y(k);
+    var over = ui.mouse_x() < PAL_W && ui.mouse_y() >= y && ui.mouse_y() < y + pal_h();
+    var bg = kind_color(k);
+    if !over { bg = ui.mix(bg, ui.rgb(24, 26, 34), 0.45); }
+    ui.fill_rect(8 * K, y, PAL_W - 16 * K, pal_h(), bg);
+    ui.text(16 * K, y + (pal_h() - TH) / 2, kind_name(k), ui.rgb(248, 248, 252));
+    if over { ui.cursor("hand"); }
+  }
+  ui.vline(PAL_W, 0, H, ui.rgb(46, 50, 62));
+}
+
+func draw_code() -> void {
+  ui.fill_rect(CX1, 0, CODE_W, H, ui.rgb(20, 22, 30));
+  ui.vline(CX1, 0, H, ui.rgb(46, 50, 62));
+  var x = CX1 + 12 * K;
+  var y = 10 * K;
+  ui.text(x, y, "生成コード", ui.rgb(112, 196, 255));
+  y += TH + 5 * K;
+  ui.hline(x, y, CODE_W - 24 * K, ui.rgb(46, 50, 62));
+  y += 5 * K;
+  var limit = CY1 - (TH + 4 * K) * 4;
+  for var line in gen_lines {
+    if y > limit {
+      ui.text(x, y, "…", ui.rgb(126, 132, 146));
+      y += TH + 3 * K;
+      break;
+    }
+    var col = ui.rgb(228, 232, 240);
+    if line.starts_with("//") { col = ui.rgb(124, 132, 148); }
+    ui.text(x, y, line, col);
+    y += TH + 3 * K;
+  }
+  y += 8 * K;
+  ui.text(x, y, "評価結果", ui.rgb(112, 196, 255));
+  y += TH + 5 * K;
+  ui.hline(x, y, CODE_W - 24 * K, ui.rgb(46, 50, 62));
+  y += 5 * K;
+  for var raw in out_lines() {
+    if y > CY1 - TH { break; }
+    var col = ui.rgb(132, 228, 156);
+    if raw.starts_with("!") { col = ui.rgb(240, 172, 88); }
+    ui.text(x, y, plain(raw), col);
+    y += TH + 3 * K;
+  }
+}
+
+func draw_bar() -> void {
+  ui.fill_rect(0, CY1, W, BAR_H, ui.rgb(16, 17, 23));
+  ui.hline(0, CY1, W, ui.rgb(46, 50, 62));
+  var s = "ドラッグ:移動／出力→入力:接続／入力:切断／右クリック:削除／↑↓:値／余白と中ボタン:視点／ホイール:スクロール／F:全体／C:コピー／Esc:終了";
+  var col = ui.rgb(138, 144, 160);
+  if msg_t > 0 {
+    s = msg;
+    col = ui.rgb(255, 206, 84);
+  }
+  ui.text(9 * K, CY1 + (BAR_H - TH) / 2, s, col);
+}
+
+func draw() -> void {
+  ui.clear(ui.rgb(29, 31, 40));
+
+  ui.clip(CX0, 0, CX1 - CX0, CY1);
+  // 方眼。視点に追従して流れる
+  var g = 26 * K;
+  var ox = view_x % g;
+  if ox < 0 { ox += g; }
+  var oy = view_y % g;
+  if oy < 0 { oy += g; }
+  var dot = ui.rgb(54, 58, 72);
+  for var j in range(CY1 / g + 2) {
+    for var i in range((CX1 - CX0) / g + 2) {
+      ui.fill_rect(CX0 - g + ox + i * g, 0 - g + oy + j * g, K, K, dot);
+    }
+  }
+
+  for var l in links {
+    var a = idx(l.from_id);
+    var b = idx(l.to_id);
+    if a < 0 || b < 0 { continue; }
+    wire(out_px(nodes[a]), out_py(nodes[a]),
+         in_px(nodes[b]), in_py(nodes[b], l.port),
+         WIRE_R * float(K), type_color(out_type(nodes[a].kind)));
+  }
+  if wire_id >= 0 && idx(wire_id) >= 0 {
+    var a = idx(wire_id);
+    wire(out_px(nodes[a]), out_py(nodes[a]), ui.mouse_x(), ui.mouse_y(),
+         WIRE_R * float(K), ui.rgb(255, 206, 84));
+  }
+  for var n in nodes { draw_node(n); }
+  draw_offscreen();
+  ui.clip_off();
+
+  draw_palette();
+  draw_code();
+  draw_bar();
+}
+
+// ---------------------------------------------------------------- 初期グラフ
+// 7 と 3 を比べ、大きい側を出力する
+func demo() -> void {
+  nodes = [];
+  links = [];
+  nodes.push(Node(1, K_NUM, 0, 0, 7));
+  nodes.push(Node(2, K_NUM, 0, 96 * K, 3));
+  nodes.push(Node(3, K_CMP, 150 * K, 0, 0));
+  nodes.push(Node(4, K_SEL, 300 * K, 40 * K, 0));
+  nodes.push(Node(5, K_OUT, 450 * K, 74 * K, 0));
+  next_id = 6;
+  connect(1, 3, 0);
+  connect(2, 3, 1);
+  connect(3, 4, 0);
+  connect(1, 4, 1);
+  connect(2, 4, 2);
+  connect(4, 5, 0);
+  sel_id = -1;
+}
+
+func layout() -> void {
+  TH = ui.text_height();
+  ROW = TH + 8 * K;
+  TITLE = TH + 8 * K;
+  NODE_W = 118 * K;
+  PAL_W = 96 * K;
+  CODE_W = 214 * K;
+  BAR_H = TH + 10 * K;
+  CX0 = PAL_W;
+  CX1 = W - CODE_W;
+  CY1 = H - BAR_H;
+}
+
+func main() -> int {
+  K = ui.scale();
+  W = 900 * K;
+  H = 520 * K;
+  ui.open("ノードエディタ", W, H, false);
+  _ = ui.font(12 * K);      // 環境のフォントを 12pt で。無ければ内蔵の字形
+  layout();
+  demo();
+  fit();
+  forget();
+  generate();
+
+  // 画面が無い環境では、初期グラフのコードを出して PNG を書き出す
+  if !ui.visible() {
+    draw();
+    for var line in gen_lines { print(line); }
+    for var line in out_lines() { print(f"// -> {plain(line)}"); }
+    var saved = file.write_bytes("node_editor.png", ui.to_png());
+    if !saved.ok() {
+      print(f"書き出せません: {saved.error().message()}");
+      return 1;
+    }
+    print("画面が無いので node_editor.png へ書き出しました");
+    ui.close();
+    return 0;
+  }
+
+  while ui.poll() {
+    keys();
+    var mx = ui.mouse_x();
+    var my = ui.mouse_y();
+
+    // ホイールで視点を送る
+    if in_canvas(mx, my) {
+      view_y -= ui.wheel() * 28 * K;
+      view_x -= ui.wheel_x() * 28 * K;
+    }
+
+    // 中ボタンは、どこを掴んでも視点だけが動く
+    var mid = ui.mouse(1);
+    if mid && !was_mid && in_canvas(mx, my) { pan_begin(mx, my); }
+    if mid && pan_on {
+      view_x = pan_bx + (mx - pan_mx);
+      view_y = pan_by + (my - pan_my);
+    }
+    if !mid && was_mid { pan_on = false; }
+    was_mid = mid;
+
+    var down = ui.mouse(0);
+    if down && !was_down { on_press(mx, my); }
+    if down { on_drag(mx, my); }
+    if !down && was_down { on_release(mx, my); }
+    was_down = down;
+
+    if ui.clicked(2) {
+      var id = node_at(mx, my);
+      if id >= 0 && in_canvas(mx, my) {
+        delete_node(id);
+        if sel_id == id { sel_id = -1; }
+        say("削除");
+      }
+    }
+    if msg_t > 0 { msg_t -= 1; }
+
+    forget();      // グラフが動いたかもしれないので、記憶は捨てる
+    generate();
+    draw();
+    ui.present();
+    ui.frame();
+  }
+  ui.close();
+  return 0;
+}
