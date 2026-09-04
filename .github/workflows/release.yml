@@ -27,8 +27,10 @@ jobs:
           - { os: macos-15-intel, name: macos-x86_64 }
           - { os: windows-latest, name: windows-x86_64 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
+      # これだけ v1 が最新（中身は Node 20 で、押すたびに古いと言われるが、
+      # 新しい形はまだ出ていない）
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
 
@@ -54,7 +56,7 @@ jobs:
         run: sh tools/package.sh ${{ matrix.name }}
         shell: bash
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: shark-${{ matrix.name }}
           path: dist/shark-${{ matrix.name }}.*
@@ -68,11 +70,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: out
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: out/*
           generate_release_notes: true

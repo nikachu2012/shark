@@ -26,16 +26,16 @@ jobs:
       # 合鍵があるかどうかは、ここで一度受けてから見る（if の中では秘密を直に見られない）
       HAS_CF: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: mymindstorm/setup-emsdk@v14
+      - uses: mymindstorm/setup-emsdk@v16
         with:
           version: 3.1.64
           actions-cache-folder: emsdk-cache
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
 
       # web/build.sh は Monaco を npm から取ってきて web/vendor/ にためる
       - name: 作る
@@ -45,7 +45,7 @@ jobs:
         run: make web-test
 
       # 載せる先が無くても、ここから落として自分の機械で配れる
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: shark-web
           path: web/dist
@@ -55,7 +55,7 @@ jobs:
       # 合鍵が無いところ（fork からの pull request）では、ここまでで止める
       - name: 載せる
         if: env.HAS_CF == 'true'
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

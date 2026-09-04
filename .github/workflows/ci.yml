@@ -29,7 +29,7 @@ jobs:
           # macos-15-intel が最後で、2027-08 まで（それ以降は arm64 だけ）
           - { os: macos-15-intel, name: macos-x86_64 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # FreeType を静的に作る（一度作れば、次からは取っておいたものを使う）
       - name: FreeType を用意する
@@ -52,7 +52,7 @@ jobs:
       - name: 包む
         run: sh tools/package.sh ${{ matrix.name }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: shark-${{ matrix.name }}
           path: dist/shark-${{ matrix.name }}.*
@@ -63,7 +63,10 @@ jobs:
     name: 作って試す（windows）
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      # これだけ v1 が最新（中身は Node 20 で、押すたびに古いと言われるが、
+      # 新しい形はまだ出ていない）
       - uses: ilammy/msvc-dev-cmd@v1
 
       - name: FreeType を静的に作る
@@ -83,7 +86,7 @@ jobs:
         run: sh tools/package.sh windows-x86_64
         shell: bash
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: shark-windows-x86_64
           path: dist/shark-windows-x86_64.*
