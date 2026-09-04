@@ -1412,6 +1412,45 @@ func grid(rows: int, cols: int, cell: func(int, int) -> Widget) -> Widget;
 ///   print(ui.width());   // 120
 func center(children: list<Widget>) -> Widget;
 
+/// 中身を**同じところに重ねて**置く（重ね置き・ZStack）。
+///
+/// 書いた順に重なり、あとのものが上に来る。大きさはいちばん大きい中身に合わせる。
+/// 絵の上に字を出す、下地の上にボタンを置く、といったときに使う。
+///
+/// 中身の置き場所は、それぞれの `.align`（横）と `.valign`（縦）で決める。
+/// 書かなければ左上に置く。
+///
+/// 例:
+///   ui.open(80, 40);
+///   _ = ui.show(ui.stack([
+///     ui.label("").width(40).height(20).background(ui.rgb(0, 0, 255)),
+///     ui.label("x").align("center").valign("middle"),
+///   ]), 0, 0);
+///   print(ui.get(0, 0));   // 255
+func stack(children: list<Widget>) -> Widget;
+
+/// 巻物（スクロールできる入れ物）。中身は縦に並び、はみ出したぶんは送って見る。
+///
+/// **高さを決める**（`.height(n)` か取り分）と、そこに入りきらないぶんが
+/// 隠れて、右に帯が出る。帯はつまんで動かせるほか、上に載せて車輪（ホイール）でも送れる。
+/// 高さを決めなければ、中身のぶんだけ伸びて巻かれない。
+///
+/// 隠れているところは押されない。送ったところは覚えていて、次の回も同じところが出る。
+/// 名札を渡しておくと、置き場所が動いても同じ巻物として覚える。
+///
+/// 引数:
+///   id        巻いたところを覚えるための名札（省ける）
+///   children  中に縦に並べる部品
+///
+/// 例:
+///   ui.open(80, 60);
+///   var rows: list<Widget> = [];
+///   for var i in range(20) { rows.push(ui.label(f"{i} 行目")); }
+///   _ = ui.show(ui.scroll(rows).height(40), 0, 0);
+///   print(ui.get(0, 50) != 0);   // false
+func scroll(children: list<Widget>) -> Widget;
+func scroll(id: string, children: list<Widget>) -> Widget;
+
 /// セパレータ（区切り線）。置ける幅いっぱいに引く。
 ///
 /// 例:
@@ -1805,6 +1844,41 @@ class Widget {
   ///   _ = ui.show(ui.label("l").align("right"), 0, 0);
   ///   print(ui.get(1, 1) != 0);   // false
   func align(a: string) -> Widget;
+
+  /// 親がくれた高さの中で、縦にどこへ寄せるか。`"top"` `"middle"` `"bottom"`。
+  ///
+  /// 書かなければ、置く側の決めた既定になる（横並び・格子ではまんなか、
+  /// 重ね置き（ui.stack）では上）。
+  ///
+  /// 例:
+  ///   ui.open(80, 40);
+  ///   _ = ui.show(ui.stack([ui.label("").width(40).height(30),
+  ///                         ui.label("l").valign("bottom").color(ui.rgb(255, 0, 0))]), 0, 0);
+  ///   print(ui.get(1, 1) != 0);   // false
+  func valign(a: string) -> Widget;
+
+  /// 縁（ボーダー）を引く。太さを省くと 1 画素。
+  ///
+  /// 中身の上から引くので、細い線でも隠れない。`.radius()` と一緒に書けば、
+  /// 角の丸みに沿って曲がる。
+  ///
+  /// 例:
+  ///   ui.open(80, 40);
+  ///   _ = ui.show(ui.label("l").width(40).height(20).border(ui.rgb(255, 0, 0)), 0, 0);
+  ///   print(f"{ui.get(0, 0)} {ui.get(20, 10)}");   // 16711680 0
+  func border(c: int) -> Widget;
+  func border(c: int, w: int) -> Widget;
+
+  /// 角の丸み（画素）。下地（`.background`）と縁（`.border`）の両方に効く。
+  ///
+  /// 0 を渡すと四角に戻る。縦横の半分より大きい数を渡しても、そこで止まる。
+  ///
+  /// 例:
+  ///   ui.open(80, 40);
+  ///   _ = ui.show(ui.label("l").width(40).height(20).radius(8)
+  ///                 .background(ui.rgb(0, 0, 255)), 0, 0);
+  ///   print(f"{ui.get(0, 0)} {ui.get(20, 10)}");   // 0 255
+  func radius(n: int) -> Widget;
 
   /// ツールチップ。カーソルを合わせたときに出す説明。
   ///

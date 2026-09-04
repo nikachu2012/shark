@@ -16,10 +16,12 @@
 /tests/bytecheck
 /tests/imecheck
 /tests/uicheck
+/tests/stepcheck
 /tests/memcheck.exe
 /tests/bytecheck.exe
 /tests/imecheck.exe
 /tests/uicheck.exe
+/tests/stepcheck.exe
 /bench/build/
 /docs/reference/
 /web/dist/

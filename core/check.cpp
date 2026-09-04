@@ -41,6 +41,10 @@ NativeStatus n_widget_height_fr(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_align(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_tooltip(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_placeholder(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_border(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_border_w(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_radius(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_valign(VM& vm, Value* args, int n, Value& out);
 // Canvas（絵）のメソッド。書き換えるものは受け手を借りる（本体は lib/ui.cpp）
 NativeStatus n_canvas_width(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_height(VM& vm, Value* args, int n, Value& out);
@@ -162,6 +166,16 @@ void Checker::make_builtin_classes() {
         {"tip", t_.t_string()},      // カーソルを合わせたときに出す説明
         {"hint", t_.t_string()},     // 何も入っていないときに、うすく出す字
         {"var", t_.t_int()},         // ref で受けたときの、書き戻す var の番号
+        {"bd", t_.t_int()},          // 縁の色（-1 は指定なし）
+        {"bdw", t_.t_int()},         // 縁の太さ（画素）
+        {"rad", t_.t_int()},         // 角の丸み（-1 は指定なし）
+        {"flg", t_.t_int()},         // こまごました入切（lib/ui.cpp の WidgetFlag）
+        {"fa", t_.t_float()},        // 小数の値（float のつまみ・ドラッグ）
+        {"fb", t_.t_float()},        // 小数の下
+        {"fc", t_.t_float()},        // 小数の上
+        {"opt", t_.t_string()},      // こまかい指定（入力に通す字など）
+        {"px", t_.t_bytes()},        // 画像の画素（ui.image）
+        {"va", t_.t_int()},          // 縦の寄せ方。0=上 1=まんなか 2=下（-1 は指定なし）
     };
     for (int i = 0; i < (int)(sizeof(wf) / sizeof(wf[0])); i++) {
       FieldInfo f;
@@ -173,18 +187,23 @@ void Checker::make_builtin_classes() {
     }
     // 見た目を変えるメソッド。**自分を変えるのではなく、変えたものを返す**ので、
     // ui.label("あ").color(c).padding(4) のようにつなげられる（本体は lib/ui.cpp）
-    struct { const char* name; NativeFn fn; Type* p0; } wm[] = {
-        {"color", n_widget_color, t_.t_int()},
-        {"background", n_widget_background, t_.t_int()},
-        {"padding", n_widget_padding, t_.t_int()},
-        {"width", n_widget_width, t_.t_int()},
-        {"height", n_widget_height, t_.t_int()},
+    struct { const char* name; NativeFn fn; Type* p0; Type* p1; } wm[] = {
+        {"color", n_widget_color, t_.t_int(), 0},
+        {"background", n_widget_background, t_.t_int(), 0},
+        {"padding", n_widget_padding, t_.t_int(), 0},
+        {"width", n_widget_width, t_.t_int(), 0},
+        {"height", n_widget_height, t_.t_int(), 0},
         // 画素ではなく取り分（fr）で決める形。int と float で書き分ける
-        {"width", n_widget_width_fr, t_.t_float()},
-        {"height", n_widget_height_fr, t_.t_float()},
-        {"align", n_widget_align, t_.t_string()},
-        {"tooltip", n_widget_tooltip, t_.t_string()},
-        {"placeholder", n_widget_placeholder, t_.t_string()},
+        {"width", n_widget_width_fr, t_.t_float(), 0},
+        {"height", n_widget_height_fr, t_.t_float(), 0},
+        {"align", n_widget_align, t_.t_string(), 0},
+        {"valign", n_widget_valign, t_.t_string(), 0},
+        {"tooltip", n_widget_tooltip, t_.t_string(), 0},
+        {"placeholder", n_widget_placeholder, t_.t_string(), 0},
+        // 飾り。縁は太さも決められる
+        {"border", n_widget_border, t_.t_int(), 0},
+        {"border", n_widget_border_w, t_.t_int(), t_.t_int()},
+        {"radius", n_widget_radius, t_.t_int(), 0},
     };
     for (int i = 0; i < (int)(sizeof(wm) / sizeof(wm[0])); i++) {
       FuncInfo* f = new_func(prog_);
@@ -200,6 +219,12 @@ void Checker::make_builtin_classes() {
       p.name = Str("v");
       p.type = wm[i].p0;
       f->params.push(p);
+      if (wm[i].p1) {
+        ParamInfo q;
+        q.name = Str("w");
+        q.type = wm[i].p1;
+        f->params.push(q);
+      }
       MethodRef m;
       m.name = f->name;
       m.func = f->index;

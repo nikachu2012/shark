@@ -210,6 +210,10 @@ NativeStatus n_widget_height_fr(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_align(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_tooltip(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_placeholder(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_valign(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_border(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_border_w(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_radius(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_width(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_height(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_get(VM& vm, Value* args, int n, Value& out);
@@ -263,8 +267,14 @@ NativeFn builtin_native_method(const Str& cls, const Str& name, const Vec<ParamI
     if (name == "width") return fr ? n_widget_width_fr : n_widget_width;
     if (name == "height") return fr ? n_widget_height_fr : n_widget_height;
     if (name == "align") return n_widget_align;
+    if (name == "valign") return n_widget_valign;
     if (name == "tooltip") return n_widget_tooltip;
     if (name == "placeholder") return n_widget_placeholder;
+    if (name == "border") return n_widget_border;
+    if (name == "radius") return n_widget_radius;
+  }
+  if (cls == "Widget" && nparams == 2) {
+    if (name == "border") return n_widget_border_w;
   }
   if (cls == "Error") {
     if (name == "message" && nparams == 0) return n_error_message;

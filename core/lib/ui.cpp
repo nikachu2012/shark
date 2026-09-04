@@ -900,6 +900,11 @@ static Vec<Str> g_undo, g_redo;            // 変わる前の中身
 static Vec<int> g_undo_at, g_redo_at;      // そのときのカーソル
 static int64_t g_undo_last = 0;            // 最後に控えた刻限
 // 続けて押したときの数え（2回で語、3回で行、4回でぜんぶ）
+// 巻物（ui.scroll）の、いま隠しているぶん。部品ごとに名札で覚える
+static Vec<Str> g_sc_id;
+static Vec<int> g_sc_px, g_sc_to;
+static Str g_sc_drag;      // 右の帯をつかんでいる巻物
+
 static Str g_multi_id;
 static int g_multi_n = 0;
 static int64_t g_multi_at = 0;
@@ -2044,14 +2049,26 @@ static NativeStatus u_font_name(VM& vm, Value* a, int n, Value& out) {
 // 値は呼んだ側が持つ。だから「今の状態」と「画面」がずれない。
 enum WidgetKind {
   WK_Label = 0, WK_Button, WK_Checkbox, WK_Slider, WK_Field, WK_Space, WK_Column, WK_Row,
-  WK_Divider, WK_Grid, WK_Area, WK_Radio, WK_Combo, WK_List, WK_Tabs, WK_Number, WK_Spacer
+  WK_Divider, WK_Grid, WK_Area, WK_Radio, WK_Combo, WK_List, WK_Tabs, WK_Number, WK_Spacer,
+  WK_Stack, WK_Scroll, WK_Image, WK_Color, WK_Drag, WK_Tree
 };
 enum WidgetField {
   WF_Kind = 0, WF_Text, WF_Id, WF_A, WF_B, WF_C, WF_Kids,
   WF_Fg, WF_Bg, WF_Pad, WF_Wid, WF_Hei, WF_WidFr, WF_HeiFr, WF_Align, WF_Act, WF_Tip,
-  WF_Hint, WF_Var, WF_Count
+  WF_Hint, WF_Var,
+  WF_Border, WF_BorderW, WF_Radius, WF_Flags, WF_Fa, WF_Fb, WF_Fc, WF_Opt, WF_Px, WF_VAlign,
+  WF_Count
 };
 enum WidgetAlign { WA_Left = 0, WA_Center, WA_Right };
+// 縦の寄せ方。-1（指定なし）のときは、置く側の決めた既定になる
+enum WidgetVAlign { WV_Top = 0, WV_Middle, WV_Bottom };
+// こまごました入切（WF_Flags）
+enum WidgetFlag {
+  WFL_Float = 1,    // 値が小数（ui.slider / ui.drag の float の形）
+  WFL_Show = 2,     // 隠した字を見せる（ui.password）
+  WFL_Multi = 4,    // いくつも選べる（ui.listbox）
+  WFL_Open = 8      // 開いている（ui.tree）
+};
 
 // 型検査に使う仮の型。本物の Widget クラスは型検査のときに作られる
 // （core/check.cpp）ので、登録の時点では**名前だけ同じ**の仮の型を置いておき、
@@ -2126,6 +2143,16 @@ static bool make_widget(VM& vm, int kind, const Str& text, const Str& id, int64_
   o->fields.push(mk_str(Str()));   // カーソルを合わせたときに出す説明（.tooltip）
   o->fields.push(mk_str(Str()));   // 何も入っていないときに、うすく出す字（.placeholder）
   o->fields.push(mk_int(-1));      // ref で受けたときの、書き戻す var の番号（-1 は無い）
+  o->fields.push(mk_int(-1));      // 縁の色（.border）。-1 は指定なし
+  o->fields.push(mk_int(0));       // 縁の太さ（画素）
+  o->fields.push(mk_int(-1));      // 角の丸み（.radius）。-1 は指定なし
+  o->fields.push(mk_int(0));       // こまごました入切（WidgetFlag）
+  o->fields.push(mk_float(0));     // 小数の値
+  o->fields.push(mk_float(0));     // 小数の下
+  o->fields.push(mk_float(0));     // 小数の上
+  o->fields.push(mk_str(Str()));   // こまかい指定（入力に通す字など）
+  o->fields.push(mk_bytes(Str())); // 画像の画素（ui.image）
+  o->fields.push(mk_int(-1));      // 縦の寄せ方（.valign）。-1 は指定なし
   return true;
 }
 
@@ -2222,6 +2249,45 @@ NativeStatus n_widget_tooltip(VM& vm, Value* a, int n, Value& out) {
 NativeStatus n_widget_placeholder(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return widget_with_str(vm, a, WF_Hint, as_str(*val_deref(&a[1]))->s, out);
+}
+// 縁の色（.border）。太さを省くと 1 画素
+NativeStatus n_widget_border(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  InstObj* o = widget_copy(vm, a, out);
+  if (!o) return N_Panic;
+  widget_put(o, WF_Border, mk_int((int64_t)to_color(val_deref(&a[1])->i)));
+  if (o->fields[WF_BorderW].i < 1) widget_put(o, WF_BorderW, mk_int(1));
+  return N_Ok;
+}
+// 縁の色と太さ（.border(色, 太さ)）
+NativeStatus n_widget_border_w(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  InstObj* o = widget_copy(vm, a, out);
+  if (!o) return N_Panic;
+  int64_t t = val_deref(&a[2])->i;
+  widget_put(o, WF_Border, mk_int((int64_t)to_color(val_deref(&a[1])->i)));
+  widget_put(o, WF_BorderW, mk_int(t < 0 ? 0 : t));
+  return N_Ok;
+}
+// 角の丸み（.radius）。0 で四角に戻る
+NativeStatus n_widget_radius(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  int64_t v = val_deref(&a[1])->i;
+  return widget_with(vm, a, WF_Radius, v < 0 ? 0 : v, out);
+}
+// 縦の寄せ方（.valign）。書かなければ、置く側の決めた既定になる
+NativeStatus n_widget_valign(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  const Str& s = as_str(*val_deref(&a[1]))->s;
+  int va = WV_Top;
+  if (s == "middle") va = WV_Middle;
+  else if (s == "bottom") va = WV_Bottom;
+  else if (!(s == "top")) {
+    vm.panic(vm.L(Str("縦の寄せ方は top / middle / bottom のどれかです: ") + s,
+                  Str("valign must be top, middle or bottom: ") + s));
+    return N_Panic;
+  }
+  return widget_with(vm, a, WF_VAlign, va, out);
 }
 NativeStatus n_widget_align(VM& vm, Value* a, int n, Value& out) {
   (void)n;
@@ -2389,17 +2455,55 @@ static int ease_to(int cur, int to) {
   return d > 0 ? (next > to ? to : next) : (next < to ? to : next);
 }
 
-// 角を少し落とした四角を塗る。r が 0 ならただの四角。
+// 角を丸めた四角の、i 行目で左右から削るぶん。半径 r の円に沿って削る
+// （ui.fill_circle と同じ数え方）
+static int round_cut(int i, int h, int r) {
+  if (r <= 0) return 0;
+  int dy;
+  if (i < r) dy = r - i;                    // 上の角
+  else if (i >= h - r) dy = i - (h - 1 - r);  // 下の角
+  else return 0;
+  int k = 0;
+  while (k * k + dy * dy <= r * r) k++;     // 1つ行きすぎたところで止まる
+  int hw = k - 1;                            // その行での、丸みの半幅
+  if (hw < 0) hw = 0;
+  return r - hw;
+}
+
+// 角を丸めた四角を塗る。r が 0 ならただの四角。
 // 角を丸めるだけで、四角い部品はずいぶん柔らかく見える
 static void fill_round(int x, int y, int w, int h, int r, uint32_t c) {
   if (w <= 0 || h <= 0) return;
   if (r * 2 > w) r = w / 2;
   if (r * 2 > h) r = h / 2;
   for (int i = 0; i < h; i++) {
-    int cut = 0;
-    if (i < r) cut = r - i;
-    else if (i >= h - r) cut = i - (h - 1 - r);
+    int cut = round_cut(i, h, r);
     span(x + cut, y + i, w - cut * 2, c);
+  }
+}
+
+// 角を落とした四角の縁を引く。落とし方は fill_round と揃えてあるので、
+// 同じ r を渡せば塗りの上にぴったり乗る
+static void stroke_round(int x, int y, int w, int h, int r, int t, uint32_t c) {
+  if (w <= 0 || h <= 0 || t <= 0) return;
+  if (t * 2 > w) t = w / 2 > 0 ? w / 2 : 1;
+  if (t * 2 > h) t = h / 2 > 0 ? h / 2 : 1;
+  if (r * 2 > w) r = w / 2;
+  if (r * 2 > h) r = h / 2;
+  int iw = w - t * 2, ih = h - t * 2;
+  int ir = r - t;
+  if (ir < 0) ir = 0;
+  for (int i = 0; i < h; i++) {
+    int cut = round_cut(i, h, r);
+    int x0 = x + cut, ww = w - cut * 2;
+    if (ww <= 0) continue;
+    int j = i - t;                       // 内側（くり抜くところ）から見た行
+    if (j < 0 || j >= ih || iw <= 0) { span(x0, y + i, ww, c); continue; }
+    int icut = round_cut(j, ih, ir);
+    int ix0 = x + t + icut, iww = iw - icut * 2;
+    if (iww <= 0) { span(x0, y + i, ww, c); continue; }
+    span(x0, y + i, ix0 - x0, c);
+    span(ix0 + iww, y + i, x0 + ww - (ix0 + iww), c);
   }
 }
 
@@ -2527,6 +2631,10 @@ static void ui_reset_widgets() {
   g_num_text.clear();
   g_slide_id.clear();
   g_sliding = false;
+  g_sc_id.clear();
+  g_sc_px.clear();
+  g_sc_to.clear();
+  g_sc_drag.clear();
   g_multi_id.clear();
   g_multi_n = 0;
   g_multi_at = 0;
@@ -2700,6 +2808,29 @@ static Box intrinsic(const Value& v, int wrap_w) {
       }
       break;
     }
+    // 重ね置き。いちばん大きい中身の大きさになる
+    case WK_Stack: {
+      ListObj* k = w_kids(v);
+      for (int i = 0; i < k->v.size(); i++) {
+        Box c = measure(k->v[i], wrap_w);
+        if (c.w > b.w) b.w = c.w;
+        if (c.h > b.h) b.h = c.h;
+      }
+      break;
+    }
+    // 巻物。中身は縦に並ぶ。高さを決めていなければ中身のぶん（巻かれない）
+    case WK_Scroll: {
+      RowAxis axis(false);
+      ListObj* k = w_kids(v);
+      for (int i = 0; i < k->v.size(); i++) {
+        Box c = measure(k->v[i], wrap_w > 0 ? wrap_w - bar_w() : 0);
+        if (c.w > b.w) b.w = c.w;
+        b.h += c.h;
+        if (i + 1 < k->v.size()) b.h += gap_y();
+      }
+      b.w += bar_w();
+      break;
+    }
     case WK_Grid: {
       Vec<int> cw, rh;
       grid_axes(v, 0, 0, cw, rh);
@@ -2728,7 +2859,7 @@ static Box measure(const Value& v, int wrap_w) {
 // --- 取り分（fr）を配る ---------------------------------------------------
 static bool is_container(const Value& v) {
   int k = w_kind(v);
-  return k == WK_Row || k == WK_Column || k == WK_Grid;
+  return k == WK_Row || k == WK_Column || k == WK_Grid || k == WK_Stack || k == WK_Scroll;
 }
 
 static int grid_cols(const Value& v);   // 下（格子）で定義
@@ -2751,6 +2882,9 @@ static double eff_fr(const Value& v, bool horiz) {
   if (horiz ? w_wid(v) > 0 : w_hei(v) > 0) return 0;   // 画素で決めてあれば、そこで止まる
   ListObj* k = w_kids(v);
   int kind = w_kind(v);
+  // 巻物は、縦には受け継がない。中身がいくら伸びたがっても、巻物の高さは
+  // 書く人が決めるもので（決めなければ中身のぶん）、伸ばすと巻けなくなる
+  if (kind == WK_Scroll && !horiz) return 0;
   // 中身を見に行くあいだは、その入れ物の向きにする（上の spacer が見る）
   RowAxis axis(kind == WK_Row);
   if (kind == WK_Grid) {
@@ -2770,7 +2904,8 @@ static double eff_fr(const Value& v, bool horiz) {
     }
     return acc;
   }
-  bool stack = (kind == WK_Row) == horiz;   // その向きに積み上がるか
+  // その向きに積み上がるか。重ね置き（ui.stack）はどちらにも積み上がらない
+  bool stack = kind != WK_Stack && (kind == WK_Row) == horiz;
   double acc = 0;
   for (int i = 0; i < k->v.size(); i++) {
     double c = eff_fr(k->v[i], horiz);
@@ -4418,9 +4553,113 @@ static void tip_draw() {
 }
 
 // 横に並べたとき、背の低い部品を真ん中に置く（つまみと文字が並んだときに揃う）
-static int yy_of_row(const Value& row, int cy, int ch, int h) {
-  (void)row;
-  return ch > h ? cy + (ch - h) / 2 : cy;
+// 親がくれた高さ（ch）の中で、高さ h の子をどこに置くか。
+// 子が .valign を書いていればそれに従い、書いていなければ def になる
+static int yy_place(const Value& child, int cy, int ch, int h, int def) {
+  int va = (int)w_field(child, WF_VAlign);
+  if (va < 0) va = def;
+  if (ch <= h) return cy;
+  if (va == WV_Middle) return cy + (ch - h) / 2;
+  if (va == WV_Bottom) return cy + ch - h;
+  return cy;
+}
+
+// 巻物（ui.scroll）。中身は縦に並び、はみ出したぶんは右の帯で送る。
+// 覚えているのは「いま隠しているぶん」だけで、中身は毎回作り直されたままでよい
+static int sc_slot(const Str& id) {
+  for (int i = 0; i < g_sc_id.size(); i++) if (g_sc_id[i] == id) return i;
+  g_sc_id.push(id);
+  g_sc_px.push(0);
+  g_sc_to.push(0);
+  return g_sc_id.size() - 1;
+}
+
+static void place_scroll(const Value& v, int x, int y, const Box& b) {
+  RowAxis axis(false);
+  ListObj* k = w_kids(v);
+  int n = k->v.size();
+  Str key = widget_key(v, x, y);
+  int lp = line_pitch(1);
+
+  // 中身の高さを測る。帯が出ると中身のもらえる幅が狭まるので、そのときは測り直す
+  int inner_w = b.w;
+  int content = 0;
+  for (int pass = 0; pass < 2; pass++) {
+    content = 0;
+    for (int i = 0; i < n; i++) {
+      content += measure(k->v[i], inner_w).h;
+      if (i + 1 < n) content += gap_y();
+    }
+    if (content <= b.h || pass == 1) break;
+    inner_w = b.w - bar_w();
+  }
+  bool has_bar = content > b.h;
+  if (!has_bar) inner_w = b.w;
+  int max_px = has_bar ? content - b.h : 0;
+
+  int slot = sc_slot(key);
+  int to = g_sc_to[slot], cur = g_sc_px[slot];
+  bool over = inside(x, y, b.w, b.h);
+
+  // 右の帯。つまんで動かせる
+  int bw = bar_w() - 1;
+  if (bw < 2) bw = 2;
+  int bx = x + b.w - bw, by = y, bh = b.h;
+  int th = (has_bar && content > 0) ? bh * b.h / content : bh;
+  if (th < 8) th = 8;
+  if (th > bh) th = bh;
+  bool on_bar = has_bar && over && g_mx >= bx;
+  if (has_bar && g_mpress[0] && inside(bx, by, bw, bh)) {
+    g_sc_drag = key;
+    g_mpress[0] = false;      // この押しは帯が使い切る
+  }
+  if (!g_mb[0] && g_sc_drag.size() > 0 && g_sc_drag == key) g_sc_drag.clear();
+  bool dragging = has_bar && g_sc_drag.size() > 0 && g_sc_drag == key;
+
+  if (dragging) {
+    // つまみの真ん中がカーソルに来るように。つまんでいる間は寄せずにその場で合わせる
+    int room = bh - th;
+    to = room > 0 ? (g_my - by - th / 2) * max_px / room : 0;
+    cur = to;
+  } else if (has_bar && over && g_wheel_y != 0) {
+    to += take_wheel_px(lp);   // この巻物が送りを使い切る
+  }
+  if (to < 0) to = 0;
+  if (to > max_px) to = max_px;
+  cur = dragging ? to : ease_to(cur, to);
+  if (cur < 0) cur = 0;
+  if (cur > max_px) cur = max_px;
+  g_sc_px[slot] = cur;
+  g_sc_to[slot] = to;
+
+  // 中身を、送ったぶん上にずらして置く。切り抜きの外へは描かれない
+  int kx0 = g_cx0, ky0 = g_cy0, kx1 = g_cx1, ky1 = g_cy1;
+  if (x > g_cx0) g_cx0 = x;
+  if (y > g_cy0) g_cy0 = y;
+  if (x + inner_w - 1 < g_cx1) g_cx1 = x + inner_w - 1;
+  if (y + b.h - 1 < g_cy1) g_cy1 = y + b.h - 1;
+  // 巻いて隠れた部品が押しを受け取らないよう、外にいる間はカーソルを遠くへやる
+  int smx = g_mx, smy = g_my;
+  if (!over) { g_mx = -1000000; g_my = -1000000; }
+  int yy = y - cur;
+  for (int i = 0; i < n; i++) {
+    int hh = measure(k->v[i], inner_w).h;
+    place(k->v[i], x, yy, inner_w, hh);
+    yy += hh + gap_y();
+  }
+  g_mx = smx;
+  g_my = smy;
+  g_cx0 = kx0;
+  g_cy0 = ky0;
+  g_cx1 = kx1;
+  g_cy1 = ky1;
+
+  if (has_bar) {
+    for (int i = 0; i < bh; i++) span(bx, by + i, bw, blend(g_bg, g_fg, 0.18));
+    int at = max_px > 0 ? (bh - th) * cur / max_px : 0;
+    double lit = dragging ? 1.0 : (on_bar ? 0.85 : 0.7);
+    for (int i = 0; i < th; i++) span(bx, by + at + i, bw, blend(g_bg, g_accent, lit));
+  }
 }
 
 static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool root) {
@@ -4449,10 +4688,14 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
 
   int64_t bg = w_field(v, WF_Bg);
   int bk = w_kind(v);
+  int rad = (int)w_field(v, WF_Radius);
   // 自分で下地を塗る部品は、ここでは塗らない（枠の中だけを塗るため）
-  if (bg >= 0 && bk != WK_Button && bk != WK_Field && bk != WK_Area && bk != WK_Combo &&
-      bk != WK_List && bk != WK_Number)
-    for (int i = 0; i < h; i++) span(x, y + i, w, (uint32_t)bg);
+  bool self_bg = bk == WK_Button || bk == WK_Field || bk == WK_Area || bk == WK_Combo ||
+                 bk == WK_List || bk == WK_Number || bk == WK_Color || bk == WK_Drag;
+  if (bg >= 0 && !self_bg) {
+    if (rad > 0) fill_round(x, y, w, h, rad, (uint32_t)bg);
+    else for (int i = 0; i < h; i++) span(x, y + i, w, (uint32_t)bg);
+  }
 
   // カーソルが乗っていて、説明を持っていれば控えておく（描くのは、ぜんぶ置いたあと）。
   // 入れ物より中身のほうが後に置かれるので、細かいほうの説明が残る
@@ -4516,11 +4759,21 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
       for (int i = 0; i < k->v.size(); i++) {
         // 高さの取り分のある子は、並びの高さいっぱいに伸びる
         int hh = eff_fr(k->v[i], false) > 0 ? ch : measure(k->v[i], ws[i]).h;
-        place(k->v[i], xx, yy_of_row(v, cy, ch, hh), ws[i], hh);
+        place(k->v[i], xx, yy_place(k->v[i], cy, ch, hh, WV_Middle), ws[i], hh);
         xx += ws[i] + gap_x();
       }
       break;
     }
+    // 重ね置き。中身を同じところに、書いた順で重ねる（あとのものが上）
+    case WK_Stack: {
+      ListObj* k = w_kids(v);
+      for (int i = 0; i < k->v.size(); i++) {
+        int hh = eff_fr(k->v[i], false) > 0 ? ch : measure(k->v[i], cw).h;
+        place(k->v[i], cx, yy_place(k->v[i], cy, ch, hh, WV_Top), cw, hh);
+      }
+      break;
+    }
+    case WK_Scroll: place_scroll(v, cx, cy, cb); break;
     case WK_Grid: {
       ListObj* k = w_kids(v);
       int cols = grid_cols(v);
@@ -4534,7 +4787,7 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
           if (i >= k->v.size()) break;
           // 横に並べたときと同じく、背の低い升は行の真ん中に置く
           int hh = eff_fr(k->v[i], false) > 0 ? gh[r] : measure(k->v[i], gw[c]).h;
-          place(k->v[i], xx, yy_of_row(v, yy, gh[r], hh), gw[c], hh);
+          place(k->v[i], xx, yy_place(k->v[i], yy, gh[r], hh, WV_Middle), gw[c], hh);
           xx += gw[c] + gap_x();
         }
         yy += gh[r] + gap_y();
@@ -4542,6 +4795,14 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
       break;
     }
     default: break;
+  }
+
+  // 縁（.border）は中身のあとに引く。細い線でも中身に隠れない
+  int64_t bd = w_field(v, WF_Border);
+  if (bd >= 0) {
+    int t = (int)w_field(v, WF_BorderW);
+    if (t < 1) t = 1;
+    stroke_round(x, y, w, h, rad > 0 ? rad : 0, t, (uint32_t)bd);
   }
 }
 
@@ -4856,6 +5117,21 @@ static NativeStatus u_center(VM& vm, Value* a, int n, Value& out) {
   o->fields[WF_Align] = mk_int(WA_Center);
   return N_Ok;
 }
+// 重ね置き。中身を同じところに重ねる（絵の上に字を出す、など）
+static NativeStatus u_stack(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_widget(vm, WK_Stack, Str(), Str(), 0, 0, 0, A(a, 0), out) ? N_Ok : N_Panic;
+}
+// 巻物。高さを決めて（.height）、はみ出したぶんを送って見る
+static NativeStatus u_scroll(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_widget(vm, WK_Scroll, Str(), Str(), 0, 0, 0, A(a, 0), out) ? N_Ok : N_Panic;
+}
+static NativeStatus u_scroll_id(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  return make_widget(vm, WK_Scroll, Str(), as_str(*A(a, 0))->s, 0, 0, 0, A(a, 1), out)
+             ? N_Ok : N_Panic;
+}
 // 区切り線。置ける幅いっぱいに引く
 static NativeStatus u_divider(VM& vm, Value* a, int n, Value& out) {
   (void)a; (void)n;
@@ -5165,6 +5441,9 @@ void register_ui(Registry& r) {
   r.add("ui.row", u_row, tw, tlw);
   r.add("ui.grid", u_grid, tw, ti, tlw);
   r.add("ui.center", u_center, tw, tlw);
+  r.add("ui.stack", u_stack, tw, tlw);
+  r.add("ui.scroll", u_scroll, tw, tlw);
+  r.add("ui.scroll", u_scroll_id, tw, ts, tlw);
   r.add("ui.divider", u_divider, tw);
   Vec<Type*> no_params;
   Type* tact = t.func_type(no_params, tv);   // func() -> void

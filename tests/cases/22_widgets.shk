@@ -1,0 +1,79 @@
+// std.ui の上の層 — 飾り・重ね置き・巻物と、あとから足した部品（spec/library/ui.md）
+import std.ui;
+
+// 塗られている点の数。描けているかを数で見るのに使う
+func hits(x0: int, y0: int, x1: int, y1: int) -> int {
+  var n = 0;
+  for var y in range(y0, y1) {
+    for var x in range(x0, x1) {
+      if ui.get(x, y) != 0 { n += 1; }
+    }
+  }
+  return n;
+}
+
+func main() -> int {
+  var red = ui.rgb(255, 0, 0);
+  var green = ui.rgb(0, 255, 0);
+  var blue = ui.rgb(0, 0, 255);
+  ui.font_builtin();
+
+  // --- 縁（.border）---
+  ui.open(80, 40);
+  ui.clear(0);
+  _ = ui.show(ui.label("l").width(40).height(20).border(red), 0, 0);
+  print(f"{ui.get(0, 0)} {ui.get(39, 19)} {ui.get(20, 10)}");
+  ui.clear(0);
+  _ = ui.show(ui.label("l").width(40).height(20).border(red, 3), 0, 0);
+  print(f"{ui.get(2, 10)} {ui.get(3, 10)}");     // 3 画素ぶん太い
+
+  // --- 角の丸み（.radius）---
+  ui.clear(0);
+  _ = ui.show(ui.label("l").width(40).height(20).radius(8).background(blue), 0, 0);
+  print(f"{ui.get(0, 0)} {ui.get(20, 10)}");      // 角は落ちて、まん中は塗られる
+  ui.clear(0);
+  _ = ui.show(ui.label("l").width(40).height(20).radius(0).background(blue), 0, 0);
+  print(ui.get(0, 0));                            // 0 なら四角のまま
+
+  // --- 重ね置き（ui.stack）---
+  ui.clear(0);
+  _ = ui.show(ui.stack([ui.label("").width(40).height(20).background(blue),
+                        ui.label("").width(10).height(10).background(green)]), 0, 0);
+  print(f"{ui.get(0, 0)} {ui.get(30, 15)}");      // あとのものが上に来る
+  // 大きさは、いちばん大きい中身に合わせる
+  ui.clear(0);
+  _ = ui.show(ui.stack([ui.label("").width(10).height(10).background(green),
+                        ui.label("").width(40).height(20).background(blue)]), 0, 0);
+  print(f"{ui.get(39, 19)} {ui.get(40, 20)}");
+
+  // --- 縦の寄せ方（.valign）---
+  ui.clear(0);
+  _ = ui.show(ui.stack([ui.label("").width(40).height(30),
+                        ui.label("").width(8).height(8).background(red).valign("bottom")]), 0, 0);
+  print(f"{ui.get(0, 0)} {ui.get(0, 25)}");
+  ui.clear(0);
+  _ = ui.show(ui.stack([ui.label("").width(40).height(30),
+                        ui.label("").width(8).height(8).background(red).valign("middle")]), 0, 0);
+  print(ui.get(0, 12));
+
+  // --- 巻物（ui.scroll）---
+  var rows: list<Widget> = [];
+  for var i in range(20) { rows.push(ui.label(f"{i}").background(blue).width(20).height(10)); }
+  ui.open(80, 60);
+  ui.clear(0);
+  _ = ui.show(ui.scroll(rows).height(30), 0, 0);
+  print(f"{ui.get(0, 0)} {hits(0, 31, 80, 60)}");   // 中は出るが、下へははみ出さない
+  // 高さを決めなければ、中身のぶんだけ伸びる（巻かれない）
+  ui.open(80, 400);
+  ui.clear(0);
+  _ = ui.show(ui.scroll(rows), 0, 0);
+  print(f"{ui.get(0, 200) != 0} {hits(0, 0, 20, 400) > 0}");
+  // 名札を渡せる形も同じに置ける
+  ui.open(80, 60);
+  ui.clear(0);
+  _ = ui.show(ui.scroll("s", rows).height(30), 0, 0);
+  print(ui.get(0, 0));
+
+  ui.close();
+  return 0;
+}
