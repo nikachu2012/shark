@@ -59,7 +59,11 @@ Str to_utf8(const Vec<int>& v, int from, int upto) {
   return r;
 }
 
-int scale() { return 1; }
+// 画面の細かさ。既定は等倍。半端な細かさ（Windows の 150%、ブラウザの拡大）を
+// 試したいときは、台本から ratio を差し替える
+double ratio = 1.0;
+double pixel_ratio() { return ratio; }
+int scale() { return (int)(ratio + 0.5); }
 bool open(const char* t, int w, int h) { (void)t; (void)w; (void)h; g_open = true; return true; }
 void close() { g_open = false; }
 
@@ -203,6 +207,7 @@ void commit() {
 
 void reset() {
   im = Ime();
+  ratio = 1.0;
   frame = 0;
   same = false;
   q.clear();
@@ -219,6 +224,8 @@ const PlatformScreen kScreen = {
     0,      // マウスの形
     0,      // 大きさを変えられない窓
     false,  // 刻みはこちらで作れる
+    0,      // 機種のファイル選びは持たない
+    pixel_ratio,
 };
 
 

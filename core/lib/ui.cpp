@@ -277,6 +277,19 @@ static NativeStatus u_scale(VM& vm, Value* a, int n, Value& out) {
   out = mk_int(k < 1 ? 1 : k);
   return N_Ok;
 }
+// 画面の細かさ（丸めない）。1.5 のような半端な数もそのまま返す。
+// 持っていない機種では、丸めた数をそのまま渡す
+static NativeStatus u_pixel_ratio(VM& vm, Value* a, int n, Value& out) {
+  (void)vm; (void)a; (void)n;
+  const PlatformScreen* s = platform().screen;
+  double r = 1.0;
+  if (s && s->pixel_ratio) r = s->pixel_ratio();
+  else if (s && s->scale) r = (double)s->scale();
+  if (!(r >= 1.0)) r = 1.0;
+  if (r > 4.0) r = 4.0;
+  out = mk_float(r);
+  return N_Ok;
+}
 static NativeStatus u_visible(VM& vm, Value* a, int n, Value& out) {
   (void)vm; (void)a; (void)n; out = mk_bool(g_visible); return N_Ok;
 }
@@ -6322,6 +6335,7 @@ void register_ui(Registry& r) {
   r.add("ui.height", u_height, ti);
   r.add("ui.visible", u_visible, tb);
   r.add("ui.scale", u_scale, ti);
+  r.add("ui.pixel_ratio", u_pixel_ratio, tf);
   r.add("ui.present", u_present, tv);
   r.add("ui.frame", u_frame, tv);
   r.add("ui.frame", u_frame, tv, ti);

@@ -173,12 +173,20 @@ bool load() {
   return true;
 }
 
+// 画面の細かさ（丸めない）。macOS では 1 か 2 の整数になるが、
+// 移植層の約束としてこちらも持っておく（platform.h）
+double pixel_ratio() {
+  if (!load()) return 1.0;
+  Obj scr = send(C("NSScreen"), "mainScreen");
+  if (!scr) return 1.0;
+  double f = ((double (*)(Obj, Sel))msgSend)(scr, S("backingScaleFactor"));
+  if (!(f >= 1.0)) f = 1.0;
+  return f > 4.0 ? 4.0 : f;
+}
+
 // 画面の細かさ。HiDPI（Retina）なら 2。窓を開く前でも答えられる
 int screen_scale() {
-  if (!load()) return 1;
-  Obj scr = send(C("NSScreen"), "mainScreen");
-  if (!scr) return 1;
-  double f = ((double (*)(Obj, Sel))msgSend)(scr, S("backingScaleFactor"));
+  double f = pixel_ratio();
   int n = (int)(f + 0.5);
   return n < 1 ? 1 : (n > 4 ? 4 : n);
 }
@@ -860,7 +868,8 @@ const PlatformScreen kMacScreen = {mac::screen_scale,  mac::open,           mac:
                                   mac::text_replace,  mac::clipboard_get,  mac::clipboard_set,
                                   mac::set_redraw,    mac::set_cursor,     mac::set_resizable,
                                   false,    // 刻みはこちらで作る（眠って起きる）
-                                  mac::pick_file};
+                                  mac::pick_file,
+                                  mac::pixel_ratio};
 
 const PlatformScreen* mac_screen() { return mac::load() ? &kMacScreen : 0; }
 

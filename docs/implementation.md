@@ -290,7 +290,8 @@ for (;;) {
   拡大は補間しない（`magnificationFilter` を `nearest`）
 - **HiDPI**：窓の大きさは「面の画素 ÷ 画面の細かさ」の**点**で決め、
   層の `contentsScale` を細かさに合わせる。こうすると面の1画素が画面の1画素に乗る。
-  細かさは `[[NSScreen mainScreen] backingScaleFactor]` で、`ui.scale()` が返す。
+  細かさは `[[NSScreen mainScreen] backingScaleFactor]` で、`ui.scale()` と
+  `ui.pixel_ratio()` が返す（macOS では 1 か 2 の整数にしかならない）。
   マウスの位置は点で来るので、細かさを掛けてから面の画素に直す
 - 面の並び `0x00RRGGBB` を、そのまま
   `kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little` として読ませている
@@ -306,7 +307,14 @@ for (;;) {
   `biHeight` を負にして上の行から並べる。拡大は混ぜない（`COLORONCOLOR`）
 - **HiDPI**：`SetProcessDpiAwarenessContext` で「細かさはこちらが見る」と伝えるので、
   窓の中身の大きさは画面の画素そのもの。細かさは `GetDpiForWindow`（96 が等倍）で、
-  `ui.scale()` が返す
+  丸めた数を `ui.scale()` が、丸めない数を `ui.pixel_ratio()` が返す。
+  Windows は 125% / 150% / 175% をふつうに使うので、**丸めない方が正**
+- 窓を作るときに分かるのは系ぜんたいの細かさだけなので、乗った画面の細かさが
+  違ったら `AdjustWindowRectExForDpi` で外枠を計り直し、中身をきっかり
+  頼まれた画素の数に合わせる
+- 細かさの違う画面へ移されたら `WM_DPICHANGED` が来る。OS が勧める枠に
+  `SetWindowPos` で合わせる。これをしないと窓は前の画面の大きさのまま残り、
+  面の1画素が画面の1画素に乗らなくなってにじむ
 - 出来事は `PeekMessage` で**待たずに**取り、`TranslateMessage` に
   「打たれた文字」（`WM_CHAR`）を作ってもらう。上下に分かれた字（絵文字など）は
   片割れを覚えておいて組み立てる
@@ -322,6 +330,22 @@ for (;;) {
   Xlib の構造体は必要なぶんだけ書き写してある（並びは昔から変わっていない）
 - 画素は `XCreateImage` で1枚だけ作り、そこへ書いてから `XPutImage`
 - `DISPLAY` が無ければ開かない。`WM_DELETE_WINDOW` を「閉じてくれ」にする
+
+#### 窓（ブラウザ）
+
+- 中身は [core/platform/screen_canvas.inc](../core/platform/screen_canvas.inc)。
+  面は `putImageData` で `canvas` に流し込む。窓枠そのものも DOM で作る
+  （ホストが `Module.sharkMount` で置き場を決めていれば、そこへ面だけ出す）
+- **HiDPI**：`canvas` の**画素の数**は面の大きさそのままで、CSS の大きさを
+  `devicePixelRatio` で割って決める。ここは**丸めない数**を使う ―
+  ブラウザの細かさは 1.25 や 1.5 がふつうにあり、整数に丸めた数で割ると
+  canvas の画素が画面の画素に乗らず、ブラウザが引き伸ばし直して**にじむ**
+- 引き伸ばし方（`image-rendering`）は、画面の画素との倍率がきっちり整数のときだけ
+  `pixelated`（ドット絵がぼけない）。置き場に入りきらずに縮めているときは
+  `auto` にしてブラウザにならしてもらう（画素を並べると、行や列がとびとびに重なる）
+- 細かさは後から変わる（ブラウザの拡大、細かさの違う画面へ移す）。
+  `matchMedia('(resolution: Ndppx)')` で見張り、変わったら面を取り直す
+  （`SEV_Resize`。macOS の窓の縁を引かれたのと同じ道）
 
 #### 車輪（ホイール）
 

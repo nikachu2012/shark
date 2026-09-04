@@ -18,9 +18,13 @@ const PlatformScreen* win_screen() { return 0; }
 
 namespace win {
 
-// 横の車輪は新しめの SDK にしか無い。無ければ番号を直に置く
+// 横の車輪と「画面の細かさが変わった」の知らせは、新しめの SDK にしか無い。
+// 無ければ番号を直に置く
 #ifndef WM_MOUSEHWHEEL
 #define WM_MOUSEHWHEEL 0x020E
+#endif
+#ifndef WM_DPICHANGED
+#define WM_DPICHANGED 0x02E0
 #endif
 
 // --- 引いてくる関数 -------------------------------------------------------
@@ -182,15 +186,34 @@ bool load() {
   return true;
 }
 
-// 画面の細かさ。OS は 1インチあたりの点の数で答える。96 が等倍、192 なら 2 倍
-int screen_scale() {
-  if (!load()) return 1;
+// いま窓が乗っている画面の、1インチあたりの点の数。96 が等倍、192 なら 2 倍。
+// 窓を開く前は、系ぜんたいの数で答える
+UINT dpi_now() {
   UINT dpi = 0;
   if (g.open && GetDpiForWindow_) dpi = GetDpiForWindow_(g.win);
   if (!dpi && GetDpiForSystem_) dpi = GetDpiForSystem_();
+  return dpi;
+}
+
+// 画面の細かさ。OS は 1インチあたりの点の数で答える。96 が等倍、192 なら 2 倍
+int screen_scale() {
+  if (!load()) return 1;
+  UINT dpi = dpi_now();
   if (!dpi) return 1;
   int s = (int)((dpi + 48) / 96);   // 96 きざみで四捨五入する
   return s < 1 ? 1 : (s > 4 ? 4 : s);
+}
+
+// 丸めない細かさ。Windows は 125%・150%・175% を**ふつうに使う**ので、
+// 整数に丸めた数で面を取ると、窓の大きさも字の大きさもそのぶんずれる。
+// std.ui はこちらで面の大きさを決める（ui.pixel_ratio()）
+double pixel_ratio() {
+  if (!load()) return 1.0;
+  UINT dpi = dpi_now();
+  if (!dpi) return 1.0;
+  double r = (double)dpi / 96.0;
+  if (r < 1.0) r = 1.0;
+  return r > 4.0 ? 4.0 : r;
 }
 
 // **本当に小さい面だけ**、整数倍に広げる（ゲーム機のようなドット絵のため）。
@@ -707,6 +730,17 @@ LRESULT CALLBACK wndproc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_SETCURSOR:
       if (LOWORD(lp) == HTCLIENT) { apply_cursor(); return TRUE; }
       break;
+    // 細かさの違う画面へ移された。OS が「この枠がよい」と言ってくるので、
+    // その通りに置き直す。これをしないと窓は前の画面の大きさのまま残り、
+    // 面の1画素が画面の1画素に乗らなくなって**にじむ**
+    case WM_DPICHANGED: {
+      const RECT* nr = (const RECT*)lp;
+      if (nr && SetWindowPos_)
+        SetWindowPos_(hw, 0, (int)nr->left, (int)nr->top,
+                      (int)(nr->right - nr->left), (int)(nr->bottom - nr->top),
+                      SWP_NOZORDER | SWP_NOACTIVATE);
+      return 0;   // 続いて WM_SIZE が来るので、面はそちらで作り直される
+    }
     case WM_ENTERSIZEMOVE: g.sizing = true; return 0;
     case WM_EXITSIZEMOVE:  g.sizing = false; return 0;
     case WM_SIZE:
@@ -754,6 +788,20 @@ bool open(const char* title, int w, int h) {
 
   if (!rebuild(w, h)) { DestroyWindow_(g.win); g.win = 0; return false; }
   g.rw = w; g.rh = h;
+  // 外枠の太さは画面の細かさで変わるが、作るときには**系ぜんたいの数**しか
+  // 分からない。細かさの違う画面に乗ったときは、そこの数で計り直して、
+  // 中身がきっかり頼まれた画素の数になるようにする
+  if (GetDpiForWindow_ && AdjustWindowRectExForDpi_ && SetWindowPos_) {
+    UINT wd = GetDpiForWindow_(g.win);
+    if (wd && wd != dpi) {
+      RECT r2;
+      r2.left = 0; r2.top = 0;
+      r2.right = (LONG)(w * g.scale); r2.bottom = (LONG)(h * g.scale);
+      AdjustWindowRectExForDpi_(&r2, style, FALSE, 0, wd);
+      SetWindowPos_(g.win, 0, 0, 0, (int)(r2.right - r2.left), (int)(r2.bottom - r2.top),
+                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+  }
   g.sizing = false;
   g.redraw = 0;
   g.hi = 0;
@@ -975,7 +1023,8 @@ const PlatformScreen kWinScreen = {win::screen_scale,  win::open,  win::close,
                                    win::set_redraw,
                                    win::set_cursor,    win::set_resizable,
                                    false,    // 刻みはこちらで作る（眠って起きる）
-                                   win::pick_file};
+                                   win::pick_file,
+                                   win::pixel_ratio};
 
 const PlatformScreen* win_screen() { return win::load() ? &kWinScreen : 0; }
 

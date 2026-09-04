@@ -831,6 +831,20 @@ int s_scale() {
   return 1;
 }
 
+// 丸めない細かさ。持っていない出し先では、丸めた数をそのまま渡す
+double one_ratio(const PlatformScreen* s) {
+  if (s->pixel_ratio) return s->pixel_ratio();
+  return s->scale ? (double)s->scale() : 1.0;
+}
+double s_pixel_ratio() {
+  if (g_active) return one_ratio(g_active);
+  if (ui_off()) return 1.0;
+  if (const PlatformScreen* m = mac_screen()) return one_ratio(m);
+  if (const PlatformScreen* w = win_screen()) return one_ratio(w);
+  if (const PlatformScreen* x = x11_screen()) return one_ratio(x);
+  return 1.0;
+}
+
 // 中身は s_open が差し替える。ここでは入れ物だけ作る
 struct ScreenInit {
   ScreenInit() {
@@ -852,6 +866,7 @@ struct ScreenInit {
     kScreen.set_resizable = s_set_resizable;
     kScreen.host_paced = false;   // 刻みはこちらで作る（眠って起きる）
     kScreen.pick_file = s_pick_file;
+    kScreen.pixel_ratio = s_pixel_ratio;
   }
 };
 ScreenInit g_screen_init;

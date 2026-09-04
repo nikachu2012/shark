@@ -39,6 +39,16 @@ EM_JS(int, cv_scale, (), {
   return k > 4 ? 4 : k;
 });
 
+// 丸めない細かさ。ブラウザでは 1.25 や 1.5 がふつうにある（Windows の拡大表示、
+// ブラウザ自身の拡大、携帯の画面）。整数に丸めた数で面を取ると、面の1画素が
+// 画面の1画素に乗らず、ブラウザが引き伸ばし直すので**にじむ**
+EM_JS(double, cv_dpr, (), {
+  if (typeof window === 'undefined') return 1;
+  var d = window.devicePixelRatio || 1;
+  if (!(d >= 1)) d = 1;
+  return d > 4 ? 4 : d;
+});
+
 // 貼り付け（Ctrl+V）で届いたものを覚えておく置き場。窓が無くても使えるので、
 // 持ち物とは別にしてある。ブラウザからは、こちらから読みに行けない
 EM_JS(void, cv_clip_init, (), {
@@ -238,7 +248,7 @@ EM_JS(void, cv_window_init, (), {
   };
 });
 
-EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
+EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, double dpr), {
   if (typeof document === 'undefined' || !document.body) return 0;   // node には画面が無い
   var EV = Module.__shark_ev;
   var KEYS = Module.__shark_keys;
@@ -251,7 +261,7 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
   if (!mount) mount = document.getElementById('shark-screen');
   var win = null;
   if (!mount) {
-    win = Module.__shark_make_window(name, w * zoom / dpi, h * zoom / dpi);
+    win = Module.__shark_make_window(name, w * zoom / dpr, h * zoom / dpr);
     mount = win.box;
   }
   // 変換の受け皿を面の上に置くので、位置の基準になってもらう
@@ -263,9 +273,11 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
   c.height = h;
   c.tabIndex = 0;                       // キーを受け取れるようにする
   c.setAttribute('aria-label', name);
-  // 面の1画素は画面の1画素。小さい面だけ zoom 倍に引き伸ばす（ぼかさない）
+  // 面の1画素は画面の1画素。小さい面だけ zoom 倍に引き伸ばす（ぼかさない）。
+  // 大きさは**丸めない細かさ**で割る。1.5 のような半端な画面でも、こうすると
+  // canvas の1画素が画面の1画素にきっちり乗る（下の fit も同じ）
   c.style.cssText = 'display:block;outline:none;touch-action:none;image-rendering:pixelated;' +
-      'width:' + (w * zoom / dpi) + 'px;height:' + (h * zoom / dpi) + 'px';
+      'width:' + (w * zoom / dpr) + 'px;height:' + (h * zoom / dpr) + 'px';
   mount.appendChild(c);
 
   // --- 持ち物 ---
@@ -284,7 +296,7 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
   S.boxw = 0;        // 出す先の大きさ（CSS の点）。0 はまだ測っていない
   S.boxh = 0;
   S.zoom = zoom;
-  S.dpi = dpi;
+  S.dpr = dpr;     // 丸めない細かさ
   S.resizable = true;
   S.textOn = false;
   S.textMulti = false;
@@ -298,13 +310,19 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
   // 出す先がそれより狭ければ、縦横の比を保ったまま縮めて収める（窓と違って、板の
   // 大きさはこちらでは決められない）
   function fit() {
-    var dw = S.sw * S.zoom / S.dpi;   // 出したい大きさ（CSS の点）
-    var dh = S.sh * S.zoom / S.dpi;
+    var dw = S.sw * S.zoom / S.dpr;   // 出したい大きさ（CSS の点）
+    var dh = S.sh * S.zoom / S.dpr;
     var r = S.mount.getBoundingClientRect();
     var k = 1;
     if (r.width >= 1 && r.height >= 1) k = Math.min(1, r.width / dw, r.height / dh);
     S.canvas.style.width = (dw * k) + "px";
     S.canvas.style.height = (dh * k) + "px";
+    // 面の1画素が画面の何画素になるか。きっちり整数倍のときだけ画素をそのまま
+    // 並べる（ドット絵がぼけない）。半端なときに画素を並べると、行や列が
+    // とびとびに重なって**ひどく荒れる**ので、ブラウザにならしてもらう
+    var n = dw * k * S.dpr / (S.sw || 1);
+    var exact = Math.abs(n - Math.round(n)) < 0.01 && Math.round(n) >= 1;
+    S.canvas.style.imageRendering = exact ? 'pixelated' : 'auto';
   }
   S.fit = fit;
 
@@ -437,7 +455,8 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
   on(window, 'blur', release);
 
   // --- 出す先の大きさが変わったら、窓の縁を引かれたのと同じに扱う ---
-  function onBox() {
+  // force は「大きさは同じでも、画面の細かさが変わったので取り直す」しるし
+  function onBox(force) {
     fit();
     if (!S.resizable) return;
     var r = mount.getBoundingClientRect();
@@ -445,13 +464,13 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
     if (!(S.boxw > 0)) {   // 初めて測れた。ここを元の大きさとして覚える
       S.boxw = r.width;
       S.boxh = r.height;
-      return;
+      if (!force) return;
     }
-    if (Math.abs(r.width - S.boxw) < 1 && Math.abs(r.height - S.boxh) < 1) return;
+    if (!force && Math.abs(r.width - S.boxw) < 1 && Math.abs(r.height - S.boxh) < 1) return;
     S.boxw = r.width;
     S.boxh = r.height;
-    var nw = Math.round(r.width * S.dpi / S.zoom);
-    var nh = Math.round(r.height * S.dpi / S.zoom);
+    var nw = Math.round(r.width * S.dpr / S.zoom);
+    var nh = Math.round(r.height * S.dpr / S.zoom);
     if (nw < 1) nw = 1;
     if (nh < 1) nh = 1;
     if (nw === S.rw && nh === S.rh) return;
@@ -465,11 +484,32 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, int dpi), {
     push(q);
   }
   if (typeof ResizeObserver !== 'undefined') {
-    S.ro = new ResizeObserver(onBox);
+    S.ro = new ResizeObserver(function () { onBox(false); });
     S.ro.observe(mount);
   } else {
-    on(window, 'resize', onBox);
+    on(window, 'resize', function () { onBox(false); });
   }
+
+  // 画面の細かさは、あとから変わる（ブラウザの拡大、別の画面へ動かす）。
+  // 変わったら面を取り直さないと、1画素が1画素に乗らなくなってにじむ。
+  // 「いまの細かさである間だけ真」という問いを立て、それが偽になったら気づく
+  function watchDpr() {
+    if (!window.matchMedia) return;
+    if (S.dprMq && S.dprMq.removeEventListener) S.dprMq.removeEventListener('change', S.dprFn);
+    S.dprMq = window.matchMedia('(resolution: ' + S.dpr + 'dppx)');
+    if (!S.dprMq.addEventListener) { S.dprMq = null; return; }   // 古いブラウザ
+    S.dprMq.addEventListener('change', S.dprFn);
+  }
+  S.dprFn = function () {
+    var d = window.devicePixelRatio || 1;
+    if (!(d >= 1)) d = 1;
+    if (d > 4) d = 4;
+    if (d === S.dpr) return;
+    S.dpr = d;
+    watchDpr();
+    onBox(true);   // 大きさは同じでも、画面の画素の数が変わっている
+  };
+  watchDpr();
   var r0 = mount.getBoundingClientRect();
   if (r0.width >= 1 && r0.height >= 1) {
     S.boxw = r0.width;
@@ -500,6 +540,7 @@ EM_JS(void, cv_close, (), {
   for (var i = 0; i < S.listeners.length; i++)
     S.listeners[i][0].removeEventListener(S.listeners[i][1], S.listeners[i][2]);
   if (S.ro) S.ro.disconnect();
+  if (S.dprMq && S.dprMq.removeEventListener) S.dprMq.removeEventListener('change', S.dprFn);
   if (S.ta && S.ta.parentNode) S.ta.parentNode.removeChild(S.ta);
   if (S.win) {
     S.win.dispose();
@@ -597,7 +638,7 @@ EM_JS(void, cv_text_input, (int on, const char* initial, int x, int y, int h, in
     S.mount.appendChild(ta);
     S.ta = ta;
   }
-  var k = S.zoom / S.dpi;   // 面の画素 → CSS の点
+  var k = S.zoom / S.dpr;   // 面の画素 → CSS の点
   S.ta.style.display = 'block';
   S.ta.style.left = (S.canvas.offsetLeft + x * k) + 'px';
   S.ta.style.top = (S.canvas.offsetTop + y * k) + 'px';
@@ -717,9 +758,9 @@ struct G {
   bool open;
   int sw, sh;      // 面の大きさ
   int zoom;        // 面の1画素を画面の何画素にするか（小さい面だけ引き伸ばす）
-  int dpi;         // 画面の細かさ
+  double dpr;      // 画面の細かさ（丸めない。1.5 などもある）
   bool resizable;
-  G() : open(false), sw(0), sh(0), zoom(1), dpi(1), resizable(true) {}
+  G() : open(false), sw(0), sh(0), zoom(1), dpr(1.0), resizable(true) {}
 };
 G g;
 
@@ -741,6 +782,14 @@ int screen_scale() {
   if (ui_off()) return 1;
   int k = cv_scale();
   return k < 1 ? 1 : k;
+}
+
+// 丸めない細かさ。std.ui はこれで面の大きさを決める（ui.pixel_ratio()）
+double pixel_ratio() {
+  if (ui_off()) return 1.0;
+  double d = cv_dpr();
+  if (!(d >= 1.0)) d = 1.0;
+  return d > 4.0 ? 4.0 : d;
 }
 
 // **本当に小さい面だけ**、整数倍に広げる（ゲーム機のようなドット絵のため）。
@@ -783,14 +832,13 @@ bool open(const char* title, int w, int h) {
   if (ui_off()) return false;
   init_js();
   int zoom = pick_zoom(w, h);
-  int dpi = cv_scale();
-  if (dpi < 1) dpi = 1;
-  if (!cv_open((title && title[0]) ? title : "Shark", w, h, zoom, dpi)) return false;
+  double dpr = pixel_ratio();
+  if (!cv_open((title && title[0]) ? title : "Shark", w, h, zoom, dpr)) return false;
   g.open = true;
   g.sw = w;
   g.sh = h;
   g.zoom = zoom;
-  g.dpi = dpi;
+  g.dpr = dpr;
   g.resizable = true;
   return true;
 }
@@ -918,4 +966,5 @@ const PlatformScreen kCanvasScreen = {
     // 機種のファイル選びは持たない。ブラウザの <input type="file"> は選び終わるまで
     // 返らない形では呼べず、ui.pick_file() は**その場で道を返す**約束のため
     // （spec/library/ui.md）。ブラウザでは、いつも値なしが返る
-    0};
+    0,
+    canvas::pixel_ratio};

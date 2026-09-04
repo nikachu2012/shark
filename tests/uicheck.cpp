@@ -788,6 +788,55 @@ struct TipCase : Case {
   }
 };
 
+// 台本の要らない見張り。1回動かして、出た行をそのまま見比べる
+static void run_once(const char* label, const char* src, const char* want) {
+  g_out.clear();
+  Config cfg;
+  Engine e(cfg);
+  HostIO io;
+  io.write_out = grab_out;
+  e.set_io(io);
+  const Vec<Diagnostic>& ds = e.load(Str("uicheck"), Str(src));
+  for (int i = 0; i < ds.size(); i++)
+    if (ds[i].severity == SEV_ERROR) printf("        %s\n", ds[i].message.c_str());
+  if (!e.ok()) {
+    printf("    fail  %s: 読み込めなかった\n", label);
+    g_fail++;
+    return;
+  }
+  int rounds = 0;
+  while (e.step(200000) == SK_Running && rounds < 500) rounds++;
+  expect_line(label, take_line(), want);
+}
+
+// 丸めない細かさ（ui.pixel_ratio）。Windows の 125%・150% 表示やブラウザの拡大では
+// 細かさが半端な数になる。整数に丸めた ui.scale() で面を取ると、面の1画素が
+// 画面の1画素に乗らず、機種の側で引き伸ばし直されてにじむ。
+// ここは「丸めない数で取れば、面がきっちり画面の画素の数になる」ことを見張る
+static void check_pixel_ratio() {
+  printf("  丸めない細かさ（ui.pixel_ratio）\n");
+  struct { double ratio; const char* want; } t[] = {
+      {1.0,  "1 420 300 12"},
+      {1.25, "1 525 375 15"},   // 丸めると 1。420 のままでは画面より粗い
+      {1.5,  "2 630 450 18"},   // 丸めると 2。840 では画面より細かすぎる
+      {2.0,  "2 840 600 24"},
+  };
+  const char* src =
+      "import std.ui;\n"
+      "func main() -> int {\n"
+      "  var r = ui.pixel_ratio();\n"
+      "  ui.open(\"t\", int(420.0 * r + 0.5), int(300.0 * r + 0.5));\n"
+      "  print(f\"{ui.scale()} {ui.width()} {ui.height()} {int(12.0 * r + 0.5)}\");\n"
+      "  return 0;\n"
+      "}\n";
+  for (int i = 0; i < (int)(sizeof t / sizeof t[0]); i++) {
+    fake::reset();
+    fake::ratio = t[i].ratio;
+    run_once("面の大きさ（細かさ・面・字）", src, t[i].want);
+  }
+  fake::reset();
+}
+
 int main() {
   printf("uicheck\n");
 
@@ -1143,6 +1192,8 @@ int main() {
             "}\n");
     run("折りたためる木（ui.tree）", src.c_str(), &tree);
   }
+
+  check_pixel_ratio();
 
   TipCase tip;
   run("説明（.tooltip）",

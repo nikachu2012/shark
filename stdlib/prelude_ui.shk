@@ -30,9 +30,12 @@ public func run(title: string, width: int, height: int,
                 view: func() -> Widget,
                 update: func(string) -> void,
                 resizable: bool) -> void {
-  var k = ui.scale();
-  ui.open(title, width * k, height * k, resizable);
-  if ui.font_name() == "" { _ = ui.font(12 * k); }
+  // 面は**画面の画素と1対1**に取る。細かさは丸めない数を使う ―
+  // Windows の 125% やブラウザの拡大では 1.25・1.5 のような半端な数になり、
+  // 整数に丸めた大きさで取ると機種が縮め直すので、字も線もにじむ
+  var r = ui.pixel_ratio();
+  ui.open(title, int(float(width) * r + 0.5), int(float(height) * r + 0.5), resizable);
+  if ui.font_name() == "" { _ = ui.font(int(12.0 * r + 0.5)); }
 
   // 画面が無いところ（SHARK_UI=off など）では、1回だけ描いて返る。
   // 面はそのままにしておくので、ui.get() や ui.to_png() で結果を見られる
