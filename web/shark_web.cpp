@@ -15,6 +15,7 @@
 
 #include "../core/platform/web.h"
 #include "../core/registry.h"   // ui_shutdown（core/lib/ui.cpp）
+#include "../core/fmt_src.h"
 #include "../core/shark.h"
 
 using namespace shark;
@@ -290,6 +291,19 @@ API int shk_load(const char* name, const char* source) {
   for (int i = 0; i < ds.size(); i++) if (ds[i].severity == SEV_ERROR) errs++;
   return errs;
 }
+
+// 見た目を整える（core/fmt_src.cpp）。読めないソースは、もとのまま返る。
+// 整えられたかどうかは shk_formatted() で分かる
+Str g_fmt;
+int g_fmt_ok = 0;
+
+API const char* shk_format(const char* source) {
+  bool ok = false;
+  g_fmt = format_source(Str(source ? source : ""), &ok);
+  g_fmt_ok = ok ? 1 : 0;
+  return g_fmt.c_str();
+}
+API int shk_formatted() { return g_fmt_ok; }
 
 // 直前の shk_load() が返した診断（JSON）
 API const char* shk_diagnostics() { return g_answer.c_str(); }

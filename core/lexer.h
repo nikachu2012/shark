@@ -24,6 +24,9 @@ enum TokKind : uint8_t {
   TK_Break, TK_Continue, TK_Class, TK_This, TK_Super, TK_ThisType,
   TK_Public, TK_Private, TK_Virtual, TK_Override, TK_Ref, TK_Import, TK_As,
   TK_Task, TK_Parallel, TK_Try, TK_Panic, TK_True, TK_False, TK_None,
+  // コメント。ふつうは読み飛ばすが、keep_comments を立てたときだけ出す
+  // （整形（core/fmt_src.cpp）がコメントを落とさないために要る）
+  TK_Comment,
 };
 
 struct Token {
@@ -41,6 +44,9 @@ class Lexer {
   Lexer(const Str& src, DiagBag& diag, int line0 = 1, int col0 = 1);
   // 全部読み切る。誤りがあれば diag に入れ、そこまでを返す
   void run(Vec<Token>* out);
+  // コメントも TK_Comment として出す。整形（core/fmt_src.cpp）だけが立てる。
+  // 構文解析はコメントを知らないので、ふつうは立てない
+  void keep_comments(bool on) { keep_ = on; }
 
  private:
   void push(Vec<Token>* out, TokKind k, int line, int col, int start);
@@ -50,6 +56,7 @@ class Lexer {
   const Str& s_;
   DiagBag& diag_;
   int i_, line_, col_;
+  bool keep_;   // コメントも出すか
 };
 
 const char* tok_name(TokKind k);

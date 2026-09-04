@@ -14,8 +14,7 @@
 | 5 | ホストの関数にクラスを渡せるようにするか | 組み込み | runtime/embedding.md |
 | 6 | 実行の途中状態を保存できるようにするか | 組み込み | runtime/embedding.md |
 | 7 | 言語サーバとして常駐させるか | 別実装 | frontend.md |
-| 8 | 整形の細かい規則 | 別実装 | frontend.md |
-| 9 | ツールをコアと同梱で配るか | 別実装 | frontend.md |
+| 8 | ツールをコアと同梱で配るか | 別実装 | frontend.md |
 
 ---
 
@@ -84,7 +83,6 @@
 コアの仕様の外。コマンドライン実装を作るときに決める（[frontend.md](frontend.md)）。
 
 - 言語サーバとして常駐させるか、`shark` を都度呼ぶか
-- 整形の細かい規則（字下げ幅、1行の長さ）
 - ツールをコアと同梱で配るか、別に配るか
 
 ---
@@ -104,6 +102,7 @@
 | 言語ごとの辞書順 | 日本語（五十音順）だけ入れる。漢字は読みが要るので対象外 | [library/text.md](library/text.md) |
 | パッケージの配布 | 持たない。`import` の手間は編集環境の側で減らす | [runtime/module.md](runtime/module.md), [frontend.md](frontend.md) |
 | JSON とクラスの相互変換 | 自動変換はしない。代わりに読み出しを短く書けるようにする | [library/json.md](library/json.md) |
+| 整形の細かい規則 | 改行は書いた人のまま。字下げ・空き・空き行だけを揃え、行の折り返しは決めない | [frontend.md](frontend.md) |
 | 実装に使う言語 | C++。例外と RTTI は使わない | [skeleton.md](skeleton.md) |
 | 雛形の配り方 | git で配る。触る場所を絞ることで、上流の直しを取り込みやすくする | [skeleton.md](skeleton.md) |
 | 複数のチャネルを待つ書き方 | `select` は持たない。送り手を増やす（多対一）か、チャネルと受け手を分ける | [runtime/concurrency.md](runtime/concurrency.md) |

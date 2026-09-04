@@ -163,7 +163,6 @@ frontend/
 | `ui.window(...) { }` の記法 | 呼び出しにブロックを続ける記法が言語に無い。宣言的な UI は**部品を入れ子にして1つ返す形**（入れ子は配列で渡す）で入れてある（[spec/library/ui.md](../spec/library/ui.md)、[ui-declarative.md](../spec/library/ui-declarative.md)） |
 | 内蔵の字形での日本語 | 内蔵は ASCII だけ。日本語は FreeType（任意の外部ライブラリ）で出す |
 | 実行時コンパイル（JIT） | 仕様でも任意機能。いまは常に仮想マシンで実行する。結果は変わらない |
-| `shark fmt` | 整形の規則がまだ決まっていない（[spec/open-questions.md](../spec/open-questions.md)） |
 | 言語サーバ | 同上。`shark check` の出力をそのまま使う形にしてある |
 | `std.text` の一部 | 正規化は仮名の濁点の合成・分解だけ。文字コード変換は `utf-8` のみ（それ以外は失敗を返す） |
 | 複数スレッドへの割り振り | 仕様どおり既定の1本のまま |

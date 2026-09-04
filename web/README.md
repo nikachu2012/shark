@@ -239,6 +239,7 @@ class Shark : Fish {
 | `shk_error()` | 止まった理由（JSON。理由・場所・呼び出しの経路） |
 | `shk_exit_code()` / `shk_test_passed()` / `shk_test_total()` | 終了コード / テストの結果 |
 | `shk_memory_used()` / `shk_memory_limit()` | 使っている量 / 上限（バイト） |
+| `shk_format(source)` / `shk_formatted()` | 見た目を整えたソース / 整えられたか（`shark fmt` と同じもの） |
 | `shk_modules()` / `shk_explain(code)` / `shk_version()` | モジュールの一覧 / 番号の説明 / 版 |
 
 いちばん短い使い方:

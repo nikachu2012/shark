@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../core/fmt_src.h"
 #include "../core/platform/platform.h"
 #include "../core/runtime.h"
 #include "../core/shark.h"
@@ -469,6 +470,49 @@ static int cmd_explain(const Str& code, Lang lang) {
   return 0;
 }
 
+// --- 整える（shark fmt）---------------------------------------------------
+// 中身を整えるのはコア（core/fmt_src.cpp）。ここはファイルの読み書きだけ。
+//   shark fmt <file.shk>       整えたものを画面に出す
+//   shark fmt -w <file.shk>…   ファイルを書き換える
+//   shark fmt --check <file>…  整っていなければ 1 で終わる（CI で使う）
+static int cmd_fmt(const Vec<Str>& files, bool write, bool check) {
+  int bad = 0;
+  for (int i = 0; i < files.size(); i++) {
+    Str src;
+    if (!read_file(files[i], &src)) {
+      fprintf(stderr, "読めません: %s\n", files[i].c_str());
+      bad = 2;
+      continue;
+    }
+    bool ok = false;
+    Str out = format_source(src, &ok);
+    if (!ok) {
+      fprintf(stderr, "整えられません（読めないソースです）: %s\n", files[i].c_str());
+      bad = 2;
+      continue;
+    }
+    if (check) {
+      if (!(out == src)) {
+        printf("%s\n", files[i].c_str());
+        if (bad == 0) bad = 1;
+      }
+      continue;
+    }
+    if (write) {
+      if (out == src) continue;   // 変わらないなら書かない（更新の刻限も動かさない）
+      if (!write_file(files[i], out, false)) {
+        fprintf(stderr, "書けません: %s\n", files[i].c_str());
+        bad = 2;
+        continue;
+      }
+      printf("%s\n", files[i].c_str());
+      continue;
+    }
+    fwrite(out.data(), 1, (size_t)out.size(), stdout);
+  }
+  return bad;
+}
+
 static void usage() {
   printf(
       "Shark🦈  ゲーム機で動く学習用プログラミング言語\n"
@@ -478,6 +522,7 @@ static void usage() {
       "  shark check <file.shk>    型検査だけを行う\n"
       "  shark build <file.shk>    どこでも動く1つのファイルにする（実行装置＋バイトコード）\n"
       "  shark test [file.shk]     test_ で始まる関数を走らせる（省略すると *_test.shk 全部）\n"
+      "  shark fmt <file.shk>…     見た目を整える（-w で書き換え、--check で確かめるだけ）\n"
       "  shark explain E0102       エラーの詳しい説明を出す\n"
       "  shark modules             この処理系が持つモジュールを並べる\n"
       "\n"
@@ -556,6 +601,17 @@ int main_impl(int argc, char** argv) {
     }
     if (target.size() == 0) return cmd_test_dir(lang, color, filter);
     return cmd_test(target, lang, color, filter);
+  }
+  if (cmd == "fmt") {
+    bool write = false, check = false;
+    Vec<Str> files;
+    for (int i = 1; i < rest.size(); i++) {
+      if (rest[i] == "-w" || rest[i] == "--write") { write = true; continue; }
+      if (rest[i] == "--check") { check = true; continue; }
+      files.push(rest[i]);
+    }
+    if (files.size() == 0) { usage(); return 2; }
+    return cmd_fmt(files, write, check);
   }
   if (cmd == "explain") {
     if (rest.size() < 2) { usage(); return 2; }

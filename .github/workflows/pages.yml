@@ -1,0 +1,54 @@
+# pages.yml — ブラウザ版（WebAssembly）を作って、Cloudflare Pages に載せる
+#
+# main に入るたびに載せ替える。手で押しても動く（workflow_dispatch）。
+# 要る秘密（リポジトリの Settings → Secrets and variables → Actions）:
+#   CLOUDFLARE_API_TOKEN    Pages を編集できる合鍵
+#   CLOUDFLARE_ACCOUNT_ID   Cloudflare の口座の番号
+# プロジェクト名は下の CF_PAGES_PROJECT で決める（Cloudflare 側に同じ名前で作っておく）。
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CF_PAGES_PROJECT: shark
+
+jobs:
+  deploy:
+    name: 作って載せる
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    env:
+      # 合鍵があるかどうかは、ここで一度受けてから見る（if の中では秘密を直に見られない）
+      HAS_CF: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.64
+          actions-cache-folder: emsdk-cache
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # web/build.sh は Monaco を npm から取ってきて web/vendor/ にためる
+      - name: 作る
+        run: make web
+
+      - name: 作ったものを node で確かめる
+        run: make web-test
+
+      # 合鍵が無いところ（fork からの pull request）では、ここまでで止める
+      - name: 載せる
+        if: env.HAS_CF == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy web/dist --project-name=${{ env.CF_PAGES_PROJECT }} --branch=main

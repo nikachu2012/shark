@@ -186,7 +186,7 @@ $rtSrc = @(
 
 # FE_SRC — ソースからバイトコードを作るところ
 $feSrc = @("core\lexer.cpp", "core\parser.cpp", "core\check.cpp", "core\codegen.cpp",
-           "core\shark.cpp")
+           "core\fmt_src.cpp", "core\shark.cpp")
 
 # tests\ の C++ 側の検査（memcheck は後始末と上限、bytecheck は壊れたバイトコード）
 $testSrc = @("tests\memcheck.cpp", "tests\bytecheck.cpp")

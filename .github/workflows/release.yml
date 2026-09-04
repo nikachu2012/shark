@@ -1,0 +1,106 @@
+# release.yml — v で始まる名札（タグ）を押したら、実行ファイルを作って配る
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# 配るのは、**それだけで動く1つの実行ファイル**（shark と sharkvm）。
+# 日本語の字を出す FreeType は元から静的に作って中に入れるので、
+# 相手の機械には何も要らない。同梱のフォント（assets/fonts）も一緒に包む。
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: 作る（${{ matrix.name }}）
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  name: linux-x86_64 }
+          - { os: macos-latest,   name: macos-arm64 }
+          - { os: macos-13,       name: macos-x86_64 }
+          - { os: windows-latest, name: windows-x86_64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+
+      - name: 作る（Windows）
+        if: runner.os == 'Windows'
+        run: |
+          tools\build_win.bat freetype
+          tools\build_win.bat
+        shell: cmd
+
+      - name: 作る（macOS・Linux）
+        if: runner.os != 'Windows'
+        run: |
+          sh tools/freetype_static.sh
+          make -j3 $(sh tools/freetype_static.sh --flags)
+
+      - name: 試す
+        if: runner.os != 'Windows'
+        run: make test $(sh tools/freetype_static.sh --flags)
+
+      - name: 包む
+        shell: bash
+        run: |
+          set -e
+          dir="shark-${{ matrix.name }}"
+          mkdir -p "$dir"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp shark.exe sharkvm.exe "$dir"/
+          else
+            cp shark sharkvm "$dir"/
+          fi
+          cp README.md "$dir"/
+          mkdir -p "$dir/assets"
+          cp -r assets/fonts "$dir/assets/" 2>/dev/null || true
+          cp -r examples "$dir/examples"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$dir.zip" "$dir" > /dev/null
+          else
+            tar -czf "$dir.tar.gz" "$dir"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shark-${{ matrix.name }}
+          path: |
+            shark-${{ matrix.name }}.tar.gz
+            shark-${{ matrix.name }}.zip
+          if-no-files-found: error
+
+  publish:
+    name: 配る
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
+          body: |
+            それだけで動く1つの実行ファイルです。入れるものはありません。
+
+            | 機種 | 取るもの |
+            |---|---|
+            | macOS（Apple シリコン） | `shark-macos-arm64.tar.gz` |
+            | macOS（Intel） | `shark-macos-x86_64.tar.gz` |
+            | Linux | `shark-linux-x86_64.tar.gz` |
+            | Windows | `shark-windows-x86_64.zip` |
+
+            広げて `./shark run examples/hello.shk` で動きます。
+            日本語の字形（FreeType と Noto Sans JP）は中に入っています。

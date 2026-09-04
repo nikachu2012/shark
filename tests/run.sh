@@ -53,6 +53,27 @@ else
   printf '%s\n' "$out" | diff -u "$expnorm" -
 fi
 
+# 整える（shark fmt）。崩して書いたものが、整えた姿になること。
+# 整えたものをもう一度整えても変わらないことも見る（整え方が落ち着いている）
+if [ -f "$root/tests/fmt/messy.shk" ]; then
+  got=$("$shark" fmt "$root/tests/fmt/messy.shk" 2>&1 | norm)
+  if [ "$got" = "$(norm < "$root/tests/fmt/tidy.expected")" ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "fail  tests/fmt/messy.shk"
+    norm < "$root/tests/fmt/tidy.expected" > "$expnorm"
+    printf '%s\n' "$got" | diff -u "$expnorm" - | sed -n '3,12p'
+  fi
+  again=$("$shark" fmt "$root/tests/fmt/tidy.expected" 2>&1 | norm)
+  if [ "$again" = "$(norm < "$root/tests/fmt/tidy.expected")" ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "fail  整えたものを、もう一度整えると変わってしまう"
+  fi
+fi
+
 # 後始末の取りこぼしと、上限の見張り（C++ 側）
 if [ -x "$root/tests/memcheck" ] || [ -x "$root/tests/memcheck.exe" ]; then
   if "$root/tests/memcheck" > /tmp/shark_memcheck.txt 2>&1; then

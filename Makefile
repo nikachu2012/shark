@@ -60,7 +60,8 @@ RT_SRC = \
   core/lib/crypto.cpp core/lib/ui.cpp
 
 FE_SRC = \
-  core/lexer.cpp core/parser.cpp core/check.cpp core/codegen.cpp core/shark.cpp
+  core/lexer.cpp core/parser.cpp core/check.cpp core/codegen.cpp core/fmt_src.cpp \
+  core/shark.cpp
 
 CORE_SRC = $(RT_SRC) $(FE_SRC)
 

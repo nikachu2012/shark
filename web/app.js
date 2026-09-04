@@ -544,11 +544,34 @@
     if (!rafId) rafId = requestAnimationFrame(tick);
   }
 
+  // 見た目を整える（core/fmt_src.cpp。shark fmt と同じもの）。
+  // 読めないソースは触らない
+  function formatCode(echo) {
+    if (!api || running) return;
+    var src = code();
+    var out = api.format(src);
+    if (!api.formatted()) {
+      if (echo) append('整えられません（読めないソースです）\n', 'err');
+      setState('整えられません', 'error');
+      return;
+    }
+    if (out === src) {
+      if (echo) append('もう整っています\n');
+      setState('もう整っています', 'done');
+      return;
+    }
+    setCode(out);
+    if (echo) append('整えました\n');
+    setState('整えました', 'done');
+    scheduleCheck();
+  }
+
   function buttons() {
     var ready = !!api && !!editor;
     $('btn-run').disabled = running || !ready;
     $('btn-check').disabled = running || !ready;
     $('btn-test').disabled = running || !ready;
+    $('btn-fmt').disabled = running || !ready;
     $('btn-stop').disabled = !running;
   }
 
@@ -562,6 +585,7 @@
     '  shark run <file.shk>      実行する\n' +
     '  shark check <file.shk>    型検査だけを行う\n' +
     '  shark test [file.shk]     test_ で始まる関数を走らせる\n' +
+    '  shark fmt <file.shk>      見た目を整える（左の内容を書き直す）\n' +
     '  shark explain E0102       エラーの詳しい説明を出す\n' +
     '  shark modules             この処理系が持つモジュールを並べる\n' +
     '\n' +
@@ -627,6 +651,10 @@
     var cmd = rest[0];
     var arg = rest.length > 1 ? rest[1].replace(/^\.\//, '') : '';
 
+    if (cmd === 'fmt') {
+      formatCode(true);
+      return;
+    }
     if (cmd === 'run' || cmd === 'check' || cmd === 'test') {
       start(cmd, { flags: fl, file: arg || FILE });
       return;
@@ -695,6 +723,7 @@
   $('btn-run').addEventListener('click', function () { start('run', { echo: true }); });
   $('btn-check').addEventListener('click', function () { start('check', { echo: true }); });
   $('btn-test').addEventListener('click', function () { start('test', { echo: true }); });
+  $('btn-fmt').addEventListener('click', function () { formatCode(true); });
   $('btn-stop').addEventListener('click', function () { interrupt(); });
   $('btn-clear').addEventListener('click', function () { clearLog(); focusTerm(); });
   $('btn-help').addEventListener('click', function () { $('help').classList.remove('hidden'); });
@@ -705,6 +734,11 @@
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') $('help').classList.add('hidden');
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); start('run', { echo: true }); }
+    // 整える（多くの編集器と同じ Shift-Alt-F）
+    if ((e.key === 'f' || e.key === 'F') && e.shiftKey && e.altKey) {
+      e.preventDefault();
+      formatCode(false);
+    }
   });
   $('sel-lang').addEventListener('change', scheduleCheck);
   $('sel-memory').addEventListener('change', scheduleCheck);
@@ -918,6 +952,8 @@
       config: M.cwrap('shk_config', null, ['number', 'number', 'number']),
       load: M.cwrap('shk_load', 'number', ['string', 'string']),
       diagnostics: M.cwrap('shk_diagnostics', 'string', []),
+      format: M.cwrap('shk_format', 'string', ['string']),
+      formatted: M.cwrap('shk_formatted', 'number', []),
       hasEntry: M.cwrap('shk_has_entry', 'number', []),
       pushInput: M.cwrap('shk_push_input', null, ['string']),
       pushEof: M.cwrap('shk_push_eof', null, []),

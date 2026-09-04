@@ -34,6 +34,7 @@ static const Keyword kKeywords[] = {
 const char* tok_name(TokKind k) {
   switch (k) {
     case TK_EOF: return "ファイルの終わり";
+    case TK_Comment: return "コメント";
     case TK_Ident: return "名前";
     case TK_Int: return "整数";
     case TK_Float: return "小数";
@@ -112,7 +113,7 @@ static int hex_val(char c) {
 }
 
 Lexer::Lexer(const Str& src, DiagBag& diag, int line0, int col0)
-    : s_(src), diag_(diag), i_(0), line_(line0), col_(col0) {}
+    : s_(src), diag_(diag), i_(0), line_(line0), col_(col0), keep_(false) {}
 
 void Lexer::push(Vec<Token>* out, TokKind k, int line, int col, int start) {
   Token t;
@@ -217,15 +218,21 @@ void Lexer::run(Vec<Token>* out) {
     if (c == '\n') { i_++; line_++; col_ = 1; continue; }
     // コメント
     if (c == '/' && i_ + 1 < s_.size() && s_[i_ + 1] == '/') {
+      int line = line_, col = col_, start = i_;
       while (i_ < s_.size() && s_[i_] != '\n') {
         if (!utf8_cont(s_[i_])) col_++;
         i_++;
+      }
+      if (keep_) {
+        push(out, TK_Comment, line, col, start);
+        out->back().text = s_.sub(start, i_ - start);
       }
       continue;
     }
     if (c == '/' && i_ + 1 < s_.size() && s_[i_ + 1] == '*') {
       int depth = 0;
       int sl = line_, sc = col_;
+      int start = i_;
       while (i_ < s_.size()) {
         if (s_[i_] == '/' && i_ + 1 < s_.size() && s_[i_ + 1] == '*') { depth++; i_ += 2; col_ += 2; continue; }
         if (s_[i_] == '*' && i_ + 1 < s_.size() && s_[i_ + 1] == '/') {
@@ -240,6 +247,10 @@ void Lexer::run(Vec<Token>* out) {
         Diagnostic& d = diag_.error("E0002", diag_.L("囲みコメントが閉じていません", "unterminated block comment"));
         d.spans.push(Span(sl, sc, 2));
         d.help.push(diag_.L("*/ で閉じます", "close it with */"));
+      }
+      if (keep_) {
+        push(out, TK_Comment, sl, sc, start);
+        out->back().text = s_.sub(start, i_ - start);
       }
       continue;
     }

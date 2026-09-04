@@ -22,6 +22,13 @@ make web-test       # 作ったものを node で確かめる
 make bench          # C・Python・Shark の速さ比べ（python3 bench/run.py loop fib で絞れる）
 ```
 
+FreeType を静的に繋いで（配るときの形で）作る:
+
+```
+sh tools/freetype_static.sh                    # 元から静的に作る（build/ に置く）
+make $(sh tools/freetype_static.sh --flags)    # それを繋ぐ
+```
+
 Windows（Visual Studio）では make の代わりに:
 
 ```
@@ -39,6 +46,7 @@ MSYS2 / MinGW の make なら Makefile がそのまま動く（`.exe` は Makefi
 ./shark run <file.shk>      # 実行（.shkc も渡せる）
 ./shark check <file.shk>    # 型検査だけ
 ./shark test [file.shk]     # test_ で始まる関数を走らせる（--filter 名前 で絞る）
+./shark fmt <file.shk>      # 見た目を整える（-w で書き換え、--check で確かめるだけ）
 ./shark build <file.shk>    # 単一バイナリにする（--bytecode で .shkc だけ保存）
 ./sharkvm <file.shkc>       # 実行装置だけで動かす
 ./shark explain E0102       # エラー番号の詳しい説明
@@ -51,6 +59,13 @@ MSYS2 / MinGW の make なら Makefile がそのまま動く（`.exe` は Makefi
 - テスト中は `SHARK_UI=off`（窓を開かず、見えない面に描く）
 - ヘッダ（`.h` / `.inc`）を直すと全 `.o` が作り直される。ビルドの指定
   （`FREETYPE=` など）を変えたときは `make clean && make`（Makefile は指定の変化を見ない）
+
+## 押すたびの検査（.github/workflows）
+
+`ci.yml`（3機種で作って試す）・`pages.yml`（ブラウザ版を Cloudflare Pages へ）・
+`release.yml`（タグを押すと実行ファイルを配る）の3つ。
+どれも FreeType を静的に作って繋ぐので、配るものは1つの実行ファイルで済む。
+Pages に載せるには `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` が要る（README）。
 
 ## アーキテクチャ
 

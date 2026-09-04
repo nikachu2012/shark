@@ -33,10 +33,11 @@ make embed && ./examples/embed/game   # ゲームに組み込む例
 ./shark check <file.shk>   型検査だけ
 ./shark build <file.shk>   処理系ごと1つにまとめる（下の「1つのファイルにして配る」）
 ./shark test [file.shk]    test_ で始まる関数を走らせる（省くと *_test.shk 全部）
+./shark fmt <file.shk>…    見た目を整える（-w で書き換え、--check で確かめるだけ）
 ./shark explain E0102      エラーの詳しい説明
 ./shark modules            この処理系が持つモジュールの一覧
 
-  --memory <MB>            使ってよいメモリの量。超えたら実行時エラー（既定 64）
+  --memory <MB>            使ってよいメモリの量。超えたら実行時エラー（既定 256）
   --lang ja|en / --strict  診断の言語 / 警告をエラーとして扱う
 ```
 
@@ -292,6 +293,36 @@ print(ui.font_name());      // いま使っているもの。内蔵なら空
 - ブラウザ版（`make web`）とゲーム機向けの雛形には FreeType を入れない。
   ブラウザは**ブラウザ自身に字を描いてもらう**ので、`ui.font()` はそのまま使えて日本語も出る
   （移植層の `PlatformFont`。ゲーム機向けの雛形は内蔵の字形だけ）
+
+## 押すたびの検査と、配りかた（CI/CD）
+
+`.github/workflows/` に3つ置いてある。
+
+| 台本 | いつ | すること |
+|---|---|---|
+| `ci.yml` | main への push と pull request | macOS・Linux・Windows で作って `make test`、`make docs`、`make docs-check` |
+| `pages.yml` | main への push | ブラウザ版（WebAssembly）を作って **Cloudflare Pages** に載せる |
+| `release.yml` | `v` で始まるタグを押したとき | 4つの機種の実行ファイルを作って、Release に付ける |
+
+どれも FreeType を**元から静的に作って**繋ぐ（`tools/freetype_static.sh`、
+Windows は `tools\build_win.bat freetype`）。配るものは、それだけで動く1つの
+実行ファイルになり、相手の機械には何も入れてもらわなくてよい。
+
+```
+sh tools/freetype_static.sh                    # 元から静的に作る（一度だけ）
+make $(sh tools/freetype_static.sh --flags)    # それを繋いで作る
+```
+
+Cloudflare Pages に載せるには、リポジトリの Settings → Secrets and variables →
+Actions に2つ入れておく。無ければ、作るところまでで止まる（載せない）。
+
+| 秘密 | 中身 |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Pages を編集できる合鍵（Cloudflare の My Profile → API Tokens） |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare の口座の番号（ダッシュボードの右下） |
+
+Pages のプロジェクト名は `pages.yml` の `CF_PAGES_PROJECT`（既定は `shark`）。
+Cloudflare 側に同じ名前で先に作っておく。
 
 ## 1つのファイルにして配る
 

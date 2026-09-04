@@ -1,0 +1,60 @@
+# ci.yml — 押すたびに、3つの機種で作って試す
+#
+# 作るのに要るのは C++17 の翻訳器だけ（外部ライブラリなし）。
+# 日本語の字を出す FreeType は任意なので、ここでは**元から静的に作って**繋ぐ。
+# 相手の機械に何も入れなくてよいことも、ここで確かめている。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  posix:
+    name: 作って試す（${{ matrix.os }}）
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # FreeType を静的に作る（一度作れば、次からは取っておいたものを使う）
+      - name: FreeType を用意する
+        id: ft
+        run: sh tools/freetype_static.sh
+
+      - name: 作る
+        run: make -j3 $(sh tools/freetype_static.sh --flags)
+
+      - name: 試す
+        run: make test $(sh tools/freetype_static.sh --flags)
+
+      - name: 説明を作って、実装と突き合わせる
+        run: make docs
+
+      - name: 説明の中の例を、ぜんぶ動かす
+        run: make docs-check
+
+  windows:
+    name: 作って試す（windows）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: FreeType を静的に作る
+        run: tools\build_win.bat freetype
+        shell: cmd
+
+      - name: 作る
+        run: tools\build_win.bat
+        shell: cmd
+
+      # tests/run.sh は sh の台本。Windows の runner には Git の sh が入っている
+      - name: 試す
+        run: sh tests/run.sh
+        shell: bash
