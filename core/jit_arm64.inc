@@ -731,8 +731,9 @@ static bool emit_op(Gen& g, int ip, int len, int next) {
   }
 }
 
-// 関数を1つ、機械語にする
-static bool jit_emit(FuncInfo* f, const JitScan& sc, Vec<uint32_t>* out, Vec<int32_t>* offout) {
+// 関数を1つ、機械語にする。ARM64 の命令はどれも 4 バイトだが、
+// 渡すのは機種によらないバイトの並び（core/jit.cpp）なので、最後にほどく
+static bool jit_emit(FuncInfo* f, const JitScan& sc, Vec<uint8_t>* out, Vec<int32_t>* offout) {
   Gen g;
   g.f = f;
   g.c = f->code.data();
@@ -826,7 +827,8 @@ static bool jit_emit(FuncInfo* f, const JitScan& sc, Vec<uint32_t>* out, Vec<int
   offout->resize(g.n, -1);
   for (int ip = 0; ip < g.n; ip++)
     if (g.iplab[ip] >= 0) (*offout)[ip] = a.lpos[g.iplab[ip]] * 4;
-  out->swap_with(a.w);
+  for (int i = 0; i < a.w.size(); i++)
+    for (int k = 0; k < 4; k++) out->push((uint8_t)(a.w[i] >> (k * 8)));
   return true;
 }
 

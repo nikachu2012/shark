@@ -3,6 +3,13 @@
 // ここを自分の機種のものに差し替える（spec/skeleton.md）。
 #if defined(_WIN32)
 #define _CRT_RAND_S   // 暗号用の乱数 rand_s を使う。stdlib.h より前に要る
+// windows.h は大きいので、要らないところを外し、min/max の置き換えも止める
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #endif
 
 #include "platform.h"
@@ -13,8 +20,11 @@
 #include <time.h>
 
 #if defined(_WIN32)
+#include <windows.h>
+
 #include <direct.h>
 #include <io.h>
+#include <sys/stat.h>
 #else
 #include <dirent.h>
 #include <errno.h>
@@ -56,8 +66,25 @@ void  d_fatal(const char* msg) { fputs(msg, stderr); fputc('\n', stderr); abort(
 // 機械語を書いて、そこへ飛べるようにする（spec/runtime/platform.md）。
 // Apple Silicon は「書ける」と「実行できる」を同時に立てられないので、
 // MAP_JIT で場所を取り、書く間だけ書き込みを許す。
-// Windows はまだ用意していない（exec が 0 なので、常に仮想マシンで動く）。
-#if !defined(_WIN32)
+#if defined(_WIN32)
+void* x_alloc(size_t n) {
+  return VirtualAlloc(0, n, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+}
+void x_unlock(void* p, size_t n) {
+  DWORD old = 0;
+  VirtualProtect(p, n, PAGE_READWRITE, &old);
+}
+void x_commit(void* p, size_t n) {
+  DWORD old = 0;
+  VirtualProtect(p, n, PAGE_EXECUTE_READ, &old);
+  // 書いたものが命令として読まれるように、命令の置き場を合わせる
+  FlushInstructionCache(GetCurrentProcess(), p, n);
+}
+void x_free(void* p, size_t n) {
+  (void)n;   // 取ったときの区切りごと返すので、大きさは要らない
+  VirtualFree(p, 0, MEM_RELEASE);
+}
+#else
 void* x_alloc(size_t n) {
   int prot = PROT_READ | PROT_WRITE;
   int flags = MAP_PRIVATE | MAP_ANON;
@@ -96,12 +123,10 @@ void x_commit(void* p, size_t n) {
   __builtin___clear_cache((char*)p, (char*)p + n);
 }
 void x_free(void* p, size_t n) { munmap(p, n); }
+#endif
 
 const PlatformExec kExec = {x_alloc, x_unlock, x_commit, x_free};
 const PlatformExec* desktop_exec() { return &kExec; }
-#else
-const PlatformExec* desktop_exec() { return 0; }
-#endif
 
 int64_t d_now() {
 #if defined(_WIN32)
@@ -124,8 +149,7 @@ int64_t d_mono() {
 void d_sleep(int64_t n) {
   if (n <= 0) return;
 #if defined(_WIN32)
-  extern void Sleep(unsigned long);
-  Sleep((unsigned long)(n / 1000000));
+  ::Sleep((DWORD)(n / 1000000));
 #else
   struct timespec ts;
   ts.tv_sec = (time_t)(n / 1000000000ll);

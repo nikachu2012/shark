@@ -48,7 +48,7 @@ make bench          # C・Python・Shark の速さ比べ（python3 bench/run.py 
 ```
 core/       実行系。字句解析→構文解析→型検査→コード生成→仮想マシン。C++17、
             -fno-exceptions -fno-rtti、外部ライブラリなし（FreeType のみ任意）
-  jit.cpp     実行時コンパイル（任意機能）。機種ごとの機械語は jit_arm64.inc
+  jit.cpp     実行時コンパイル（任意機能）。機種ごとの機械語は jit_arm64.inc と jit_x64.inc
   platform/   移植層（desktop / console / web）← 機種ごとに差し替える場所
   lib/        標準ライブラリの実装（*.cpp）。ホスト関数は Engine::register_host() に足す
 frontend/   shark コマンド（main.cpp）と sharkvm（vm_main.cpp）。コアを呼ぶ参考実装

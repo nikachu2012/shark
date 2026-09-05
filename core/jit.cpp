@@ -1,6 +1,7 @@
 // jit.cpp — 実行時コンパイル（spec/runtime/execution.md）
 //
-// 機種によらない土台はここ。機械語そのものを作るところは jit_arm64.inc にある。
+// 機種によらない土台はここ。機械語そのものを作るところは
+// jit_arm64.inc（ARM64）と jit_x64.inc（x86-64）にある。
 //
 //   1. 仮想マシンが「この関数はよく通る」と数える（jit_hot）
 //   2. しきい値を超えたら、その関数を丸ごと機械語にする（jit_compile）
@@ -19,6 +20,12 @@
 // 機械語の作り方を知っている機種か。知らない機種では、常に仮想マシンで実行する
 #if defined(__aarch64__) || defined(_M_ARM64)
 #define SHARK_JIT_ARM64 1
+#elif defined(__x86_64__) || defined(_M_X64)
+#define SHARK_JIT_X64 1
+#endif
+
+#if defined(SHARK_JIT_ARM64) || defined(SHARK_JIT_X64)
+#define SHARK_JIT 1
 #endif
 
 namespace shark {
@@ -252,14 +259,14 @@ static void layout_init() {
   g_lay.vm_steps = (int)offsetof(VM, steps_since_switch);
 }
 
-// 機械語の入口。jit_arm64.inc が作った前口上を、この形で呼ぶ
+// 機械語の入口。機種ごとの .inc が作った前口上を、この形で呼ぶ
 typedef int64_t (*JitEntry)(VM* vm, Value* locals, Value* top, void* target, int64_t budget,
                             Value* globals, Value* limit);
 
 // ------------------------------------------------------------------ 手伝いの関数
 //
-// 機械語から呼ぶ。番号は下の表（g_helpers）の並びで、jit_arm64.inc が使う
-#if defined(SHARK_JIT_ARM64)
+// 機械語から呼ぶ。番号は下の表（g_helpers）の並びで、機種ごとの .inc が使う
+#if defined(SHARK_JIT)
 enum { H_FALLBACK = 0, H_RELEASE, H_COMPARE, H_SYNC, H_CALL, H_CALL_NATIVE, H_RET, H_MAX };
 
 // 1命令のあとも、同じタスクの同じ枠で続けられるか。
@@ -391,16 +398,20 @@ static JitHelper g_helpers[H_MAX] = {(JitHelper)&jit_fallback,    (JitHelper)&ob
                                      (JitHelper)&jit_call,        (JitHelper)&jit_call_native,
                                      (JitHelper)&jit_ret};
 
+#if defined(SHARK_JIT_ARM64)
 #include "jit_arm64.inc"
+#else
+#include "jit_x64.inc"
+#endif
 
-#else   // SHARK_JIT_ARM64
+#else   // SHARK_JIT
 // 機械語の作り方を知らない機種。作らないので、いつも仮想マシンで動く
-static bool jit_emit(FuncInfo*, const JitScan&, Vec<uint32_t>*, Vec<int32_t>*) { return false; }
+static bool jit_emit(FuncInfo*, const JitScan&, Vec<uint8_t>*, Vec<int32_t>*) { return false; }
 #endif
 
 // ------------------------------------------------------------------ 表からの口
 bool jit_available() {
-#if defined(SHARK_JIT_ARM64)
+#if defined(SHARK_JIT)
   return platform().exec != 0;
 #else
   return false;
@@ -454,16 +465,18 @@ static JitFunc* jit_compile(JitState* j, FuncInfo* f) {
   if (f->is_native || f->code.size() == 0 || f->code.size() > kMaxCode) return 0;
   if (!jit_scan(f, &sc)) return 0;
 
-  Vec<uint32_t> code;
+  // 命令の長さが機種によって違う（ARM64 は 4 バイト、x86-64 は 1〜15 バイト）ので、
+  // 受け取るのはバイトの並び。中の位置（off）もバイトで数える
+  Vec<uint8_t> code;
   Vec<int32_t> off;
   if (!jit_emit(f, sc, &code, &off)) return 0;
 
-  size_t bytes = (size_t)code.size() * 4u;
+  size_t bytes = (size_t)code.size();
   void* mem = jit_alloc_code(j, bytes);
   if (!mem) return 0;
   const PlatformExec* ex = platform().exec;
   ex->unlock(mem, bytes);
-  uint32_t* dst = (uint32_t*)mem;
+  uint8_t* dst = (uint8_t*)mem;
   for (int i = 0; i < code.size(); i++) dst[i] = code[i];
   ex->commit(mem, bytes);
 
