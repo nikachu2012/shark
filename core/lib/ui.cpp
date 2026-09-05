@@ -5521,9 +5521,12 @@ static void place_scroll(const Value& v, int x, int y, const Box& b) {
   }
 }
 
-static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool root) {
-  TextPx tp(v);          // .font と .disabled は、ここから下ぜんぶに効く
-  DisabledScope dis(v);
+// 親がくれた場所の中で、その部品がどこに、どれだけの大きさで置かれるか。
+// 置くとき（place）と、重ね置きの当たり判定とで同じものを見るために分けてある
+struct Placed { int x, y, w, h; };
+
+static Placed layout_of(const Value& v, int x, int y, int avail_w, int avail_h, bool root) {
+  TextPx tp(v);          // 測るときの字の大きさは、その部品のもの
   Box b = measure(v, avail_w);
   int w = b.w, h = b.h;
   // 取り分（fr）のある向きは、親が配ってくれたぶんいっぱいに広がる
@@ -5546,7 +5549,21 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
     if (al == WA_Center) x += (avail_w - w) / 2;
     else if (al == WA_Right) x += avail_w - w;
   }
+  Placed r;
+  r.x = x;
+  r.y = y;
+  r.w = w;
+  r.h = h;
+  return r;
+}
 
+static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool root) {
+  TextPx tp(v);          // .font と .disabled は、ここから下ぜんぶに効く
+  DisabledScope dis(v);
+  Placed pl = layout_of(v, x, y, avail_w, avail_h, root);
+  x = pl.x;
+  y = pl.y;
+  int w = pl.w, h = pl.h;
   int64_t bg = w_field(v, WF_Bg);
   int bk = w_kind(v);
   int rad = (int)w_field(v, WF_Radius);
@@ -5630,9 +5647,24 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
     // 重ね置き。中身を同じところに、書いた順で重ねる（あとのものが上）
     case WK_Stack: {
       ListObj* k = w_kids(v);
-      for (int i = 0; i < k->v.size(); i++) {
+      int kn = k->v.size();
+      // 触られたかは、**カーソルに重なっているうち、いちばん上のもの**が取る。
+      // 下に敷いたものには届かない。だからダイアログは、面ぜんぶを覆う幕を
+      // 1枚かぶせるだけで、うしろの画面がまとめて止まる（spec/library/ui.md）
+      int top = -1;
+      for (int i = 0; i < kn; i++) {
         int hh = eff_fr(k->v[i], false) > 0 ? ch : measure(k->v[i], cw).h;
+        int yy = yy_place(k->v[i], cy, ch, hh, WV_Top);
+        Placed pl = layout_of(k->v[i], cx, yy, cw, hh, false);
+        if (inside(pl.x, pl.y, pl.w, pl.h)) top = i;
+      }
+      for (int i = 0; i < kn; i++) {
+        int hh = eff_fr(k->v[i], false) > 0 ? ch : measure(k->v[i], cw).h;
+        int smx = g_mx, smy = g_my;
+        if (top >= 0 && i != top) { g_mx = -1000000; g_my = -1000000; }
         place(k->v[i], cx, yy_place(k->v[i], cy, ch, hh, WV_Top), cw, hh);
+        g_mx = smx;
+        g_my = smy;
       }
       break;
     }

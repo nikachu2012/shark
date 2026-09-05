@@ -677,6 +677,34 @@ struct ColorCase : Case {
   }
 };
 
+// --- 重ね置きの当たり判定（ui.stack）--------------------------------------
+// 押しは「カーソルに重なっているうち、いちばん上のもの」が取る。
+// 下に敷いたものには届かない（面ぜんぶを覆う幕をかぶせれば、うしろが止まる）
+struct ModalCase : Case {
+  int steps() { return 4; }
+  void act(int step) {
+    if (step == 0) fake::click(5, 5);         // 下に敷いたボタン。幕が覆っている
+    else if (step == 2) fake::click(192, 6);  // 幕より上に置いたボタン
+  }
+  void done(int step, const Str& line) {
+    if (step == 1) expect_line("幕の下に敷いたボタンは押されない", line, "[]");
+    if (step == 3) expect_line("幕より上のボタンは押せる", line, "[above]");
+  }
+};
+
+// --- 使えなくする（.disabled）---------------------------------------------
+struct DisabledCase : Case {
+  int steps() { return 4; }
+  void act(int step) {
+    if (step == 0) fake::click(5, 5);         // ふつうのボタン
+    else if (step == 2) fake::click(5, 25);   // 止めてあるボタン
+  }
+  void done(int step, const Str& line) {
+    if (step == 1) expect_line("止めていないボタンは押せる", line, "[on]");
+    if (step == 3) expect_line("止めたボタンは押されない", line, "[]");
+  }
+};
+
 // --- 折りたためる木（ui.tree）---------------------------------------------
 struct TreeCase : Case {
   int steps() { return 8; }
@@ -1201,6 +1229,48 @@ int main() {
               "func update(hit: string) -> void { }\n")
           .c_str(),
       &tip);
+
+  ModalCase modal;
+  {
+    Str src("import std.ui;\n"
+            "func main() -> int {\n"
+            "  ui.font_builtin();\n"
+            "  ui.open(\"t\", 200, 120);\n"
+            "  while ui.poll() {\n"
+            "    ui.clear(0);\n"
+            "    var hit = ui.show(ui.stack([\n"
+            "      ui.button(\"a\", \"below\"),\n"
+            "      ui.label(\"\").width(float.infinity()).height(float.infinity())\n"
+            "          .background(ui.rgba(0, 0, 0, 150)),\n"
+            "      ui.button(\"b\", \"above\").align(\"right\"),\n"
+            "    ]), 0, 0);\n"
+            "    print(f\"[{hit}]\");\n"
+            "    ui.present();\n"
+            "  }\n"
+            "  return 0;\n"
+            "}\n");
+    run("重ね置きの当たり判定（ui.stack）", src.c_str(), &modal);
+  }
+
+  DisabledCase off;
+  {
+    Str src("import std.ui;\n"
+            "func main() -> int {\n"
+            "  ui.font_builtin();\n"
+            "  ui.open(\"t\", 200, 120);\n"
+            "  while ui.poll() {\n"
+            "    ui.clear(0);\n"
+            "    var hit = ui.show(ui.col([\n"
+            "      ui.button(\"a\", \"on\"),\n"
+            "      ui.button(\"b\", \"off\").disabled(true),\n"
+            "    ]), 0, 0);\n"
+            "    print(f\"[{hit}]\");\n"
+            "    ui.present();\n"
+            "  }\n"
+            "  return 0;\n"
+            "}\n");
+    run("使えなくする（.disabled）", src.c_str(), &off);
+  }
 
   if (g_fail) {
     printf("uicheck: %d 件おかしい\n", g_fail);

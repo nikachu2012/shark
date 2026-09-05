@@ -26,7 +26,8 @@ $out = Join-Path $root "build\win"
 
 if ($Task -eq "clean") {
   if (Test-Path $out) { Remove-Item -Recurse -Force $out }
-  foreach ($f in @("shark.exe", "sharkvm.exe", "tests\memcheck.exe", "tests\bytecheck.exe")) {
+  foreach ($f in @("shark.exe", "sharkvm.exe", "tests\memcheck.exe", "tests\bytecheck.exe",
+                 "tests\imecheck.exe", "tests\uicheck.exe")) {
     $p = Join-Path $root $f
     if (Test-Path $p) { Remove-Item -Force $p }
   }
@@ -188,8 +189,13 @@ $rtSrc = @(
 $feSrc = @("core\lexer.cpp", "core\parser.cpp", "core\check.cpp", "core\codegen.cpp",
            "core\fmt_src.cpp", "core\shark.cpp")
 
-# tests\ の C++ 側の検査（memcheck は後始末と上限、bytecheck は壊れたバイトコード）
-$testSrc = @("tests\memcheck.cpp", "tests\bytecheck.cpp")
+# tests\ の C++ 側の検査。Makefile の test が要るものと同じ4つを作る
+#   memcheck  … 後始末とメモリの上限
+#   bytecheck … 壊れたバイトコードを断るか
+#   imecheck  … 変換つきの文字入力（IME）
+#   uicheck   … 部品を押した・合わせたときの動き
+$testSrc = @("tests\memcheck.cpp", "tests\bytecheck.cpp",
+             "tests\imecheck.cpp", "tests\uicheck.cpp")
 
 $allSrc = $rtSrc + $feSrc + @("frontend\main.cpp", "frontend\vm_main.cpp") + $testSrc
 
@@ -207,7 +213,7 @@ Write-Host "繋いでいます..."
 if ($LASTEXITCODE -ne 0) { Pop-Location; exit 1 }
 & cl @cflags "/Fe:$root\sharkvm.exe" @rtObj (Join-Path $out "vm_main.obj") @ldlibs
 if ($LASTEXITCODE -ne 0) { Pop-Location; exit 1 }
-foreach ($t in @("memcheck", "bytecheck")) {
+foreach ($t in @("memcheck", "bytecheck", "imecheck", "uicheck")) {
   & cl @cflags "/Fe:$root\tests\$t.exe" @rtObj @feObj (Join-Path $out "$t.obj") @ldlibs
   if ($LASTEXITCODE -ne 0) { Pop-Location; exit 1 }
 }

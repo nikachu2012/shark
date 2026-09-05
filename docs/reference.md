@@ -1071,6 +1071,26 @@ ui.col([
 ]),
 ```
 
+重ね置き（`ui.stack`）では、**押しはいちばん上のものが取ります**。下に敷いたものには
+届きません。面ぜんぶを覆う幕を1枚かぶせれば、うしろの画面がまとめて止まるので、
+**ダイアログはこれで書けます**。
+
+```shark
+func view() -> Widget {
+  if !toi { return body(); }
+  return ui.stack([
+    body(),                                              // うしろの画面
+    ui.label("").width(float.infinity()).height(float.infinity())
+        .background(ui.rgba(0, 0, 0, 150)),              // うすい幕
+    ui.col([
+      ui.label("本当に消しますか？"),
+      ui.row([ui.button("やめる", "no"), ui.button("消す", "yes")]).align("right"),
+    ]).padding(10).background(ui.rgb(38, 40, 52)).radius(6)
+      .align("center").valign("middle"),
+  ]);
+}
+```
+
 使えなくするのは `.disabled(on)` です。これも**中の部品にまで効く**ので、
 入れ物に書けば、そのかたまりがまとめて止まります。うすくなって、押しても
 引いても打っても動きません。場所は同じだけ取るので、画面が動きません。

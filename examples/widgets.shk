@@ -7,6 +7,8 @@
 //   ui.drag / ui.field / ui.password / ui.textarea / ui.combo / ui.listbox /
 //   ui.tabs / ui.color / ui.tree / ui.image / ui.space / ui.spacer /
 //   ui.divider / ui.col / ui.row / ui.grid / ui.center / ui.stack / ui.scroll
+// 「消す」を押すと、前に出す問いかけ（ダイアログ）が出る。ui.stack は押しを
+// いちばん上のものが取るので、幕を1枚かぶせるだけでうしろが止まる。
 // 見た目を変える鎖:
 //   .color / .background / .border / .radius / .padding / .width / .height /
 //   .align / .valign / .filter / .decimals / .tooltip / .placeholder /
@@ -40,6 +42,7 @@ var word = "aiueo";
 var memo = "ここは複数行の入力欄です。\n改行は enter。\n上下の矢印で行を行き来し、置ける幅に入らない行はひとりでに折り返します。";
 var page = 0;
 var kuwashiku = false;   // 「くわしい設定」を使えるようにするか（.disabled）
+var toi = false;         // 前に出す問いかけ（ダイアログ）を出しているか
 var iro = 4;
 var sakana = 0;
 var last = "なし";
@@ -136,7 +139,8 @@ func name_of(s: string) -> Widget {
   return ui.label(s).align("right");
 }
 
-func view() -> Widget {
+// いまの画面。前に出すものが無ければ、これがそのまま出る
+func screen() -> Widget {
   var lines = memo.split("\n").len();
   return ui.col([
     // 見出し。ui.center は「置ける幅の真ん中に置く」。
@@ -239,8 +243,34 @@ func view() -> Widget {
     ui.row([
       ui.label(f"さいごに動いたもの: {last}").padding(2)
           .background(ui.rgb(30, 30, 40)).width(float.infinity()),
+      ui.button("消す", func() -> void { toi = true; }),
       ui.button("おわる", func() -> void { ui.quit(); }),
     ]),
+  ]);
+}
+
+// 前に出す問いかけ（ダイアログ）。
+//
+// 重ね置き（ui.stack）は、押しを**いちばん上のものが取る**。だから面ぜんぶを
+// 覆う幕を1枚かぶせるだけで、うしろの画面がまとめて止まる。
+// 前に出すための別の仕組みは要らない。
+func view() -> Widget {
+  if !toi { return screen(); }
+  return ui.stack([
+    screen(),
+    // うすい幕。ここで押しが止まるので、うしろは触れない
+    ui.label("").width(float.infinity()).height(float.infinity())
+        .background(ui.rgba(0, 0, 0, 150)),
+    ui.col([
+      ui.label("メモを消しますか？").font(14),
+      ui.space(6),
+      ui.row([
+        ui.button("やめる", func() -> void { toi = false; }),
+        ui.button("消す", func() -> void { memo = ""; toi = false; }),
+      ]).align("right"),
+    ]).padding(10).background(ui.rgb(38, 40, 52))
+        .border(ui.rgb(90, 100, 130)).radius(6)
+        .align("center").valign("middle"),
   ]);
 }
 
