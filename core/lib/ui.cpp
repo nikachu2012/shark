@@ -2739,6 +2739,13 @@ static Str g_hit_text;
 static int g_point_x = -1, g_point_y = -1;
 static bool g_click_seen = false;   // この回にどこかが押されたか（焦点を外すのに使う）
 static Str g_focus_next;
+
+// マウスが無くても操れるように、置いた順に焦点を回す。ゲーム機のように
+// マウスが無い機種では、これが唯一の操り方になる（spec/library/ui.md）。
+//
+// 置いていく途中で、触れる部品の名札をこの並びにためる。ぜんぶ置き終わってから
+// tab を見て、次（shift+tab なら前）へ移す。1こま遅れるが、目には見えない。
+static Vec<Str> g_ring;
 static bool g_edited = false;      // この回、ref で受けた部品が変数を書き換えたか
 // 最後に ui.show() に渡された部品。窓の縁を引いている間、これを新しい大きさで置き直す
 static Value g_last_view;
@@ -2859,6 +2866,10 @@ static void ui_reset_widgets() {
   g_want_caret = -1;
   g_want_id.clear();
   g_focus.clear();
+  {
+    Vec<Str> empty;      // clear() は場所を抱えたままなので、入れ替えて返す
+    g_ring.swap_with(empty);
+  }
   g_hit_id.clear();
   g_hit_text.clear();
   g_hit_val = 0;
@@ -3245,6 +3256,50 @@ static void grid_axes(const Value& v, int avail_w, int avail_h, Vec<int>& cw, Ve
   if (avail_h > 0) distribute(rh, rf, avail_h, gap_y());
 }
 
+// --- 焦点の送り（tab）-----------------------------------------------------
+static Str widget_key(const Value& v, int x, int y);   // 下（並べる文字）で定義
+
+
+// 焦点を当てられる部品か
+static bool focusable(int k) {
+  return k == WK_Button || k == WK_Checkbox || k == WK_Radio || k == WK_Field ||
+         k == WK_Area || k == WK_Combo || k == WK_List || k == WK_Tabs ||
+         k == WK_Number || k == WK_Drag || k == WK_Slider || k == WK_Color ||
+         k == WK_Tree;
+}
+
+// 自分で「焦点がある」と見せる部品（カーソルや枠の色が変わるもの）。
+// それ以外には、こちらで枠を引く
+static bool shows_focus(int k) {
+  return k == WK_Field || k == WK_Area || k == WK_List || k == WK_Number ||
+         k == WK_Drag || k == WK_Color;
+}
+
+// 焦点で指すときの名札。入力欄は名札そのもの、ほかは置き場所からも作る
+static Str focus_key(const Value& v, int x, int y) {
+  int k = w_kind(v);
+  if (k == WK_Field || k == WK_Area) {
+    const Str& id = w_id(v);
+    if (id.size() > 0) return id;
+  }
+  return widget_key(v, x, y);
+}
+
+static bool focused_key(const Str& key) {
+  return !g_disabled && key.size() > 0 && g_focus.size() > 0 && g_focus == key;
+}
+
+// 焦点があって、押しのキーが来たか。マウスで押したのと同じに扱う
+static bool key_press(const Str& key) {
+  return focused_key(key) && (g_press[32] || g_press[SKEY_Enter]);
+}
+
+// 焦点があるとき、左右のキーで動かすぶん（-1 / 0 / +1）
+static int key_step(const Str& key) {
+  if (!focused_key(key)) return 0;
+  return (g_press[SKEY_Right] ? 1 : 0) - (g_press[SKEY_Left] ? 1 : 0);
+}
+
 // --- 描いて、触られたかを見る ---------------------------------------------
 // 親がくれる場所（avail_w × avail_h）の中に置く。取り分（fr）を書いた向きは、
 // 親がそこに配ったぶんがそのまま渡ってくる（下の axis_sizes）
@@ -3279,7 +3334,7 @@ static void place_button(const Value& v, int x, int y, const Box& b) {
     int tw = text_px_width(w_text(v), cur_text_px());
     put_text(x + (b.w - tw) / 2, text_y_mid(y, b.h, cur_text_px()), w_text(v), cur_text_px(), w_fg(v));
   }
-  if (over && g_mpress[0]) hit(v, 1);
+  if ((over && g_mpress[0]) || key_press(widget_key(v, x, y))) hit(v, 1);
 }
 
 // 四角い枠と、真ん中のレ点。**中は塗らない**（塗ると印が読みにくく、
@@ -3297,10 +3352,9 @@ static void place_checkbox(const Value& v, int x, int y, const Box& b) {
   for (int i = 1; i < bw - 1; i++) span(x + 1, by + i, bw - 2, face);
   if (on) check_mark(x, by, bw, blend(g_bg, g_accent, 1.0));
   put_text(x + bw + mark_gap(), ty, w_text(v), cur_text_px(), w_fg(v));
-  if (over && g_mpress[0]) hit(v, on ? 0 : 1);
+  if ((over && g_mpress[0]) || key_press(widget_key(v, x, y))) hit(v, on ? 0 : 1);
 }
 
-static Str widget_key(const Value& v, int x, int y);   // 下（並べる文字）で定義
 
 static void place_slider(const Value& v, int x, int y, const Box& b) {
   // 小数の形（ui.slider(ref v: float, ...)）は、値も限りも WF_Fa/Fb/Fc の側にある
@@ -3338,6 +3392,24 @@ static void place_slider(const Value& v, int x, int y, const Box& b) {
       int64_t nv = lo + (int64_t)rel * (hi - lo) / usable;
       hit(v, nv);
       val = nv;               // 描くのも新しいところ（1こま遅れない）
+    }
+  }
+
+  // 焦点があれば、左右のキーでも動かす（マウスの無い機種のため）
+  int step = key_step(key);
+  if (step != 0) {
+    if (isf) {
+      double nv = fval + (fhi - flo) / 100.0 * step;
+      if (nv < flo) nv = flo;
+      if (nv > fhi) nv = fhi;
+      hit_f(v, nv);
+      fval = nv;
+    } else {
+      int64_t nv = val + step;
+      if (nv < lo) nv = lo;
+      if (nv > hi) nv = hi;
+      hit(v, nv);
+      val = nv;
     }
   }
 
@@ -4593,7 +4665,8 @@ static void place_radio(const Value& v, int x, int y, const Box& b) {
     disc(cx, cy, dot, edge);
   }
   put_text(x + bw + mark_gap(), ty, w_text(v), cur_text_px(), w_fg(v));
-  if (over && g_mpress[0]) hit(v, w_b(v));   // ref の形なら「自分の数」、名札なら 1
+  // ref の形なら「自分の数」、名札なら 1
+  if ((over && g_mpress[0]) || key_press(widget_key(v, x, y))) hit(v, w_b(v));
 }
 
 // 選ぶ（押すと一覧が出て、選んだものになる）。一覧は ui.menu と同じ仕組みで出す
@@ -4617,7 +4690,7 @@ static void place_combo(const Value& v, int x, int y, const Box& b) {
   int aw = arrow_w();
   tri_down(x + b.w - pad_x() - aw, y + (b.h - aw / 2) / 2, aw, w_fg(v));
 
-  if (over && g_mpress[0] && n > 0) {   // 押されたので一覧を出す
+  if (((over && g_mpress[0]) || key_press(key)) && n > 0) {   // 押されたので一覧を出す
     Vec<Str> items;
     for (int i = 0; i < n; i++) items.push(opt_at(v, i));
     menu_open_at(x, y + b.h, items, key);
@@ -4779,6 +4852,12 @@ static void place_list(const Value& v, int x, int y, const Box& b) {
 static void place_tabs(const Value& v, int x, int y, const Box& b) {
   int n = opt_count(v);
   int idx = (int)w_a(v);
+  // 焦点があれば、左右のキーで隣の見出しへ
+  int step = key_step(widget_key(v, x, y));
+  if (step != 0 && idx + step >= 0 && idx + step < n) {
+    idx += step;
+    hit(v, idx);
+  }
   int base = y + b.h - 2;   // 見出しの下に通す線
   span(x, base, b.w, blend(g_bg, g_fg, 0.3));
   int xx = x;
@@ -5364,7 +5443,7 @@ static void place_tree(const Value& v, int x, int y, const Box& b) {
   if (open) tri_down(x + (box_w() - aw) / 2, y + (head_h - aw / 2) / 2, aw, mark);
   else tri_right(x + (box_w() - aw / 2) / 2, y + (head_h - aw) / 2, aw, mark);
   put_text(x + ind, text_y_mid(y, head_h, cur_text_px()), w_text(v), cur_text_px(), w_fg(v));
-  if (over && g_mpress[0]) hit(v, open ? 0 : 1);
+  if ((over && g_mpress[0]) || key_press(widget_key(v, x, y))) hit(v, open ? 0 : 1);
   if (!open) return;
 
   RowAxis axis(false);
@@ -5590,6 +5669,12 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
   cb.w = cw;
   cb.h = ch;
 
+  // 焦点を回す並びに、置いた順でためる。止めてあるもの（.disabled）は入れない
+  if (!g_disabled && focusable(bk)) {
+    Str fk = focus_key(v, cx, cy);
+    if (fk.size() > 0) g_ring.push(fk);
+  }
+
   switch (w_kind(v)) {
     case WK_Label: {
       // 測ったとき（measure）と同じ幅で折り返して描く
@@ -5692,6 +5777,18 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
       break;
     }
     default: break;
+  }
+
+  // 焦点のしるし。自分で見せる部品（入力欄・一覧など）には引かない
+  if (!g_disabled && focusable(bk) && !shows_focus(bk) && focused_key(focus_key(v, cx, cy))) {
+    uint32_t fc = blend(g_bg, g_accent, 1.0);
+    int fx = x - 2, fy = y - 2, fw = w + 4, fh = h + 4;
+    span(fx, fy, fw, fc);
+    span(fx, fy + fh - 1, fw, fc);
+    for (int i = 1; i < fh - 1; i++) {
+      put(fx, fy + i, fc);
+      put(fx + fw - 1, fy + i, fc);
+    }
   }
 
   // 縁（.border）は中身のあとに引く。細い線でも中身に隠れない
@@ -6275,6 +6372,7 @@ static NativeStatus show_at(VM& vm, Value* a, int x, int y, Value& out) {
   g_last_y = y;
   g_tip_text.clear();
   g_point_x = g_point_y = -1;   // 絵の上に乗っていれば、置くときに入る
+  g_ring.clear();       // 焦点を回す並びは、置きながら作り直す
   g_row_axis = false;   // いちばん外は縦並びとみなす（ui.spacer の向き）
   g_click_seen = g_mpress[0];
   g_focus_next = g_focus;
@@ -6288,6 +6386,17 @@ static NativeStatus show_at(VM& vm, Value* a, int x, int y, Value& out) {
   if (avail_h < 1) avail_h = g_h > y ? g_h - y : 1;
   place(*view, x, y, avail, avail_h, true);
   g_focus = g_focus_next;
+  // tab で次へ、shift+tab で前へ。マウスの無い機種では、これが唯一の操り方になる。
+  // 並びは置いた順なので、見た目の順に回る（spec/library/ui.md）
+  if (g_press[SKEY_Tab] && g_ring.size() > 0) {
+    int n = g_ring.size();
+    int at = -1;
+    for (int i = 0; i < n; i++)
+      if (g_ring[i] == g_focus) at = i;
+    bool back = g_key[SKEY_Shift];
+    int to = at < 0 ? (back ? n - 1 : 0) : ((at + (back ? -1 : 1)) % n + n) % n;
+    g_focus = g_ring[to];
+  }
   // 押された入力欄に焦点が来なかったら、覚えておいた位置は捨てる
   if (g_want_caret >= 0 && !(g_focus == g_want_id)) {
     g_want_caret = -1;

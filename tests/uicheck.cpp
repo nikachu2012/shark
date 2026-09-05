@@ -705,6 +705,34 @@ struct DisabledCase : Case {
   }
 };
 
+// --- キーだけで操る（tab で送って、space / enter で押す）------------------
+// マウスの無い機種（ゲーム機）でも操れること。tab は「ぜんぶ置いたあと」に
+// 効くので、焦点が移るのは次のこまから
+struct KeyNavCase : Case {
+  int steps() { return 12; }
+  void act(int step) {
+    if (step == 0) { fake::key(SKEY_Tab, true); fake::key(SKEY_Tab, false); }
+    else if (step == 2) { fake::key(32, true); fake::key(32, false); }
+    else if (step == 4) { fake::key(SKEY_Tab, true); fake::key(SKEY_Tab, false); }
+    else if (step == 6) { fake::key(32, true); fake::key(32, false); }
+    else if (step == 8) {
+      fake::key(SKEY_Shift, true);   // 押したまま次のこままで持たせる
+      fake::key(SKEY_Tab, true);
+      fake::key(SKEY_Tab, false);
+    } else if (step == 10) {
+      fake::key(SKEY_Enter, true);
+      fake::key(SKEY_Enter, false);
+      fake::key(SKEY_Shift, false);
+    }
+  }
+  void done(int step, const Str& line) {
+    if (step == 1) expect_line("tab を押しただけでは、まだ押されない", line, "[]");
+    if (step == 3) expect_line("space で、1つ目が押される", line, "[one]");
+    if (step == 7) expect_line("もう一度 tab を送ると、2つ目が押される", line, "[two]");
+    if (step == 11) expect_line("shift+tab で戻り、enter でも押せる", line, "[one]");
+  }
+};
+
 // --- 折りたためる木（ui.tree）---------------------------------------------
 struct TreeCase : Case {
   int steps() { return 8; }
@@ -1270,6 +1298,26 @@ int main() {
             "  return 0;\n"
             "}\n");
     run("使えなくする（.disabled）", src.c_str(), &off);
+  }
+
+  KeyNavCase nav;
+  {
+    Str src("import std.ui;\n"
+            "func main() -> int {\n"
+            "  ui.font_builtin();\n"
+            "  ui.open(\"t\", 200, 120);\n"
+            "  while ui.poll() {\n"
+            "    ui.clear(0);\n"
+            "    var hit = ui.show(ui.col([\n"
+            "      ui.button(\"a\", \"one\"),\n"
+            "      ui.button(\"b\", \"two\"),\n"
+            "    ]), 0, 0);\n"
+            "    print(f\"[{hit}]\");\n"
+            "    ui.present();\n"
+            "  }\n"
+            "  return 0;\n"
+            "}\n");
+    run("キーだけで操る（tab / space / enter）", src.c_str(), &nav);
   }
 
   if (g_fail) {

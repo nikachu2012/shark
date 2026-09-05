@@ -432,9 +432,11 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, double dpr), {
     // 面が受け取ったキーは、ブラウザの既定の動き（巻物・焦点の移動）に渡さない
     if (!S.textOn && !e.ctrlKey && !e.metaKey && !e.altKey && PREVENT[e.key]) e.preventDefault();
     // 改行はコア（Shark）が入れる。受け皿にも入れさせると二重になる。
-    // 複数行の入力欄では、行にまつわるキーもコアが受け持つ（折り返す幅が違うため）
+    // 複数行の入力欄では、行にまつわるキーもコアが受け持つ（折り返す幅が違うため）。
+    // tab も同じで、入力欄から次の部品へ焦点を移すのはコアの側。
+    // ブラウザにも渡すと、受け皿ごと面の外へ焦点が飛んでしまう
     if (S.textOn && !e.ctrlKey && !e.metaKey && !e.altKey &&
-        (e.key === 'Enter' ||
+        (e.key === 'Enter' || e.key === 'Tab' ||
          (S.textMulti && LINEKEY[e.key])))
       e.preventDefault();
   }
