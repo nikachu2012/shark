@@ -12,8 +12,8 @@
 // 曲線と端子は自前のアンチエイリアスで引く（aa_seg / aa_disc / aa_ring）。
 // 宣言的な上層は examples/counter.shk と widgets.shk を参照。
 //
-// 視点は独立して動く。ノードは無限の平面に置かれ、画面はその一部を覗いている。
-// 画面外のノードは、縁に色の点として残り、F でまとめて視界へ戻る。
+// ノードは無限の平面（ワールド）に置かれ、画面はその一部を倍率つきで覗く。
+// 画面外のノードは縁に色の点として残り、右下のミニマップに全体が出る。
 //
 // 画面を持たない環境（SHARK_UI=off など）では、初期グラフのコードを出力し、
 // node_editor.png を書き出す。
@@ -107,7 +107,7 @@ func type_color(t: int) -> int {
 
 // ---------------------------------------------------------------- グラフ
 // ノードは id で指す。並びが変わっても接続が壊れない。
-// 座標は無限平面の側（ワールド）で持ち、画面へは視点を足して写す。
+// 座標はワールド側で持ち、画面へは倍率を掛けて視点を足して写す。
 class Node {
   public var id: int;
   public var kind: int;
@@ -132,6 +132,20 @@ class Link {
     this.from_id = from_id;
     this.to_id = to_id;
     this.port = port;
+  }
+}
+
+// ワールド上の矩形。全体の範囲を取り回すのに使う
+class Rect {
+  public var x0: int;
+  public var y0: int;
+  public var x1: int;
+  public var y1: int;
+  func init(x0: int, y0: int, x1: int, y1: int) {
+    this.x0 = x0;
+    this.y0 = y0;
+    this.x1 = x1;
+    this.y1 = y1;
   }
 }
 
@@ -372,33 +386,56 @@ func code_text() -> string {
 }
 
 // ---------------------------------------------------------------- レイアウト
+const ZOOM_MIN = 0.35;
+const ZOOM_MAX = 2.5;
+
 var K: int = 1;         // 画素密度
 var W: int = 900;
 var H: int = 520;
-var TH: int = 8;        // 文字の高さ
-var ROW: int = 16;      // 入力 1 本ぶんの高さ
-var TITLE: int = 16;    // ヘッダ帯の高さ
-var NODE_W: int = 118;
+var BASE_FS: int = 12;  // ペインの字の大きさ（画素）
+var TH: int = 8;        // ペインの字の高さ
+var CTH: int = 8;       // キャンバスの字の高さ（倍率で変わる）
+var ROW: int = 16;      // 入力 1 本ぶんの高さ（ワールド）
+var TITLE: int = 16;    // ヘッダ帯の高さ（ワールド）
+var NODE_W: int = 118;  // ノードの幅（ワールド）
 var PAL_W: int = 96;    // 左のパレット
 var CODE_W: int = 214;  // 右のペイン
 var BAR_H: int = 24;    // 下のステータスバー
+var MM_W: int = 156;    // ミニマップ
+var MM_H: int = 104;
 var CX0: int = 0;       // キャンバスの左端
 var CX1: int = 0;       // キャンバスの右端
 var CY1: int = 0;       // キャンバスの下端
-var WIRE_R: float = 1.7;   // 配線の半幅（画素）
-var PORT_R: float = 4.5;   // 端子の半径
+var WIRE_R: float = 1.7;   // 配線の半幅（倍率 1 のとき、画素）
+var PORT_R: float = 4.5;   // 端子の半径（同上）
 
-// 視点。ワールド座標に足すと画面座標になる
+// 視点。ワールドに倍率を掛け、これを足すと画面座標になる
 var view_x: int = 0;
 var view_y: int = 0;
+var zoom: float = 1.0;
 
-func px(n: Node) -> int { return n.x + view_x; }
-func py(n: Node) -> int { return n.y + view_y; }
-func node_h(n: Node) -> int { return TITLE + rows(n.kind) * ROW + 4 * K; }
+func zi(v: int) -> int { return int(float(v) * zoom); }
+func node_w() -> int { return zi(NODE_W); }
+func row_h() -> int { return zi(ROW); }
+func head_h() -> int { return zi(TITLE); }
+
+// ワールドでの高さと、画面での高さ
+func node_wh(n: Node) -> int { return TITLE + rows(n.kind) * ROW + 4 * K; }
+func node_h(n: Node) -> int { return zi(node_wh(n)); }
+
+func px(n: Node) -> int { return zi(n.x) + view_x; }
+func py(n: Node) -> int { return zi(n.y) + view_y; }
 func in_px(n: Node) -> int { return px(n); }
-func in_py(n: Node, i: int) -> int { return py(n) + TITLE + i * ROW + ROW / 2; }
-func out_px(n: Node) -> int { return px(n) + NODE_W; }
-func out_py(n: Node) -> int { return py(n) + TITLE + ROW / 2; }
+func in_py(n: Node, i: int) -> int { return py(n) + head_h() + i * row_h() + row_h() / 2; }
+func out_px(n: Node) -> int { return px(n) + node_w(); }
+func out_py(n: Node) -> int { return py(n) + head_h() + row_h() / 2; }
+
+// 画面 → ワールド
+func to_wx(x: int) -> int { return int(float(x - view_x) / zoom); }
+func to_wy(y: int) -> int { return int(float(y - view_y) / zoom); }
+
+// 端子をつかめる半径。小さく引いても押しやすいように下限を置く
+func grab_r() -> int { return math.max(int(9.0 * float(K) * zoom), 6 * K); }
 
 func near(ax: int, ay: int, bx: int, by: int, r: int) -> bool {
   var dx = ax - bx;
@@ -406,31 +443,85 @@ func near(ax: int, ay: int, bx: int, by: int, r: int) -> bool {
   return dx * dx + dy * dy <= r * r;
 }
 
-// グラフ全体が収まる位置へ視点を戻す
-func fit() -> void {
-  if nodes.len() == 0 {
-    view_x = CX0 + 40 * K;
-    view_y = 40 * K;
-    return;
-  }
-  var x0 = nodes[0].x;
-  var y0 = nodes[0].y;
-  var x1 = x0 + NODE_W;
-  var y1 = y0 + node_h(nodes[0]);
+// いま画面が見ているワールドの範囲
+func view_rect() -> Rect {
+  return Rect(to_wx(CX0), to_wy(0), to_wx(CX1), to_wy(CY1));
+}
+
+// ノード全体を囲むワールドの範囲
+func graph_rect() -> Rect {
+  if nodes.len() == 0 { return Rect(0, 0, NODE_W, TITLE); }
+  var r = Rect(nodes[0].x, nodes[0].y, nodes[0].x + NODE_W, nodes[0].y + node_wh(nodes[0]));
   for var n in nodes {
-    if n.x < x0 { x0 = n.x; }
-    if n.y < y0 { y0 = n.y; }
-    if n.x + NODE_W > x1 { x1 = n.x + NODE_W; }
-    if n.y + node_h(n) > y1 { y1 = n.y + node_h(n); }
+    if n.x < r.x0 { r.x0 = n.x; }
+    if n.y < r.y0 { r.y0 = n.y; }
+    if n.x + NODE_W > r.x1 { r.x1 = n.x + NODE_W; }
+    if n.y + node_wh(n) > r.y1 { r.y1 = n.y + node_wh(n); }
   }
-  view_x = CX0 + ((CX1 - CX0) - (x1 - x0)) / 2 - x0;
-  view_y = (CY1 - (y1 - y0)) / 2 - y0;
+  return r;
+}
+
+// 画面の中心を、ワールドの一点に合わせる
+func look_at(wx: int, wy: int) -> void {
+  view_x = (CX0 + CX1) / 2 - int(float(wx) * zoom);
+  view_y = CY1 / 2 - int(float(wy) * zoom);
+}
+
+// その画面座標を動かさずに倍率を変える（指した点を軸に拡大縮小する）
+func zoom_at(mx: int, my: int, nz: float) -> void {
+  var z = math.clamp(nz, ZOOM_MIN, ZOOM_MAX);
+  if z == zoom { return; }
+  var wx = float(mx - view_x) / zoom;
+  var wy = float(my - view_y) / zoom;
+  zoom = z;
+  view_x = mx - int(wx * zoom);
+  view_y = my - int(wy * zoom);
+}
+
+// グラフ全体が収まるところまで引いて、中央に置く
+func fit() -> void {
+  var r = graph_rect();
+  var bw = math.max(r.x1 - r.x0, 1);
+  var bh = math.max(r.y1 - r.y0, 1);
+  var zx = float(CX1 - CX0 - 40 * K) / float(bw);
+  var zy = float(CY1 - 40 * K) / float(bh);
+  zoom = math.clamp(math.min(math.min(zx, zy), 1.0), ZOOM_MIN, ZOOM_MAX);
+  look_at((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2);
 }
 
 // ---------------------------------------------------------------- 自前の階調描画
 // ui.line は 1 画素・階調なし。ここでは太さと縁の階調を自分で持つ。
 // ui.set は下地と混ぜずに置くので、混ぜたい 1 画素は ui.hline(x, y, 1, 色) で置く。
 // 濃度ごとの色は、ホスト呼び出しを削るため 33 段の表に焼いておく。
+// 切り抜き。ui.clip に頼むのと同時に、自前の描画でも範囲外をまるごと
+// 捨てられるよう、同じ矩形を覚えておく（拡大したときの無駄を削る）
+var cl_x0: int = 0;
+var cl_y0: int = 0;
+var cl_x1: int = 0;
+var cl_y1: int = 0;
+
+func set_clip(x: int, y: int, w: int, h: int) -> void {
+  cl_x0 = x;
+  cl_y0 = y;
+  cl_x1 = x + w;
+  cl_y1 = y + h;
+  ui.clip(x, y, w, h);
+}
+
+func clip_all() -> void {
+  cl_x0 = 0;
+  cl_y0 = 0;
+  cl_x1 = W;
+  cl_y1 = H;
+  ui.clip_off();
+}
+
+// その矩形が、いまの切り抜きに掛かるか
+func visible_box(x0: float, y0: float, x1: float, y1: float) -> bool {
+  return x1 >= float(cl_x0) && x0 <= float(cl_x1)
+      && y1 >= float(cl_y0) && y0 <= float(cl_y1);
+}
+
 var cov_key: int = -1;
 var cov_tab: list<int> = [];
 
@@ -459,6 +550,8 @@ func aa_seg(ax: float, ay: float, bx: float, by: float, r: float) -> void {
   var adx = math.abs(bx - ax);
   var ady = math.abs(by - ay);
   if adx < 0.001 && ady < 0.001 { return; }
+  if !visible_box(math.min(ax, bx) - r - 1.0, math.min(ay, by) - r - 1.0,
+                  math.max(ax, bx) + r + 1.0, math.max(ay, by) + r + 1.0) { return; }
   if adx >= ady {
     var x0 = ax;
     var y0 = ay;
@@ -524,6 +617,7 @@ func aa_seg(ax: float, ay: float, bx: float, by: float, r: float) -> void {
 
 // 塗った円
 func aa_disc(cx: float, cy: float, r: float, col: int) -> void {
+  if !visible_box(cx - r - 1.0, cy - r - 1.0, cx + r + 1.0, cy + r + 1.0) { return; }
   cov_use(col);
   for var y in range(math.floor(cy - r - 1.0), math.ceil(cy + r + 1.0) + 1) {
     for var x in range(math.floor(cx - r - 1.0), math.ceil(cx + r + 1.0) + 1) {
@@ -536,6 +630,8 @@ func aa_disc(cx: float, cy: float, r: float, col: int) -> void {
 
 // 輪郭だけの円。t は線の半幅
 func aa_ring(cx: float, cy: float, r: float, t: float, col: int) -> void {
+  var e = r + t + 1.0;
+  if !visible_box(cx - e, cy - e, cx + e, cy + e) { return; }
   cov_use(col);
   for var y in range(math.floor(cy - r - t - 1.0), math.ceil(cy + r + t + 1.0) + 1) {
     for var x in range(math.floor(cx - r - t - 1.0), math.ceil(cx + r + t + 1.0) + 1) {
@@ -549,8 +645,7 @@ func aa_ring(cx: float, cy: float, r: float, t: float, col: int) -> void {
 // 配線。三次ベジエを折れ線に割り、太さつきで引く
 func wire(x0: int, y0: int, x1: int, y1: int, r: float, col: int) -> void {
   cov_use(col);
-  var h = math.abs(x1 - x0) / 2;
-  if h < 30 * K { h = 30 * K; }
+  var h = math.max(math.abs(x1 - x0) / 2, math.max(zi(30 * K), 12 * K));
   var span = math.abs(x1 - x0) + math.abs(y1 - y0) + h;
   var steps = math.clamp(span / (7 * K), 10, 48);
   var pxx = float(x0);
@@ -568,6 +663,59 @@ func wire(x0: int, y0: int, x1: int, y1: int, r: float, col: int) -> void {
   }
 }
 
+// ---------------------------------------------------------------- ミニマップ
+// 右下に、グラフ全体といまの視野を出す。押した先へ視点が飛ぶ。
+// 写す倍率と原点は、描画と当たり判定とで共有する。
+var mm_s: float = 1.0;
+var mm_ox: int = 0;
+var mm_oy: int = 0;
+
+func mm_x() -> int { return CX1 - MM_W - 12 * K; }
+func mm_y() -> int { return CY1 - MM_H - 12 * K; }
+
+func mm_sx(wx: int) -> int { return mm_ox + int(float(wx) * mm_s); }
+func mm_sy(wy: int) -> int { return mm_oy + int(float(wy) * mm_s); }
+
+// グラフと視野の両方が入るよう、写す倍率と原点を決める
+func mm_prepare() -> void {
+  var g = graph_rect();
+  var v = view_rect();
+  var r = Rect(math.min(g.x0, v.x0) - 24, math.min(g.y0, v.y0) - 24,
+               math.max(g.x1, v.x1) + 24, math.max(g.y1, v.y1) + 24);
+  var bw = math.max(r.x1 - r.x0, 1);
+  var bh = math.max(r.y1 - r.y0, 1);
+  mm_s = math.min(float(MM_W - 8 * K) / float(bw), float(MM_H - 8 * K) / float(bh));
+  mm_ox = mm_x() + (MM_W - int(float(bw) * mm_s)) / 2 - int(float(r.x0) * mm_s);
+  mm_oy = mm_y() + (MM_H - int(float(bh) * mm_s)) / 2 - int(float(r.y0) * mm_s);
+}
+
+func mm_inside(mx: int, my: int) -> bool {
+  return mx >= mm_x() && mx < mm_x() + MM_W && my >= mm_y() && my < mm_y() + MM_H;
+}
+
+func draw_minimap() -> void {
+  mm_prepare();
+  ui.fill_rect(mm_x(), mm_y(), MM_W, MM_H, ui.rgba(12, 13, 18, 210));
+  ui.rect(mm_x(), mm_y(), MM_W, MM_H, ui.rgb(58, 62, 76));
+
+  for var l in links {
+    var a = idx(l.from_id);
+    var b = idx(l.to_id);
+    if a < 0 || b < 0 { continue; }
+    ui.line(mm_sx(nodes[a].x + NODE_W), mm_sy(nodes[a].y + TITLE / 2),
+            mm_sx(nodes[b].x), mm_sy(nodes[b].y + TITLE / 2), ui.rgb(70, 76, 94));
+  }
+  for var n in nodes {
+    ui.fill_rect(mm_sx(n.x), mm_sy(n.y),
+                 math.max(int(float(NODE_W) * mm_s), 2 * K),
+                 math.max(int(float(node_wh(n)) * mm_s), 2 * K), kind_color(n.kind));
+  }
+
+  var v = view_rect();
+  ui.rect(mm_sx(v.x0), mm_sy(v.y0), mm_sx(v.x1) - mm_sx(v.x0), mm_sy(v.y1) - mm_sy(v.y0),
+          ui.rgb(255, 206, 84));
+}
+
 // ---------------------------------------------------------------- 操作
 var was_down: bool = false;
 var was_mid: bool = false;
@@ -583,6 +731,7 @@ var pan_mx: int = 0;
 var pan_my: int = 0;
 var pan_bx: int = 0;
 var pan_by: int = 0;
+var mm_on: bool = false;    // ミニマップを掴んでいるか
 var sel_id: int = -1;       // 選択中のノード
 var hit_id: int = -1;       // find_in が見つけた入力
 var hit_port: int = 0;
@@ -602,7 +751,7 @@ func in_canvas(mx: int, my: int) -> bool {
 func node_at(mx: int, my: int) -> int {
   for var i in range(nodes.len()) {
     var n = nodes[nodes.len() - 1 - i];
-    if mx >= px(n) && mx < px(n) + NODE_W && my >= py(n) && my < py(n) + node_h(n) {
+    if mx >= px(n) && mx < px(n) + node_w() && my >= py(n) && my < py(n) + node_h(n) {
       return n.id;
     }
   }
@@ -613,7 +762,7 @@ func out_at(mx: int, my: int) -> int {
   for var i in range(nodes.len()) {
     var n = nodes[nodes.len() - 1 - i];
     if out_type(n.kind) == T_NONE { continue; }
-    if near(out_px(n), out_py(n), mx, my, 9 * K) { return n.id; }
+    if near(out_px(n), out_py(n), mx, my, grab_r()) { return n.id; }
   }
   return -1;
 }
@@ -622,7 +771,7 @@ func find_in(mx: int, my: int) -> bool {
   for var i in range(nodes.len()) {
     var n = nodes[nodes.len() - 1 - i];
     for var p in range(in_count(n.kind)) {
-      if near(in_px(n), in_py(n, p), mx, my, 9 * K) {
+      if near(in_px(n), in_py(n, p), mx, my, grab_r()) {
         hit_id = n.id;
         hit_port = p;
         return true;
@@ -661,7 +810,7 @@ func add_node(k: int) -> void {
   var sx = CX0 + 24 * K + (spawn % 3) * 36 * K;
   var sy = 24 * K + (spawn % 5) * 32 * K;
   spawn += 1;
-  nodes.push(Node(next_id, k, sx - view_x, sy - view_y, 2));
+  nodes.push(Node(next_id, k, to_wx(sx), to_wy(sy), 2));
   sel_id = next_id;
   next_id += 1;
 }
@@ -685,6 +834,10 @@ func pan_begin(mx: int, my: int) -> void {
   pan_by = view_y;
 }
 
+func mm_jump(mx: int, my: int) -> void {
+  look_at(int(float(mx - mm_ox) / mm_s), int(float(my - mm_oy) / mm_s));
+}
+
 func on_press(mx: int, my: int) -> void {
   if mx < PAL_W {
     var k = pal_hit(my);
@@ -693,6 +846,11 @@ func on_press(mx: int, my: int) -> void {
   }
   if !in_canvas(mx, my) { return; }     // 右のペインと下のバーは読むだけ
 
+  if mm_inside(mx, my) {                // ミニマップは、ほかの何より先に取る
+    mm_on = true;
+    mm_jump(mx, my);
+    return;
+  }
   var o = out_at(mx, my);
   if o >= 0 {
     wire_id = o;
@@ -713,7 +871,7 @@ func on_press(mx: int, my: int) -> void {
   }
   sel_id = id;
   var n = nodes[idx(id)];
-  if n.kind == K_NUM && my >= py(n) + TITLE {
+  if n.kind == K_NUM && my >= py(n) + head_h() {
     num_id = id;                       // 値の行を横に引くと数が変わる
     num_base = n.value;
     num_mx = mx;
@@ -732,29 +890,40 @@ func on_release(mx: int, my: int) -> void {
   drag_id = -1;
   num_id = -1;
   pan_on = false;
+  mm_on = false;
 }
 
 func on_drag(mx: int, my: int) -> void {
+  if mm_on {
+    mm_jump(mx, my);
+    return;
+  }
   if pan_on {
     view_x = pan_bx + (mx - pan_mx);
     view_y = pan_by + (my - pan_my);
   }
   if drag_id >= 0 {
     var i = idx(drag_id);
-    nodes[i].x = mx - drag_dx - view_x;
-    nodes[i].y = my - drag_dy - view_y;
+    nodes[i].x = to_wx(mx - drag_dx);
+    nodes[i].y = to_wy(my - drag_dy);
   }
   if num_id >= 0 {
     nodes[idx(num_id)].value = num_base + (mx - num_mx) / (4 * K);
   }
 }
 
-func keys() -> void {
+func keys(mx: int, my: int) -> void {
   if ui.pressed("esc") || ui.pressed("q") { ui.quit(); }
   if ui.pressed("f") || ui.pressed("home") {
     fit();
-    say("全体表示");
+    say(f"全体表示 {int(zoom * 100.0)}%");
   }
+  if ui.pressed("0") {
+    zoom_at((CX0 + CX1) / 2, CY1 / 2, 1.0);
+    say("等倍");
+  }
+  if ui.pressed("=") || ui.pressed("+") { zoom_at(mx, my, zoom * 1.25); }
+  if ui.pressed("-") { zoom_at(mx, my, zoom / 1.25); }
   if sel_id >= 0 && idx(sel_id) >= 0 {
     if ui.pressed("delete") || ui.pressed("x") {
       delete_node(sel_id);
@@ -778,47 +947,59 @@ func keys() -> void {
 }
 
 // ---------------------------------------------------------------- 描画
+// 倍率を掛けた字が小さすぎるときは、名前を省いて色の塊として出す
+var labels: bool = true;
+
 func draw_node(n: Node) -> void {
   var x = px(n);
   var y = py(n);
+  var w = node_w();
   var h = node_h(n);
-  ui.fill_rect(x, y, NODE_W, h, ui.rgb(40, 43, 55));
-  ui.rect(x, y, NODE_W, h, ui.rgb(22, 24, 32));
-  ui.fill_rect(x, y, NODE_W, TITLE, kind_color(n.kind));
-  ui.text(x + 8 * K, y + (TITLE - TH) / 2, kind_name(n.kind), ui.rgb(255, 255, 255));
-
-  // 現在値をヘッダ右に。定数ノードは本体に出るので省く
-  if n.kind != K_NUM {
-    var v = value_text(n.id);
-    ui.text(x + NODE_W - 8 * K - ui.text_width(v), y + (TITLE - TH) / 2, v,
-            ui.rgb(16, 20, 26));
+  if !visible_box(float(x), float(y), float(x + w), float(y + h)) { return; }
+  var head = head_h();
+  ui.fill_rect(x, y, w, h, ui.rgb(40, 43, 55));
+  ui.rect(x, y, w, h, ui.rgb(22, 24, 32));
+  ui.fill_rect(x, y, w, head, kind_color(n.kind));
+  if labels {
+    ui.text(x + 8 * K, y + (head - CTH) / 2, kind_name(n.kind), ui.rgb(255, 255, 255));
+    // 現在値をヘッダ右に。定数ノードは本体に出るので省く
+    if n.kind != K_NUM {
+      var v = value_text(n.id);
+      ui.text(x + w - 8 * K - ui.text_width(v), y + (head - CTH) / 2, v,
+              ui.rgb(16, 20, 26));
+    }
   }
 
+  var pr = math.max(PORT_R * float(K) * zoom, 2.2);
   for var i in range(rows(n.kind)) {
-    var ry = y + TITLE + i * ROW;
+    var ry = y + head + i * row_h();
     if n.kind == K_NUM {
-      var s = string(n.value);
-      ui.text(x + (NODE_W - ui.text_width(s)) / 2, ry + (ROW - TH) / 2, s,
-              ui.rgb(240, 242, 248));
+      if labels {
+        var s = string(n.value);
+        ui.text(x + (w - ui.text_width(s)) / 2, ry + (row_h() - CTH) / 2, s,
+                ui.rgb(240, 242, 248));
+      }
       continue;
     }
     var t = in_type(n.kind, i);
-    var cy = ry + ROW / 2;
+    var cy = ry + row_h() / 2;
     if src_of(n.id, i) >= 0 {
-      aa_disc(float(in_px(n)), float(cy), PORT_R * float(K), type_color(t));
+      aa_disc(float(in_px(n)), float(cy), pr, type_color(t));
     } else {
-      aa_ring(float(in_px(n)), float(cy), PORT_R * float(K) - 1.0, 0.9 * float(K),
-              type_color(t));
+      aa_ring(float(in_px(n)), float(cy), pr - 1.0,
+              math.max(0.9 * float(K) * zoom, 0.7), type_color(t));
     }
-    ui.text(x + 14 * K, ry + (ROW - TH) / 2, in_name(n.kind, i), ui.rgb(178, 184, 198));
+    if labels {
+      ui.text(x + 14 * K, ry + (row_h() - CTH) / 2, in_name(n.kind, i),
+              ui.rgb(178, 184, 198));
+    }
   }
 
   if out_type(n.kind) != T_NONE {
-    aa_disc(float(out_px(n)), float(out_py(n)), PORT_R * float(K),
-            type_color(out_type(n.kind)));
+    aa_disc(float(out_px(n)), float(out_py(n)), pr, type_color(out_type(n.kind)));
   }
   if n.id == sel_id {
-    ui.rect(x - 2 * K, y - 2 * K, NODE_W + 4 * K, h + 4 * K, ui.rgb(255, 206, 84));
+    ui.rect(x - 2 * K, y - 2 * K, w + 4 * K, h + 4 * K, ui.rgb(255, 206, 84));
   }
 }
 
@@ -828,8 +1009,8 @@ func draw_offscreen() -> void {
     var x = px(n);
     var y = py(n);
     var h = node_h(n);
-    if x + NODE_W > CX0 && x < CX1 && y + h > 0 && y < CY1 { continue; }
-    var mx = math.clamp(x + NODE_W / 2, CX0 + 7 * K, CX1 - 7 * K);
+    if x + node_w() > CX0 && x < CX1 && y + h > 0 && y < CY1 { continue; }
+    var mx = math.clamp(x + node_w() / 2, CX0 + 7 * K, CX1 - 7 * K);
     var my = math.clamp(y + h / 2, 7 * K, CY1 - 7 * K);
     aa_disc(float(mx), float(my), 3.5 * float(K), kind_color(n.kind));
   }
@@ -888,7 +1069,7 @@ func draw_code() -> void {
 func draw_bar() -> void {
   ui.fill_rect(0, CY1, W, BAR_H, ui.rgb(16, 17, 23));
   ui.hline(0, CY1, W, ui.rgb(46, 50, 62));
-  var s = "ドラッグ:移動／出力→入力:接続／入力:切断／右クリック:削除／↑↓:値／余白と中ボタン:視点／ホイール:スクロール／F:全体／C:コピー／Esc:終了";
+  var s = "ドラッグ:移動／出力→入力:接続／入力:切断／右クリック:削除／↑↓:値／余白･中ボタン:視点／ホイール:拡大縮小／F:全体／0:等倍／C:コピー／Esc:終了";
   var col = ui.rgb(138, 144, 160);
   if msg_t > 0 {
     s = msg;
@@ -900,9 +1081,9 @@ func draw_bar() -> void {
 func draw() -> void {
   ui.clear(ui.rgb(29, 31, 40));
 
-  ui.clip(CX0, 0, CX1 - CX0, CY1);
-  // 方眼。視点に追従して流れる
-  var g = 26 * K;
+  set_clip(CX0, 0, CX1 - CX0, CY1);
+  // 方眼。視点と倍率に追従して流れる
+  var g = math.max(zi(26 * K), 9 * K);
   var ox = view_x % g;
   if ox < 0 { ox += g; }
   var oy = view_y % g;
@@ -914,22 +1095,35 @@ func draw() -> void {
     }
   }
 
+  var wr = math.max(WIRE_R * float(K) * zoom, 0.9);
   for var l in links {
     var a = idx(l.from_id);
     var b = idx(l.to_id);
     if a < 0 || b < 0 { continue; }
     wire(out_px(nodes[a]), out_py(nodes[a]),
          in_px(nodes[b]), in_py(nodes[b], l.port),
-         WIRE_R * float(K), type_color(out_type(nodes[a].kind)));
+         wr, type_color(out_type(nodes[a].kind)));
   }
   if wire_id >= 0 && idx(wire_id) >= 0 {
     var a = idx(wire_id);
     wire(out_px(nodes[a]), out_py(nodes[a]), ui.mouse_x(), ui.mouse_y(),
-         WIRE_R * float(K), ui.rgb(255, 206, 84));
+         wr, ui.rgb(255, 206, 84));
   }
+
+  // キャンバスの字だけ倍率に合わせる。字形の覚え書きは大きさごとに引かれるので、
+  // 1 こまのあいだに切り替えても、作り直しは起きない
+  var fs = math.clamp(int(float(BASE_FS) * zoom), 5, 96);
+  labels = fs >= 8 * K;
+  _ = ui.font(fs);
+  CTH = ui.text_height();
   for var n in nodes { draw_node(n); }
+  _ = ui.font(BASE_FS);
+  CTH = TH;
+
   draw_offscreen();
-  ui.clip_off();
+  draw_minimap();
+  ui.text(CX0 + 10 * K, 8 * K, f"{int(zoom * 100.0)}%", ui.rgb(104, 112, 130));
+  clip_all();
 
   draw_palette();
   draw_code();
@@ -957,13 +1151,17 @@ func demo() -> void {
 }
 
 func layout() -> void {
+  BASE_FS = 12 * K;
   TH = ui.text_height();
+  CTH = TH;
   ROW = TH + 8 * K;
   TITLE = TH + 8 * K;
   NODE_W = 118 * K;
   PAL_W = 96 * K;
   CODE_W = 214 * K;
   BAR_H = TH + 10 * K;
+  MM_W = 156 * K;
+  MM_H = 104 * K;
   CX0 = PAL_W;
   CX1 = W - CODE_W;
   CY1 = H - BAR_H;
@@ -997,14 +1195,13 @@ func main() -> int {
   }
 
   while ui.poll() {
-    keys();
     var mx = ui.mouse_x();
     var my = ui.mouse_y();
+    keys(mx, my);
 
-    // ホイールで視点を送る
-    if in_canvas(mx, my) {
-      view_y -= ui.wheel() * 28 * K;
-      view_x -= ui.wheel_x() * 28 * K;
+    // ホイールで、指した点を軸に拡大縮小
+    if in_canvas(mx, my) && ui.wheel() != 0 {
+      zoom_at(mx, my, zoom * math.pow(1.15, float(-ui.wheel())));
     }
 
     // 中ボタンは、どこを掴んでも視点だけが動く
@@ -1025,7 +1222,7 @@ func main() -> int {
 
     if ui.clicked(2) {
       var id = node_at(mx, my);
-      if id >= 0 && in_canvas(mx, my) {
+      if id >= 0 && in_canvas(mx, my) && !mm_inside(mx, my) {
         delete_node(id);
         if sel_id == id { sel_id = -1; }
         say("削除");
