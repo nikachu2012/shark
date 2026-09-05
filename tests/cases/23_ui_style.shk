@@ -1,0 +1,137 @@
+// std.ui の上の層 — 字の大きさ（.font）と、使えなくする（.disabled）
+// （spec/library/ui.md）
+//
+// 内蔵の 5×7（高さ 8）に固定して測る。フォントを入れて作ったかどうかで
+// 数が変わらないようにするため。
+import std.ui;
+
+var agree = false;
+
+// x 列のうち、その色で塗られている点の数
+func rows_of(x: int, col: int) -> int {
+  var n = 0;
+  for var y in range(ui.height()) {
+    if ui.get(x, y) == col { n += 1; }
+  }
+  return n;
+}
+
+// x 列で、その色がいちばん下に出た行（無ければ -1）
+func last_row(x: int, col: int) -> int {
+  var at = -1;
+  for var y in range(ui.height()) {
+    if ui.get(x, y) == col { at = y; }
+  }
+  return at;
+}
+
+// 面ぜんぶから、その色の点を数える
+func count_of(col: int) -> int {
+  var n = 0;
+  for var y in range(ui.height()) {
+    for var x in range(ui.width()) {
+      if ui.get(x, y) == col { n += 1; }
+    }
+  }
+  return n;
+}
+
+func main() -> int {
+  var red = ui.rgb(255, 0, 0);
+  var blue = ui.rgb(0, 0, 255);
+  ui.font_builtin();
+  ui.open(200, 200);
+
+  // --- 字の大きさ（.font）---
+  // 決めなければ内蔵の 8。書けばその大きさになる
+  ui.clear(0);
+  _ = ui.show(ui.label("A").width(30).background(blue), 0, 0);
+  print(rows_of(29, blue));   // 8
+  ui.clear(0);
+  _ = ui.show(ui.label("A").width(30).background(blue).font(24), 0, 0);
+  print(rows_of(29, blue));   // 24
+  ui.clear(0);
+  _ = ui.show(ui.label("A").width(30).background(blue).font(16), 0, 0);
+  print(rows_of(29, blue));   // 16
+
+  // 入れ物に書けば、中の部品まで受け継ぐ
+  ui.clear(0);
+  _ = ui.show(ui.col([ui.label("A").width(30).background(blue)]).font(24), 0, 0);
+  print(rows_of(29, blue));   // 24
+
+  // 中の部品に書いたほうが勝つ
+  ui.clear(0);
+  _ = ui.show(ui.col([ui.label("A").width(30).background(blue).font(8)]).font(24), 0, 0);
+  print(rows_of(29, blue));   // 8
+
+  // 0 は「決めていない」。外から受け継いだままになる
+  ui.clear(0);
+  _ = ui.show(ui.col([ui.label("A").width(30).background(blue).font(0)]).font(24), 0, 0);
+  print(rows_of(29, blue));   // 24
+
+  // 部品の寸法は字の大きさから決まるので、**並べたときの間も一緒に広がる**。
+  // 8 なら 8 + 間 4 + 8 = 20、24 なら 24 + 間 12 + 24 = 60
+  ui.clear(0);
+  _ = ui.show(ui.col([ui.label("A").width(30).background(blue),
+                      ui.label("B").width(30).background(blue)]), 0, 0);
+  print(f"{rows_of(29, blue)} {last_row(29, blue)}");   // 16 19
+  ui.clear(0);
+  _ = ui.show(ui.col([ui.label("A").width(30).background(blue),
+                      ui.label("B").width(30).background(blue)]).font(24), 0, 0);
+  print(f"{rows_of(29, blue)} {last_row(29, blue)}");   // 48 59
+
+  // --- 使えなくする（.disabled）---
+  // 字の色はうすくなる（頼んだ色そのものは、もう出ない）
+  ui.clear(0);
+  _ = ui.show(ui.label("A").color(red), 0, 0);
+  var lit = count_of(red);
+  ui.clear(0);
+  _ = ui.show(ui.label("A").color(red).disabled(true), 0, 0);
+  print(f"{lit > 0} {count_of(red)}");   // true 0
+
+  // 入れ物ごと止められる（中の部品まで効く）
+  ui.clear(0);
+  _ = ui.show(ui.col([ui.label("A").color(red)]).disabled(true), 0, 0);
+  print(count_of(red));   // 0
+
+  // 外で止めたものは、中で false を書いても戻らない
+  ui.clear(0);
+  _ = ui.show(ui.col([ui.label("A").color(red).disabled(false)]).disabled(true), 0, 0);
+  print(count_of(red));   // 0
+
+  // false なら、そのまま使える
+  ui.clear(0);
+  _ = ui.show(ui.label("A").color(red).disabled(false), 0, 0);
+  print(count_of(red) > 0);   // true
+
+  // 止めても、場所は同じだけ取る（出し入れで画面が動かない）
+  ui.clear(0);
+  _ = ui.show(ui.label("A").width(30).background(blue).disabled(true), 0, 0);
+  print(rows_of(29, blue));   // 8
+
+  // 字の大きさと一緒にも書ける
+  ui.clear(0);
+  _ = ui.show(ui.col([ui.label("A").width(30).background(blue)]).font(16).disabled(true), 0, 0);
+  print(rows_of(29, blue));   // 16
+
+  // --- 書いても元は変わらない（ほかの飾りと同じ）---
+  var base = ui.label("A").width(30).background(blue);
+  var big = base.font(24);
+  ui.clear(0);
+  _ = ui.show(base, 0, 0);
+  var a = rows_of(29, blue);
+  ui.clear(0);
+  _ = ui.show(big, 0, 0);
+  print(f"{a} {rows_of(29, blue)}");   // 8 24
+
+  // --- 使い方の形（同意するまで進めない）---
+  ui.clear(0);
+  var hit = ui.show(ui.col([
+    ui.checkbox("同意する", ref agree),
+    ui.button("進む", "go").disabled(!agree),
+  ]), 0, 0);
+  print(f"[{hit}] {agree}");   // [] false
+
+  ui.close();
+  return 0;
+}

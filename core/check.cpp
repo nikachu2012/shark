@@ -47,6 +47,8 @@ NativeStatus n_widget_radius(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_decimals(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_filter(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_valign(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_font(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_disabled(VM& vm, Value* args, int n, Value& out);
 // Canvas（絵）のメソッド。書き換えるものは受け手を借りる（本体は lib/ui.cpp）
 NativeStatus n_canvas_width(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_height(VM& vm, Value* args, int n, Value& out);
@@ -211,6 +213,9 @@ void Checker::make_builtin_classes() {
         {"radius", n_widget_radius, t_.t_int(), 0},
         {"decimals", n_widget_decimals, t_.t_int(), 0},
         {"filter", n_widget_filter, t_.t_string(), 0},
+        // 字の大きさと、使えるかどうか。どちらも**中の部品まで**効く
+        {"font", n_widget_font, t_.t_int(), 0},
+        {"disabled", n_widget_disabled, t_.t_bool(), 0},
     };
     for (int i = 0; i < (int)(sizeof(wm) / sizeof(wm[0])); i++) {
       FuncInfo* f = new_func(prog_);

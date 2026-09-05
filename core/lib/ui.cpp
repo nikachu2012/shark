@@ -657,25 +657,44 @@ static void font_close() {
   g_pfont = false;
 }
 
+// いま描いている字の大きさ（画素）。
+//
+// 下の層（ui.text）は「フォントの大きさの何倍か」で頼むが、上の層（部品）は
+// **画素で持つ**。部品ごとに大きさを変えられるようにするためで（Widget の .font）、
+// 見出しと本文を同じ画面に置ける。0 のあいだはフォントの大きさそのまま。
+//
+// 部品の寸法（間・余白・印の大きさ…）は、ぜんぶ ui_unit() ごしにここから決まるので、
+// .font を書いた部品は、字だけでなく**まわりの寸法ごと**釣り合ったまま大きくなる。
+static int g_text_px = 0;
+
+static int base_text_px() { return font_active() ? font_size() : kCellH; }
+static int cur_text_px() { return g_text_px > 0 ? g_text_px : base_text_px(); }
+
+// 内蔵の 5×7 は整数倍にしか伸ばせないので、頼まれた大きさに近い倍率へ落とす
+static int builtin_scale(int px) {
+  int s = px / kCellH;
+  return s < 1 ? 1 : s;
+}
+
 // 1行の高さ（字の上端から下端まで）。部品の高さもこれで決まる
-static int line_h(int scale) {
-  if (font_active()) return font_line_height(font_size() * scale);
-  return kCellH * scale;
+static int line_h(int px) {
+  if (font_active()) return font_line_height(px);
+  return kCellH * builtin_scale(px);
 }
 // 改行したときに下げる幅。字の高さそのままだと詰まって見えるので少し空ける。
 // 内蔵の 5×7 は枠（6×8）に空きを含んでいるので、そのまま
-static int line_pitch(int scale) {
-  if (font_active()) return line_h(scale) * 5 / 4;
-  return line_h(scale);
+static int line_pitch(int px) {
+  if (font_active()) return line_h(px) * 5 / 4;
+  return line_h(px);
 }
 // その文字のぶん、次の字までどれだけ進むか
-static int advance_of(int cp, int scale) {
+static int advance_of(int cp, int px) {
   if (font_active()) {
     FontGlyph g;
-    return font_glyph(cp, font_size() * scale, &g) ? g.adv : 0;
+    return font_glyph(cp, px, &g) ? g.adv : 0;
   }
   (void)cp;
-  return kCellW * scale;
+  return kCellW * builtin_scale(px);
 }
 
 // 濃さ a（0〜255）で、下地と混ぜて1点打つ。内蔵の 5×7 以外は縁がなめらかなので混ぜる
@@ -693,9 +712,8 @@ static void blend_at(int x, int y, uint32_t c, int a) {
 }
 
 // 1文字描く。(x, y) はその文字の枠の左上
-static void draw_cp(int x, int y, int cp, int scale, uint32_t c) {
+static void draw_cp(int x, int y, int cp, int px, uint32_t c) {
   if (font_active()) {
-    int px = font_size() * scale;
     FontGlyph g;
     if (!font_glyph(cp, px, &g)) return;
     int base = y + font_ascender(px);   // 基準線。字形はここから上下に置かれる
@@ -705,12 +723,12 @@ static void draw_cp(int x, int y, int cp, int scale, uint32_t c) {
                  g.bits ? g.bits[gy * g.w + gx] : 0);
     return;
   }
-  draw_glyph(cp, x, y, scale, c);
+  draw_glyph(cp, x, y, builtin_scale(px), c);
 }
 
-static void put_text(int x, int y, const Str& s, int scale, uint32_t c) {
-  if (scale < 1) scale = 1;
-  int lh = line_pitch(scale);
+static void put_text(int x, int y, const Str& s, int px, uint32_t c) {
+  if (px < 1) px = 1;
+  int lh = line_pitch(px);
   int cx = x, cy = y;
   int at = 0;
   while (at < s.size()) {
@@ -719,8 +737,8 @@ static void put_text(int x, int y, const Str& s, int scale, uint32_t c) {
     if (adv <= 0) break;
     at += adv;
     if (cp == '\n') { cx = x; cy += lh; continue; }
-    draw_cp(cx, cy, cp, scale, c);
-    cx += advance_of(cp, scale);
+    draw_cp(cx, cy, cp, px, c);
+    cx += advance_of(cp, px);
   }
 }
 
@@ -738,8 +756,8 @@ static int text_lines(const Str& s) {
 }
 
 // その文字を描いたときの幅（画素）。いちばん長い行で数える
-static int text_px_width(const Str& s, int scale) {
-  if (scale < 1) scale = 1;
+static int text_px_width(const Str& s, int px) {
+  if (px < 1) px = 1;
   int at = 0, cur = 0, best = 0;
   while (at < s.size()) {
     int cp = 0;
@@ -747,7 +765,7 @@ static int text_px_width(const Str& s, int scale) {
     if (adv <= 0) break;
     at += adv;
     if (cp == '\n') { cur = 0; continue; }
-    cur += advance_of(cp, scale);
+    cur += advance_of(cp, px);
     if (cur > best) best = cur;
   }
   return best;
@@ -757,7 +775,7 @@ static int text_px_width(const Str& s, int scale) {
 // 折り目は、その行に空白があればそこ（英語の単語を切らない）、
 // 無ければ（日本語など）入り切らなくなった字の手前。
 // 行頭の1字は、幅より広くてもそのまま出す（無限に折らないため）
-static Str wrap_text(const Str& s, int max_w, int scale) {
+static Str wrap_text(const Str& s, int max_w, int px) {
   if (max_w <= 0) return s;
   const char* sd = s.data();
   Str out, line;
@@ -777,7 +795,7 @@ static Str wrap_text(const Str& s, int max_w, int scale) {
       at += adv;
       continue;
     }
-    int cw = advance_of(cp, scale);
+    int cw = advance_of(cp, px);
     // 行末からあふれた空白は、折り目そのものにする（次の行の頭に空白を残さない）
     if (cp == ' ' && line_w > 0 && line_w + cw > max_w) {
       out += line;
@@ -811,9 +829,12 @@ static Str wrap_text(const Str& s, int max_w, int scale) {
   return out;
 }
 
+// 倍率で頼まれたぶんを、字の大きさ（画素）へ直してから渡す
 static NativeStatus draw_text(VM& vm, Value* a, int scale, Value& out) {
   if (!need_open(vm)) return N_Panic;
-  put_text((int)A(a, 0)->i, (int)A(a, 1)->i, as_str(*A(a, 2))->s, scale, to_color(A(a, 3)->i));
+  if (scale < 1) scale = 1;
+  put_text((int)A(a, 0)->i, (int)A(a, 1)->i, as_str(*A(a, 2))->s, base_text_px() * scale,
+           to_color(A(a, 3)->i));
   out = mk_void();
   return N_Ok;
 }
@@ -828,12 +849,13 @@ static NativeStatus u_text_scaled(VM& vm, Value* a, int n, Value& out) {
 static NativeStatus u_text_width(VM& vm, Value* a, int n, Value& out) {
   (void)vm;
   int scale = n >= 2 ? (int)A(a, 1)->i : 1;
-  out = mk_int(text_px_width(as_str(*A(a, 0))->s, scale));
+  if (scale < 1) scale = 1;
+  out = mk_int(text_px_width(as_str(*A(a, 0))->s, base_text_px() * scale));
   return N_Ok;
 }
 static NativeStatus u_text_height(VM& vm, Value* a, int n, Value& out) {
   (void)vm;
-  out = mk_int(line_h(n >= 1 ? (int)A(a, 0)->i : 1));
+  out = mk_int(line_h(base_text_px() * (n >= 1 && A(a, 0)->i > 0 ? (int)A(a, 0)->i : 1)));
   return N_Ok;
 }
 
@@ -2114,7 +2136,7 @@ enum WidgetField {
   WF_Fg, WF_Bg, WF_Pad, WF_Wid, WF_Hei, WF_WidFr, WF_HeiFr, WF_Align, WF_Act, WF_Tip,
   WF_Hint, WF_Var,
   WF_Border, WF_BorderW, WF_Radius, WF_Flags, WF_Fa, WF_Fb, WF_Fc, WF_Opt, WF_Px, WF_VAlign,
-  WF_Dec, WF_Sel, WF_Count
+  WF_Dec, WF_Sel, WF_Font, WF_Count
 };
 enum WidgetAlign { WA_Left = 0, WA_Center, WA_Right };
 // 縦の寄せ方。-1（指定なし）のときは、置く側の決めた既定になる
@@ -2124,7 +2146,8 @@ enum WidgetFlag {
   WFL_Float = 1,    // 値が小数（ui.slider / ui.drag の float の形）
   WFL_Show = 2,     // 隠した字を見せる（ui.password）
   WFL_Multi = 4,    // いくつも選べる（ui.listbox）
-  WFL_Open = 8      // 開いている（ui.tree）
+  WFL_Open = 8,     // 開いている（ui.tree）
+  WFL_Disabled = 16 // 使えない（.disabled）。中の部品にも受け継がれる
 };
 
 // 型検査に使う仮の型。本物の Widget クラスは型検査のときに作られる
@@ -2212,6 +2235,7 @@ static bool make_widget(VM& vm, int kind, const Str& text, const Str& id, int64_
   o->fields.push(mk_int(-1));      // 縦の寄せ方（.valign）。-1 は指定なし
   o->fields.push(mk_int(-1));      // 出す小数の桁（.decimals）。-1 は限りの広さから決める
   o->fields.push(mk_list());       // いくつも選べる一覧で、選ばれている番号
+  o->fields.push(mk_int(0));       // 字の大きさ（.font。画素）。0 は指定なし
   return true;
 }
 
@@ -2263,6 +2287,27 @@ static NativeStatus widget_size(VM& vm, Value* a, int px_field, int fr_field, in
   if (!o) return N_Panic;
   widget_put(o, px_field, mk_int(px));
   widget_put(o, fr_field, mk_float(fr));
+  return N_Ok;
+}
+
+// 字の大きさ（画素）。0 以下は「指定なし」。大きすぎるものは頭打ちにする
+NativeStatus n_widget_font(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  int64_t v = val_deref(&a[1])->i;
+  if (v < 0) v = 0;
+  if (v > 400) v = 400;
+  return widget_with(vm, a, WF_Font, v, out);
+}
+// 使えなくする。false を渡せば、元どおり使える
+NativeStatus n_widget_disabled(VM& vm, Value* a, int n, Value& out) {
+  (void)n;
+  InstObj* o = widget_copy(vm, a, out);
+  if (!o) return N_Panic;
+  if (WF_Flags >= o->fields.size()) return N_Ok;
+  int f = (int)o->fields[WF_Flags].i;
+  if (val_deref(&a[1])->b) f |= WFL_Disabled;
+  else f &= ~WFL_Disabled;
+  widget_put(o, WF_Flags, mk_int(f));
   return N_Ok;
 }
 
@@ -2424,18 +2469,66 @@ static double w_fr(const Value& v, bool horiz) {
 static bool fr_is_fill(double f) { return f > 1.0e308; }
 static int w_align(const Value& v) { return (int)w_field(v, WF_Align); }
 // 指定が無ければ、いまの見た目の色を使う
+// いま、使えない部品（.disabled）の中を置いているか
+static bool g_disabled = false;
+static uint32_t blend(uint32_t a, uint32_t b, double t);   // 下で定義（2色を混ぜる）
+
 static uint32_t w_fg(const Value& v) {
   int64_t c = w_field(v, WF_Fg);
-  return c < 0 ? g_fg : (uint32_t)c;
+  if (c < 0) return g_fg;   // 決めていなければ、そのときの文字色（うすさは済んでいる）
+  return g_disabled ? blend(g_bg, (uint32_t)c, 0.42) : (uint32_t)c;
 }
+
+// .font（字の大きさ）は、その部品と**中の部品ぜんぶ**に効く。
+// 測るとき（measure）と置くとき（place）の入口で立てて、抜けるときに戻す。
+// 部品の寸法は ui_unit() ごしにここから決まるので、字だけでなく余白や印も釣り合う
+struct TextPx {
+  int keep;
+  TextPx(const Value& v) : keep(g_text_px) {
+    int64_t f = w_field(v, WF_Font);
+    if (f > 0) g_text_px = (int)f;
+  }
+  ~TextPx() { g_text_px = keep; }
+};
+
+// .disabled も同じく受け継ぐ。いちばん外側の1つだけが効かせて、中はそれに乗る。
+//
+//   ・色は下地に寄せてうすくする（w_fg と、g_fg / g_accent から作る部品の色）
+//   ・カーソルを遠くへやる。**触られたかは inside() で見ている**ので、
+//     これだけで押し・つまみ・車輪・カーソルの形まで、まとめて届かなくなる
+struct DisabledScope {
+  bool applied;
+  int mx, my;
+  uint32_t fg, accent;
+  DisabledScope(const Value& v) : applied(false), mx(0), my(0), fg(0), accent(0) {
+    if (g_disabled || !((int)w_field(v, WF_Flags) & WFL_Disabled)) return;
+    applied = true;
+    g_disabled = true;
+    mx = g_mx;
+    my = g_my;
+    g_mx = -1000000;
+    g_my = -1000000;
+    fg = g_fg;
+    accent = g_accent;
+    g_fg = blend(g_bg, g_fg, 0.42);
+    g_accent = blend(g_bg, g_accent, 0.35);
+  }
+  ~DisabledScope() {
+    if (!applied) return;
+    g_disabled = false;
+    g_mx = mx;
+    g_my = my;
+    g_fg = fg;
+    g_accent = accent;
+  }
+};
 
 // --- 見た目の既定値（spec/library/ui.md）---------------------------------
 // 部品の寸法は、**そのときの字の高さ**から決める。
 // フォントを変えても、HiDPI で字を大きくしても、見た目の釣り合いが崩れない。
 // 内蔵の 5×7（高さ 8）のときに、下の数がそれぞれ 4・6・5・3・96・120 になる
 static int ui_unit() {
-  int h = kCellH;   // 内蔵の 5×7 のとき
-  if (font_active()) h = font_size();   // フォントの大きさ（行送りではなく字の大きさ）
+  int h = cur_text_px();   // その部品が .font を持っていれば、その大きさ
   return h < 6 ? 6 : h;
 }
 static int gap_y() { return ui_unit() / 2; }          // 縦に並べたときの間
@@ -2471,15 +2564,14 @@ static int caret_w() {
 // put_text は行の箱を置くだけで、字のインクはその中で下に寄っている（上に行間があく）。
 // 印と並べるときに行の箱の真ん中で合わせると、印だけ上にずれて見えるので、
 // 大文字の高さの真ん中で合わせる
-static int text_mid(int scale) {
+static int text_mid(int px) {
   if (font_active()) {
-    int px = font_size() * scale;
     int asc = font_ascender(px);
     FontGlyph g;
     if (font_glyph('H', px, &g) && g.h > 0) return asc - g.top + g.h / 2;
     return asc / 2;
   }
-  return (kCellH - 2) * scale / 2;   // 内蔵の 5×7 は、8 の枠の 0〜6 行目に乗る
+  return (kCellH - 2) * builtin_scale(px) / 2;   // 内蔵の 5×7 は、8 の枠の 0〜6 行目に乗る
 }
 
 // 印（チェックの四角・ラジオの丸）と、そのうしろの字とのあいだ
@@ -2490,20 +2582,20 @@ static int mark_gap() {
 // 高さ h の箱の中に字を置くときの y。put_text は「行の箱」を置くので、
 // (h - line_h) / 2 にすると**字が下に寄って見える**（行の箱は上に行間があく）。
 // 字の見た目のまんなかが箱のまんなかに来るところを返す
-static int text_y_mid(int y, int h, int scale) {
-  return y + h / 2 - text_mid(scale);
+static int text_y_mid(int y, int h, int px) {
+  return y + h / 2 - text_mid(px);
 }
 
 static int box_w();   // 下で定義
 // 印と字を並べた1行の高さ。どちらもこの高さの真ん中に置くので、高いほうを取る
 static int mark_row_h() {
-  int h = line_h(1), bw = box_w();
+  int h = line_h(cur_text_px()), bw = box_w();
   return bw > h ? bw : h;
 }
 // チェックの四角と、ラジオの丸。**字の高さに合わせる**（小さいと押しにくく、
 // 字と並べたときに沈んで見える）
 static int box_w() {
-  int h = line_h(1) * 7 / 8;
+  int h = line_h(cur_text_px()) * 7 / 8;
   if (h < ui_unit()) h = ui_unit();
   if (h < 9) h = 9;
   return (h & 1) ? h : h + 1;   // 奇数にすると、丸が枠にきっちり収まる
@@ -2844,13 +2936,13 @@ static Box intrinsic(const Value& v, int wrap_w) {
   switch (w_kind(v)) {
     case WK_Label: {
       const Str& raw = w_text(v);
-      if (wrap_w > 0 && text_px_width(raw, 1) > wrap_w) {
-        Str t = wrap_text(raw, wrap_w, 1);
-        b.w = text_px_width(t, 1);
-        b.h = line_h(1) + (text_lines(t) - 1) * line_pitch(1);
+      if (wrap_w > 0 && text_px_width(raw, cur_text_px()) > wrap_w) {
+        Str t = wrap_text(raw, wrap_w, cur_text_px());
+        b.w = text_px_width(t, cur_text_px());
+        b.h = line_h(cur_text_px()) + (text_lines(t) - 1) * line_pitch(cur_text_px());
       } else {
-        b.w = text_px_width(raw, 1);
-        b.h = line_h(1) + (text_lines(raw) - 1) * line_pitch(1);
+        b.w = text_px_width(raw, cur_text_px());
+        b.h = line_h(cur_text_px()) + (text_lines(raw) - 1) * line_pitch(cur_text_px());
       }
       break;
     }
@@ -2861,8 +2953,8 @@ static Box intrinsic(const Value& v, int wrap_w) {
         b.w = c.w + pad_x() * 2;
         b.h = c.h + pad_y() * 2;
       } else {
-        b.w = text_px_width(w_text(v), 1) + pad_x() * 2;
-        b.h = line_h(1) + pad_y() * 2;
+        b.w = text_px_width(w_text(v), cur_text_px()) + pad_x() * 2;
+        b.h = line_h(cur_text_px()) + pad_y() * 2;
       }
       break;
     }
@@ -2870,52 +2962,52 @@ static Box intrinsic(const Value& v, int wrap_w) {
     // 字の見た目のまんなかに合わせた印が下からはみ出すことがある
     case WK_Checkbox:
     case WK_Radio:
-      b.w = box_w() + mark_gap() + text_px_width(w_text(v), 1);
+      b.w = box_w() + mark_gap() + text_px_width(w_text(v), cur_text_px());
       b.h = mark_row_h();
       break;
-    case WK_Slider: b.w = slide_w(); b.h = line_h(1) + 2; break;
-    case WK_Field: b.w = field_w(); b.h = line_h(1) + field_pad_y() * 2; break;
+    case WK_Slider: b.w = slide_w(); b.h = line_h(cur_text_px()) + 2; break;
+    case WK_Field: b.w = field_w(); b.h = line_h(cur_text_px()) + field_pad_y() * 2; break;
     case WK_Area: {
       int rows = (int)w_b(v);
       if (rows < 1) rows = 1;
       b.w = field_w();
-      b.h = line_h(1) + (rows - 1) * line_pitch(1) + field_pad_y() * 2;
+      b.h = line_h(cur_text_px()) + (rows - 1) * line_pitch(cur_text_px()) + field_pad_y() * 2;
       break;
     }
 
     case WK_Combo:
       b.w = opt_widest(v) + pad_x() * 3 + arrow_w();
-      b.h = line_h(1) + pad_y() * 2;
+      b.h = line_h(cur_text_px()) + pad_y() * 2;
       break;
     case WK_List: {
       int rows = (int)w_b(v);
       if (rows < 1) rows = 1;
       b.w = opt_widest(v) + field_pad_x() * 2 + bar_w();
-      if (is_multi(v)) b.w += line_h(1) + mark_gap();   // レ点のぶん
-      b.h = line_h(1) + (rows - 1) * line_pitch(1) + field_pad_y() * 2;
+      if (is_multi(v)) b.w += line_h(cur_text_px()) + mark_gap();   // レ点のぶん
+      b.h = line_h(cur_text_px()) + (rows - 1) * line_pitch(cur_text_px()) + field_pad_y() * 2;
       break;
     }
     case WK_Tabs: {
       for (int i = 0; i < opt_count(v); i++)
-        b.w += text_px_width(opt_at(v, i), 1) + pad_x() * 2;
-      b.h = line_h(1) + pad_y() * 2 + 2;
+        b.w += text_px_width(opt_at(v, i), cur_text_px()) + pad_x() * 2;
+      b.h = line_h(cur_text_px()) + pad_y() * 2 + 2;
       break;
     }
     case WK_Number:
       b.w = num_w() + field_pad_x() * 2 + step_w() * 2;
-      b.h = line_h(1) + field_pad_y() * 2;
+      b.h = line_h(cur_text_px()) + field_pad_y() * 2;
       break;
     case WK_Drag:
       b.w = num_w() + field_pad_x() * 2;
-      b.h = line_h(1) + field_pad_y() * 2;
+      b.h = line_h(cur_text_px()) + field_pad_y() * 2;
       break;
     case WK_Image:
       b.w = (int)w_a(v);
       b.h = (int)w_b(v);
       break;
     case WK_Color:
-      b.h = line_h(1) + field_pad_y() * 2;
-      b.w = b.h + field_pad_x() * 2 + text_px_width(Str("#000000"), 1);
+      b.h = line_h(cur_text_px()) + field_pad_y() * 2;
+      b.w = b.h + field_pad_x() * 2 + text_px_width(Str("#000000"), cur_text_px());
       break;
     case WK_Divider: b.w = 0; b.h = ui_unit() / 2 + 1; break;   // 幅は置くときに決まる
     case WK_Space: b.h = (int)w_a(v); break;
@@ -2950,7 +3042,7 @@ static Box intrinsic(const Value& v, int wrap_w) {
     // 折りたためる木。見出しの1行と、開いていれば中身のぶん
     case WK_Tree: {
       int ind = box_w() + mark_gap();
-      b.w = ind + text_px_width(w_text(v), 1);
+      b.w = ind + text_px_width(w_text(v), cur_text_px());
       b.h = mark_row_h();
       if (w_a(v) != 0) {
         RowAxis axis(false);
@@ -3001,6 +3093,7 @@ static Box intrinsic(const Value& v, int wrap_w) {
 // 外から見た大きさ。内側の余白（padding）と、決め打ちの幅・高さを入れる。
 // wrap_w は「親がくれる幅」。幅を画素で決めてあれば、折り返しはそちらに合わせる
 static Box measure(const Value& v, int wrap_w) {
+  TextPx tp(v);          // .font はここから下（中の部品も）に効く
   int p = w_pad(v);
   int inner = w_wid(v) > 0 ? w_wid(v) : wrap_w;
   Box b = intrinsic(v, inner > p * 2 ? inner - p * 2 : 0);
@@ -3183,8 +3276,8 @@ static void place_button(const Value& v, int x, int y, const Box& b) {
     g_my = smy;
   } else {
     // 決め打ちで広げたときは、ラベルを真ん中に置く
-    int tw = text_px_width(w_text(v), 1);
-    put_text(x + (b.w - tw) / 2, text_y_mid(y, b.h, 1), w_text(v), 1, w_fg(v));
+    int tw = text_px_width(w_text(v), cur_text_px());
+    put_text(x + (b.w - tw) / 2, text_y_mid(y, b.h, cur_text_px()), w_text(v), cur_text_px(), w_fg(v));
   }
   if (over && g_mpress[0]) hit(v, 1);
 }
@@ -3197,13 +3290,13 @@ static void place_checkbox(const Value& v, int x, int y, const Box& b) {
   if (over) g_cursor_want = SCUR_Hand;
   int bw = box_w();
   int by = y + (b.h - bw) / 2;              // 印も字も、部品のまんなかに合わせる
-  int ty = text_y_mid(y, b.h, 1);
+  int ty = text_y_mid(y, b.h, cur_text_px());
   uint32_t edge = blend(g_bg, g_accent, on ? 1.0 : (over ? 0.85 : 0.5));
   uint32_t face = blend(g_bg, g_accent, over ? 0.25 : 0.12);
   for (int i = 0; i < bw; i++) span(x, by + i, bw, edge);
   for (int i = 1; i < bw - 1; i++) span(x + 1, by + i, bw - 2, face);
   if (on) check_mark(x, by, bw, blend(g_bg, g_accent, 1.0));
-  put_text(x + bw + mark_gap(), ty, w_text(v), 1, w_fg(v));
+  put_text(x + bw + mark_gap(), ty, w_text(v), cur_text_px(), w_fg(v));
   if (over && g_mpress[0]) hit(v, on ? 0 : 1);
 }
 
@@ -3292,12 +3385,12 @@ static void menu_open_at(int x, int y, const Vec<Str>& items, const Str& owner,
   g_menu_open_mx = g_mx;
   g_menu_open_my = g_my;
 }
-static int menu_item_h() { return line_h(1) + pad_y() * 2; }
+static int menu_item_h() { return line_h(cur_text_px()) + pad_y() * 2; }
 // キーの書き方をいちばん広く出すのに要る幅（無ければ 0）
 static int menu_key_w() {
   int w = 0;
   for (int i = 0; i < g_menu_keys.size(); i++) {
-    int t = text_px_width(g_menu_keys[i], 1);
+    int t = text_px_width(g_menu_keys[i], cur_text_px());
     if (t > w) w = t;
   }
   return w;
@@ -3305,7 +3398,7 @@ static int menu_key_w() {
 static int menu_w() {
   int w = 0;
   for (int i = 0; i < g_menu_items.size(); i++) {
-    int t = text_px_width(g_menu_items[i], 1);
+    int t = text_px_width(g_menu_items[i], cur_text_px());
     if (t > w) w = t;
   }
   int kw = menu_key_w();
@@ -3454,11 +3547,11 @@ static void menu_draw() {
     int iy = by + r * ih - off;
     if (inside(x, iy, w, ih))
       for (int k = 1; k < ih - 1; k++) span(x + 1, iy + k, w - 2, blend(g_bg, g_accent, 0.45));
-    put_text(x + pad_x() * 2, text_y_mid(iy, ih, 1), g_menu_items[i], 1, g_fg);
+    put_text(x + pad_x() * 2, text_y_mid(iy, ih, cur_text_px()), g_menu_items[i], cur_text_px(), g_fg);
     // キーの書き方は、右に寄せてうすく（読めるが、目立たない）
     if (i < g_menu_keys.size() && g_menu_keys[i].size() > 0) {
-      int kw = text_px_width(g_menu_keys[i], 1);
-      put_text(x + w - pad_x() - kw, text_y_mid(iy, ih, 1), g_menu_keys[i], 1,
+      int kw = text_px_width(g_menu_keys[i], cur_text_px());
+      put_text(x + w - pad_x() - kw, text_y_mid(iy, ih, cur_text_px()), g_menu_keys[i], cur_text_px(),
                blend(g_bg, g_fg, 0.45));
     }
   }
@@ -3551,7 +3644,7 @@ static int char_at_x(const Str& s, int from, int x0, int mx) {
     int cp = 0;
     int adv = utf8_decode(s, at, &cp);
     if (adv <= 0) break;
-    int w = advance_of(cp, 1);
+    int w = advance_of(cp, cur_text_px());
     if (mx < cx + w / 2) break;
     cx += w;
     at += adv;
@@ -3564,7 +3657,7 @@ static int char_at_x(const Str& s, int from, int x0, int mx) {
 // 境目はその1つ手前にある。ここを外すと、カーソルが右どなりの字に重なって見える
 static int edge_x(const Str& s, int from, int upto, int x0) {
   if (upto < from) upto = from;
-  return x0 + text_px_width(sub_chars(s, from, upto - from), 1) - 1;
+  return x0 + text_px_width(sub_chars(s, from, upto - from), cur_text_px()) - 1;
 }
 
 // --- 取り消しとやり直し ---------------------------------------------------
@@ -3741,8 +3834,8 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
   bool masked = w_b(v) != 0;
   bool over = inside(x, y, b.w, b.h);
   if (over) g_cursor_want = SCUR_Text;   // 文字を打つところ
-  bool focused = g_focus.size() > 0 && g_focus == id;
-  int tx = x + field_pad_x(), ty = text_y_mid(y, b.h, 1);
+  bool focused = !g_disabled && g_focus.size() > 0 && g_focus == id;
+  int tx = x + field_pad_x(), ty = text_y_mid(y, b.h, cur_text_px());
   if (ty < y) ty = y;
   int room = b.w - field_pad_x() * 2;
 
@@ -3811,7 +3904,7 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
       g_press['y'] = false;
     }
     Str conf;
-    input_frame(tx, ty, line_h(1), text, &conf, &marked);
+    input_frame(tx, ty, line_h(cur_text_px()), text, &conf, &marked);
     // 入れてよい字だけ通す（.filter）。落とした字は、次の回に受け皿へも入れ直される
     conf = filter_keep(w_str(v, WF_Opt), conf);
     if (g_press[SKEY_Enter] && !was_composing) g_focus_next.clear();
@@ -3863,11 +3956,11 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
     if (g_scroll > n) g_scroll = 0;
     if (caret < g_scroll) g_scroll = caret;
     while (g_scroll < caret &&
-           text_px_width(sub_chars(m, g_scroll, caret - g_scroll), 1) + 2 > room)
+           text_px_width(sub_chars(m, g_scroll, caret - g_scroll), cur_text_px()) + 2 > room)
       g_scroll++;
     // 末尾を消すなどして右に空きができたら、左に隠した分を戻して詰める
     while (g_scroll > 0 &&
-           text_px_width(sub_chars(m, g_scroll - 1, n - (g_scroll - 1)), 1) + 2 <= room)
+           text_px_width(sub_chars(m, g_scroll - 1, n - (g_scroll - 1)), cur_text_px()) + 2 <= room)
       g_scroll--;
   }
   int scroll = focused ? g_scroll : 0;
@@ -3885,7 +3978,7 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
   for (int i = 0; i < b.h; i++) { put(x, y + i, edge); put(x + b.w - 1, y + i, edge); }
 
   // カーソルと帯は、字の少し上から少し下まで。字と同じところに揃える
-  int top = ty - 1, bot = ty + line_h(1);
+  int top = ty - 1, bot = ty + line_h(cur_text_px());
   if (top < y + 1) top = y + 1;
   if (bot > y + b.h - 2) bot = y + b.h - 2;
 
@@ -3918,15 +4011,15 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
   // 打ち始めたら消える。伏せ字の欄でも、これは伏せない（中身ではないため）
   const Str& hint = w_str(v, WF_Hint);
   if (shown.size() == 0 && hint.size() > 0)
-    put_text(tx, ty, hint, 1, blend(g_bg, w_fg(v), 0.45));
+    put_text(tx, ty, hint, cur_text_px(), blend(g_bg, w_fg(v), 0.45));
   else
-    put_text(tx, ty, shown, 1, w_fg(v));
+    put_text(tx, ty, shown, cur_text_px(), w_fg(v));
 
   if (focused) {
     int cx = edge_x(view, scroll, caret, tx);
     if (marked.size() > 0) {   // 変換中のところに下線
-      int mw = text_px_width(marked, 1);
-      span(cx + 1, ty + line_h(1) - 1, mw, g_accent);
+      int mw = text_px_width(marked, cur_text_px());
+      span(cx + 1, ty + line_h(cur_text_px()) - 1, mw, g_accent);
       cx += mw;
     }
     // カーソルは差し色で、字の大きさに合わせて太く引く。枠も差し色だが、
@@ -3977,7 +4070,7 @@ static void area_lines(const Str& s, int room, Vec<int>* starts, Vec<int>* count
       sp = -1;
       continue;
     }
-    int cw = advance_of(cp, 1);
+    int cw = advance_of(cp, cur_text_px());
     if (room > 0 && width + cw > room && i > start) {   // 入りきらないので折り返す
       starts->push(start);
       if (sp > start) {   // その行の空白で折る
@@ -4012,7 +4105,7 @@ static int area_row_of(const Vec<int>& starts, int caret) {
 
 // 箱の中身の高さに、見た目の行が何行入るか
 static int area_rows_shown(int inner_h) {
-  int lh = line_h(1), lp = line_pitch(1);
+  int lh = line_h(cur_text_px()), lp = line_pitch(cur_text_px());
   if (lp <= 0 || inner_h < lh) return 1;
   return 1 + (inner_h - lh) / lp;
 }
@@ -4021,7 +4114,7 @@ static int area_rows_shown(int inner_h) {
 // cur は、上に隠しているぶん（画素）。半端に切れて出ている行も数に入れる
 static int area_index_at(const Str& text, const Vec<int>& starts, const Vec<int>& counts,
                          int ty, int tx, int shown, int cur) {
-  int lp = line_pitch(1);
+  int lp = line_pitch(cur_text_px());
   if (lp <= 0) lp = 1;
   int top = cur / lp;
   int r = g_my < ty ? top : (g_my - ty + cur) / lp;
@@ -4066,8 +4159,8 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
   Str id = w_id(v);
   bool over = inside(x, y, b.w, b.h);
   if (over) g_cursor_want = SCUR_Text;   // 文字を打つところ
-  bool focused = g_focus.size() > 0 && g_focus == id;
-  int lh = line_h(1), lp = line_pitch(1);
+  bool focused = !g_disabled && g_focus.size() > 0 && g_focus == id;
+  int lh = line_h(cur_text_px()), lp = line_pitch(cur_text_px());
   int tx = x + field_pad_x(), ty = y + field_pad_y();
   int room = b.w - field_pad_x() * 2 - bar_w();
   if (room < 1) room = 1;
@@ -4176,7 +4269,7 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
         // 短い行を通り抜けても、元の位置に戻ってくる
         int gx = g_agoal >= 0
                      ? g_agoal
-                     : text_px_width(sub_chars(text, starts[r], g_acaret - starts[r]), 1);
+                     : text_px_width(sub_chars(text, starts[r], g_acaret - starts[r]), cur_text_px());
         int nr = r + (up ? -1 : down ? 1 : pgup ? -page : page);
         if (nr < 0) nr = 0;
         if (nr >= nrows) nr = nrows - 1;
@@ -4310,8 +4403,8 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
   // 何も入っていなければ、うすく「何を入れるところか」を出す（.placeholder）
   const Str& hint = w_str(v, WF_Hint);
   if (text.size() == 0 && marked.size() == 0 && hint.size() > 0) {
-    Str t = text_px_width(hint, 1) > room ? wrap_text(hint, room, 1) : hint;
-    put_text(tx, ty, t, 1, blend(g_bg, w_fg(v), 0.45));
+    Str t = text_px_width(hint, cur_text_px()) > room ? wrap_text(hint, room, cur_text_px()) : hint;
+    put_text(tx, ty, t, cur_text_px(), blend(g_bg, w_fg(v), 0.45));
   }
 
   int caret_row = focused ? area_row_of(starts, caret) : -1;
@@ -4327,7 +4420,7 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
       bool crosses = !wrapped && st <= re && st + ln > re;
       if (a <= c && (c > a || crosses)) {
         int ax = edge_x(text, rs, a, tx);
-        int bx = edge_x(text, rs, c, tx) + (crosses ? advance_of(' ', 1) : 0);
+        int bx = edge_x(text, rs, c, tx) + (crosses ? advance_of(' ', cur_text_px()) : 0);
         if (bx > ax)
           for (int k = ry - 1; k <= ry + lh; k++) span(ax, k, bx - ax, blend(g_bg, g_accent, 0.5));
       }
@@ -4335,19 +4428,19 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
     // 字。変換中の文字は、カーソルのところに挟んで、下線をつけて出す
     if (focused && marked.size() > 0 && r == caret_row) {
       Str head = sub_chars(text, rs, caret - rs);
-      put_text(tx, ry, head, 1, w_fg(v));
-      int mx0 = tx + text_px_width(head, 1);
-      put_text(mx0, ry, marked, 1, w_fg(v));
-      int mw = text_px_width(marked, 1);
+      put_text(tx, ry, head, cur_text_px(), w_fg(v));
+      int mx0 = tx + text_px_width(head, cur_text_px());
+      put_text(mx0, ry, marked, cur_text_px(), w_fg(v));
+      int mw = text_px_width(marked, cur_text_px());
       span(mx0, ry + lh - 1, mw, g_accent);
-      put_text(mx0 + mw, ry, sub_chars(text, caret, re - caret), 1, w_fg(v));
+      put_text(mx0 + mw, ry, sub_chars(text, caret, re - caret), cur_text_px(), w_fg(v));
     } else {
-      put_text(tx, ry, sub_chars(text, rs, re - rs), 1, w_fg(v));
+      put_text(tx, ry, sub_chars(text, rs, re - rs), cur_text_px(), w_fg(v));
     }
     // カーソル。差し色で、字の大きさに合わせて太く引く
     if (focused && r == caret_row && (ln == 0 || marked.size() > 0)) {
       int cx = edge_x(text, rs, caret, tx);
-      if (marked.size() > 0) cx += text_px_width(marked, 1);
+      if (marked.size() > 0) cx += text_px_width(marked, cur_text_px());
       int cw = caret_w();
       for (int k = ry - 1; k <= ry + lh; k++) span(cx, k, cw, g_accent);
     }
@@ -4398,7 +4491,7 @@ static const Str& opt_at(const Value& v, int i) {
 static int opt_widest(const Value& v) {
   int w = 0;
   for (int i = 0; i < opt_count(v); i++) {
-    int t = text_px_width(opt_at(v, i), 1);
+    int t = text_px_width(opt_at(v, i), cur_text_px());
     if (t > w) w = t;
   }
   return w;
@@ -4486,7 +4579,7 @@ static void place_radio(const Value& v, int x, int y, const Box& b) {
   if (over) g_cursor_want = SCUR_Hand;
   int bw = box_w(), r = bw / 2;
   int by = y + (b.h - bw) / 2;                   // 丸も字も、部品のまんなかに合わせる
-  int ty = text_y_mid(y, b.h, 1);
+  int ty = text_y_mid(y, b.h, cur_text_px());
   int cx = x + r, cy = by + r;
   uint32_t edge = blend(g_bg, g_accent, on ? 1.0 : (over ? 0.85 : 0.5));
   uint32_t face = on ? g_bg : blend(g_bg, g_accent, over ? 0.25 : 0.12);
@@ -4499,7 +4592,7 @@ static void place_radio(const Value& v, int x, int y, const Box& b) {
     if (dot < 2) dot = 2;
     disc(cx, cy, dot, edge);
   }
-  put_text(x + bw + mark_gap(), ty, w_text(v), 1, w_fg(v));
+  put_text(x + bw + mark_gap(), ty, w_text(v), cur_text_px(), w_fg(v));
   if (over && g_mpress[0]) hit(v, w_b(v));   // ref の形なら「自分の数」、名札なら 1
 }
 
@@ -4519,7 +4612,7 @@ static void place_combo(const Value& v, int x, int y, const Box& b) {
   span(x + 1, y + b.h - 1, b.w - 2, edge);
   for (int i = 1; i < b.h - 1; i++) { put(x, y + i, edge); put(x + b.w - 1, y + i, edge); }
   if (idx >= 0 && idx < n)
-    put_text(x + pad_x(), text_y_mid(y, b.h, 1), opt_at(v, idx), 1, w_fg(v));
+    put_text(x + pad_x(), text_y_mid(y, b.h, cur_text_px()), opt_at(v, idx), cur_text_px(), w_fg(v));
   // 「開く」しるしの三角（▼）
   int aw = arrow_w();
   tri_down(x + b.w - pad_x() - aw, y + (b.h - aw / 2) / 2, aw, w_fg(v));
@@ -4544,7 +4637,7 @@ static void place_list(const Value& v, int x, int y, const Box& b) {
   Str key = widget_key(v, x, y);
   bool over = inside(x, y, b.w, b.h);
   bool focused = g_focus.size() > 0 && g_focus == key;
-  int lp = line_pitch(1), lh = line_h(1);
+  int lp = line_pitch(cur_text_px()), lh = line_h(cur_text_px());
   int tx = x + field_pad_x(), ty = y + field_pad_y();
   int shown = area_rows_shown(b.h - field_pad_y() * 2);
   int row_w = b.w - field_pad_x() * 2 - bar_w();
@@ -4663,9 +4756,9 @@ static void place_list(const Value& v, int x, int y, const Box& b) {
     if (multi) {
       int mw = lh;
       if (on) check_mark(tx, ry, mw, w_fg(v));
-      put_text(tx + mw + mark_gap(), ry, opt_at(v, r), 1, w_fg(v));
+      put_text(tx + mw + mark_gap(), ry, opt_at(v, r), cur_text_px(), w_fg(v));
     } else {
-      put_text(tx, ry, opt_at(v, r), 1, w_fg(v));
+      put_text(tx, ry, opt_at(v, r), cur_text_px(), w_fg(v));
     }
   }
   if (over) g_cursor_want = SCUR_Hand;
@@ -4690,7 +4783,7 @@ static void place_tabs(const Value& v, int x, int y, const Box& b) {
   span(x, base, b.w, blend(g_bg, g_fg, 0.3));
   int xx = x;
   for (int i = 0; i < n; i++) {
-    int tw = text_px_width(opt_at(v, i), 1) + pad_x() * 2;
+    int tw = text_px_width(opt_at(v, i), cur_text_px()) + pad_x() * 2;
     bool over = inside(xx, y, tw, b.h - 2);
     bool sel = i == idx;
     if (over) g_cursor_want = SCUR_Hand;
@@ -4698,7 +4791,7 @@ static void place_tabs(const Value& v, int x, int y, const Box& b) {
       uint32_t face = blend(g_bg, g_accent, sel ? 0.3 : 0.15);
       for (int k = 0; k < b.h - 2; k++) span(xx, y + k, tw, face);
     }
-    put_text(xx + pad_x(), text_y_mid(y, b.h - 2, 1), opt_at(v, i), 1, w_fg(v));
+    put_text(xx + pad_x(), text_y_mid(y, b.h - 2, cur_text_px()), opt_at(v, i), cur_text_px(), w_fg(v));
     if (sel) {   // 選ばれているタブの下だけ、差し色で太く引く
       span(xx, base, tw, g_accent);
       span(xx, base + 1, tw, g_accent);
@@ -4805,7 +4898,7 @@ static void place_number(const Value& v, int x, int y, const Box& b) {
   int sw = step_w();
   int fw = b.w - sw * 2;   // 字を出すところの幅
   if (fw < 1) fw = 1;
-  int ty = text_y_mid(y, b.h, 1);
+  int ty = text_y_mid(y, b.h, cur_text_px());
 
   // --- 押された ---
   bool over_box = inside(x, y, fw, b.h);
@@ -4874,7 +4967,7 @@ static void place_number(const Value& v, int x, int y, const Box& b) {
   span(x, y + b.h - 1, fw, edge);
   for (int i = 0; i < b.h; i++) put(x, y + i, edge);
   // 数は右に寄せる（桁が揃う）。枠からはみ出さないように切り抜く
-  int tw = text_px_width(shown, 1);
+  int tw = text_px_width(shown, cur_text_px());
   int sx = x + fw - field_pad_x() - tw;
   if (sx < x + field_pad_x()) sx = x + field_pad_x();
   int kx0 = g_cx0, ky0 = g_cy0, kx1 = g_cx1, ky1 = g_cy1;
@@ -4884,12 +4977,12 @@ static void place_number(const Value& v, int x, int y, const Box& b) {
   if (y + b.h - 2 < g_cy1) g_cy1 = y + b.h - 2;
   const Str& hint = w_str(v, WF_Hint);
   if (shown.size() == 0 && hint.size() > 0)
-    put_text(x + field_pad_x(), ty, hint, 1, blend(g_bg, w_fg(v), 0.45));
+    put_text(x + field_pad_x(), ty, hint, cur_text_px(), blend(g_bg, w_fg(v), 0.45));
   else
-    put_text(sx, ty, shown, 1, w_fg(v));
+    put_text(sx, ty, shown, cur_text_px(), w_fg(v));
   if (focused) {
     int cw = caret_w();
-    for (int i = ty - 1; i <= ty + line_h(1); i++) span(sx + tw, i, cw, g_accent);
+    for (int i = ty - 1; i <= ty + line_h(cur_text_px()); i++) span(sx + tw, i, cw, g_accent);
   }
   g_cx0 = kx0;
   g_cy0 = ky0;
@@ -4928,7 +5021,7 @@ static void place_drag(const Value& v, int x, int y, const Box& b) {
   Str key = widget_key(v, x, y);
   bool focused = g_focus.size() > 0 && g_focus == key;
   bool over = inside(x, y, b.w, b.h);
-  int ty = text_y_mid(y, b.h, 1);
+  int ty = text_y_mid(y, b.h, cur_text_px());
 
   // --- つかんで引く ---
   bool mine = g_dnum_id.size() > 0 && g_dnum_id == key;
@@ -5033,15 +5126,15 @@ static void place_drag(const Value& v, int x, int y, const Box& b) {
     int fillw = (int)((val - lo) * (b.w - 2) / (hi - lo));
     for (int i = 1; i < b.h - 1; i++) span(x + 1, y + i, fillw, blend(face, g_accent, 0.22));
   }
-  int tw = text_px_width(shown, 1);
+  int tw = text_px_width(shown, cur_text_px());
   int sx = x + (b.w - tw) / 2;
   int kx0 = g_cx0, ky0 = g_cy0, kx1 = g_cx1, ky1 = g_cy1;
   if (x + 1 > g_cx0) g_cx0 = x + 1;
   if (x + b.w - 2 < g_cx1) g_cx1 = x + b.w - 2;
-  put_text(sx, ty, shown, 1, w_fg(v));
+  put_text(sx, ty, shown, cur_text_px(), w_fg(v));
   if (focused) {
     int cw = caret_w();
-    for (int i = ty - 1; i <= ty + line_h(1); i++) span(sx + tw, i, cw, g_accent);
+    for (int i = ty - 1; i <= ty + line_h(cur_text_px()); i++) span(sx + tw, i, cw, g_accent);
   } else if (over) {
     // 引けるしるし。左右に小さな三角
     uint32_t m = blend(g_bg, g_fg, 0.5);
@@ -5092,10 +5185,10 @@ static void tip_draw() {
     if (now - g_tip_since < 400000000LL) return;   // 0.4 秒
   }
   int max_w = g_w * 2 / 3;
-  Str t = text_px_width(g_tip_text, 1) > max_w ? wrap_text(g_tip_text, max_w, 1) : g_tip_text;
-  int tw = text_px_width(t, 1), lines = text_lines(t);
+  Str t = text_px_width(g_tip_text, cur_text_px()) > max_w ? wrap_text(g_tip_text, max_w, cur_text_px()) : g_tip_text;
+  int tw = text_px_width(t, cur_text_px()), lines = text_lines(t);
   int w = tw + pad_x() * 2;
-  int h = line_h(1) + (lines - 1) * line_pitch(1) + pad_y() * 2;
+  int h = line_h(cur_text_px()) + (lines - 1) * line_pitch(cur_text_px()) + pad_y() * 2;
   int x = g_tip_x + ui_unit(), y = g_tip_y + ui_unit();
   if (x + w > g_w) x = g_w - w;
   if (y + h > g_h) y = g_tip_y - h - 2;
@@ -5106,7 +5199,7 @@ static void tip_draw() {
   span(x, y, w, edge);
   span(x, y + h - 1, w, edge);
   for (int i = 0; i < h; i++) { put(x, y + i, edge); put(x + w - 1, y + i, edge); }
-  put_text(x + pad_x(), y + pad_y(), t, 1, g_fg);
+  put_text(x + pad_x(), y + pad_y(), t, cur_text_px(), g_fg);
 }
 
 // 横に並べたとき、背の低い部品を真ん中に置く（つまみと文字が並んだときに揃う）
@@ -5270,7 +5363,7 @@ static void place_tree(const Value& v, int x, int y, const Box& b) {
   uint32_t mark = blend(g_bg, w_fg(v), over ? 1.0 : 0.75);
   if (open) tri_down(x + (box_w() - aw) / 2, y + (head_h - aw / 2) / 2, aw, mark);
   else tri_right(x + (box_w() - aw / 2) / 2, y + (head_h - aw) / 2, aw, mark);
-  put_text(x + ind, text_y_mid(y, head_h, 1), w_text(v), 1, w_fg(v));
+  put_text(x + ind, text_y_mid(y, head_h, cur_text_px()), w_text(v), cur_text_px(), w_fg(v));
   if (over && g_mpress[0]) hit(v, open ? 0 : 1);
   if (!open) return;
 
@@ -5309,7 +5402,7 @@ static void place_color(const Value& v, int x, int y, const Box& b) {
   fill_round(x, y, b.w, b.h, rad, blend(g_bg, g_fg, 0.08));
   fill_round(x + 1, y + 1, sw - 2, b.h - 2, rad, c);
   stroke_round(x, y, b.w, b.h, rad, 1, edge);
-  put_text(x + sw + field_pad_x(), text_y_mid(y, b.h, 1), color_hex(c), 1, w_fg(v));
+  put_text(x + sw + field_pad_x(), text_y_mid(y, b.h, cur_text_px()), color_hex(c), cur_text_px(), w_fg(v));
 
   if (over && g_mpress[0]) {
     if (open) {
@@ -5345,7 +5438,7 @@ static void place_scroll(const Value& v, int x, int y, const Box& b) {
   ListObj* k = w_kids(v);
   int n = k->v.size();
   Str key = widget_key(v, x, y);
-  int lp = line_pitch(1);
+  int lp = line_pitch(cur_text_px());
 
   // 中身の高さを測る。帯が出ると中身のもらえる幅が狭まるので、そのときは測り直す
   int inner_w = b.w;
@@ -5429,6 +5522,8 @@ static void place_scroll(const Value& v, int x, int y, const Box& b) {
 }
 
 static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool root) {
+  TextPx tp(v);          // .font と .disabled は、ここから下ぜんぶに効く
+  DisabledScope dis(v);
   Box b = measure(v, avail_w);
   int w = b.w, h = b.h;
   // 取り分（fr）のある向きは、親が配ってくれたぶんいっぱいに広がる
@@ -5482,10 +5577,10 @@ static void place(const Value& v, int x, int y, int avail_w, int avail_h, bool r
     case WK_Label: {
       // 測ったとき（measure）と同じ幅で折り返して描く
       int lw = (w_wid(v) > 0 ? w_wid(v) : avail_w) - p * 2;
-      if (lw > 0 && text_px_width(w_text(v), 1) > lw)
-        put_text(cx, cy, wrap_text(w_text(v), lw, 1), 1, w_fg(v));
+      if (lw > 0 && text_px_width(w_text(v), cur_text_px()) > lw)
+        put_text(cx, cy, wrap_text(w_text(v), lw, cur_text_px()), cur_text_px(), w_fg(v));
       else
-        put_text(cx, cy, w_text(v), 1, w_fg(v));
+        put_text(cx, cy, w_text(v), cur_text_px(), w_fg(v));
       break;
     }
     case WK_Button: place_button(v, cx, cy, cb); break;

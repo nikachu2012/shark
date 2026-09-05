@@ -216,6 +216,8 @@ NativeStatus n_widget_border_w(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_radius(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_decimals(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_widget_filter(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_font(VM& vm, Value* args, int n, Value& out);
+NativeStatus n_widget_disabled(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_width(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_height(VM& vm, Value* args, int n, Value& out);
 NativeStatus n_canvas_get(VM& vm, Value* args, int n, Value& out);
@@ -278,6 +280,8 @@ NativeFn builtin_native_method(const Str& cls, const Str& name, const Vec<ParamI
     if (name == "radius") return n_widget_radius;
     if (name == "decimals") return n_widget_decimals;
     if (name == "filter") return n_widget_filter;
+    if (name == "font") return n_widget_font;
+    if (name == "disabled") return n_widget_disabled;
   }
   if (cls == "Widget" && nparams == 2) {
     if (name == "border") return n_widget_border_w;

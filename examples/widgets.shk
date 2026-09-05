@@ -9,7 +9,8 @@
 //   ui.divider / ui.col / ui.row / ui.grid / ui.center / ui.stack / ui.scroll
 // 見た目を変える鎖:
 //   .color / .background / .border / .radius / .padding / .width / .height /
-//   .align / .valign / .filter / .decimals / .tooltip / .placeholder
+//   .align / .valign / .filter / .decimals / .tooltip / .placeholder /
+//   .font / .disabled（この2つだけは**中の部品まで**効く）
 //
 // 一覧（ui.listbox）と選ぶ（ui.combo）とメモ（ui.textarea）は、カーソルを乗せて
 // 車輪（ホイール）を回しても送れる。一覧の右の帯は、つまんで動かせる。
@@ -38,6 +39,7 @@ var name = "さめ";
 var word = "aiueo";
 var memo = "ここは複数行の入力欄です。\n改行は enter。\n上下の矢印で行を行き来し、置ける幅に入らない行はひとりでに折り返します。";
 var page = 0;
+var kuwashiku = false;   // 「くわしい設定」を使えるようにするか（.disabled）
 var iro = 4;
 var sakana = 0;
 var last = "なし";
@@ -137,8 +139,9 @@ func name_of(s: string) -> Widget {
 func view() -> Widget {
   var lines = memo.split("\n").len();
   return ui.col([
-    // 見出し。ui.center は「置ける幅の真ん中に置く」
-    ui.center([ui.label("ぜんぶの部品").color(ui.rgb(120, 200, 255))]),
+    // 見出し。ui.center は「置ける幅の真ん中に置く」。
+    // .font は字だけでなく、余白も間も釣り合ったまま大きくする
+    ui.center([ui.label("ぜんぶの部品").font(20).color(ui.rgb(120, 200, 255))]),
     ui.divider(),
 
     ui.row([
@@ -203,6 +206,16 @@ func view() -> Widget {
 
         ui.space(4),
         ui.label(f"こんにちは、{name} さん").color(ui.rgb(150, 220, 150)),
+        ui.space(4),
+
+        // .disabled は入れ物に書くと、中のものがまとめて止まる。
+        // うすくなって、押しても引いても打っても動かない。場所は同じだけ取るので、
+        // 出し入れしても画面が動かない
+        ui.checkbox("くわしい設定を出す", ref kuwashiku),
+        ui.row([
+          ui.label("小さい字").font(9),
+          ui.button("ためす", "kuwashiku").font(9),
+        ]).disabled(!kuwashiku),
       ]).width(1.0),
 
       // ---------------------------------------------------------- 右がわ
