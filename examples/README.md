@@ -27,6 +27,7 @@
 |---|---|---|
 | [paint.shk](paint.shk) | 下 | マウスで描く。押された・動いたを自分で見る |
 | [node_editor.shk](node_editor.shk) | 下 | **ノードをつないでプログラムを作る。**組んだものが Shark のコードになって出る。拡大縮小・ミニマップと、線と丸を自分でなめらかに描くところも |
+| [hexedit.shk](hexedit.shk) | 下 | Hex エディタ。表を自分で描き、キーとマウスで書き換える。取り消し・やり直し・探す・開く画面まで一とおり |
 | [breakout.shk](breakout.shk) | 下 | 2D のゲーム。絵（Canvas）と透けた色 |
 | [cube3d.shk](cube3d.shk) | 下 | 3D。三角形（`ui.tri`）と奥行き（z バッファ）だけで書く |
 | [counter.shk](counter.shk) | 上 | いちばん小さい宣言的な書き方（`ui.run` と `view()`） |

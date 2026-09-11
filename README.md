@@ -115,6 +115,7 @@ make web-test       # 作ったものを node で確かめる
 ./shark run examples/widgets.shk     # 上の層。部品をぜんぶ1つの画面に出す
 ./shark run examples/breakout.shk    # ブロック崩し。絵（Canvas）と透明を使う
 ./shark run examples/cube3d.shk      # 回る立方体。三角形と奥行き（z バッファ）を使う
+./shark run examples/hexedit.shk     # Hex エディタ。下の層で表を描き、キーとマウスで書き換える
 ```
 
 **下の層**は、画素の並び1枚（面）と、押された・動いたという出来事だけ。

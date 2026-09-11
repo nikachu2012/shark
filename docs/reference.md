@@ -1247,7 +1247,8 @@ ui.text(8, 8, "こんにちは", ui.rgb(255, 255, 255));
 [examples/counter.shk](../examples/counter.shk)（上の層）、
 [examples/widgets.shk](../examples/widgets.shk)（部品をぜんぶ出したもの）、
 [examples/breakout.shk](../examples/breakout.shk)（絵と透明を使ったブロック崩し）、
-[examples/cube3d.shk](../examples/cube3d.shk)（三角形と奥行きで描く 3D）
+[examples/cube3d.shk](../examples/cube3d.shk)（三角形と奥行きで描く 3D）、
+[examples/hexedit.shk](../examples/hexedit.shk)（キーとマウスで書き換える Hex エディタ）
 にあります。
 
 → [spec/library/ui.md](../spec/library/ui.md)

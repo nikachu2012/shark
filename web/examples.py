@@ -22,6 +22,7 @@ ITEMS = [
     ("web/examples/ui.shk", "画面に出す（std.ui）"),
     ("examples/paint.shk", "マウスで描く（下の層）"),
     ("examples/node_editor.shk", "ノードエディタ（つないでコードにする）"),
+    ("examples/hexedit.shk", "Hex エディタ（キーとマウスで書き換える）"),
     ("examples/counter.shk", "部品を組んで返す（上の層）"),
     ("examples/widgets.shk", "部品をぜんぶ出す（std.ui）"),
     ("examples/breakout.shk", "2D のゲーム（ブロック崩し）"),

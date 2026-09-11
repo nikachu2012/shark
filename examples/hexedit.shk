@@ -1,0 +1,1272 @@
+// hexedit.shk — Shark で書いた Hex エディタ（std.ui の「下の層」で自分で描く）
+//
+//   ./shark run examples/hexedit.shk <ファイル>
+//   ./shark run examples/hexedit.shk              # 空から始める（Ctrl+O で開く。保存のときは名前を聞く）
+//   ./shark run examples/hexedit.shk --selftest   # 画面を開かず、書き換えの仕組みだけ確かめる
+//
+// 左に 16 進、右に文字。Tab で行き来する。Ctrl は macOS でも control キー。
+//
+//   矢印 / PageUp / PageDown / Home / End    動く（Shift を押しながらで選ぶ）
+//   Ctrl+Home / Ctrl+End                     先頭 / 末尾へ
+//   0〜9 a〜f（16 進の側）・文字（文字の側）  書き換える
+//   Ctrl+I                                   上書き ⇄ 差し込み
+//   Delete / Back                            1 バイト消す（選んでいれば選んだぶん）
+//   Ctrl+A / Ctrl+C / Ctrl+X / Ctrl+V        すべて選ぶ / 写す / 切り取る / 貼る（16 進の文字で）
+//   Ctrl+Z / Ctrl+Y                          取り消す / やり直す
+//   Ctrl+G                                   位置へ飛ぶ（16 進。#26 なら 10 進、+10 / -10 なら今の場所から）
+//   Ctrl+F / F3                              探す（16 進か文字。Tab で切り替え） / 次を探す
+//   Ctrl+O                                   ファイルを開く（フォルダの中身から選ぶか、パスを打つ）
+//   （1 行のバイト数は窓の幅で決まる。縁を引いて広げると 8 → 16 → 32 バイトになる）
+//   Ctrl+= / Ctrl+-                          字を大きく / 小さく
+//   Ctrl+S                                   保存
+//   Ctrl+Q / Esc                             おしまい（変えたままなら聞く）
+//
+// マウス: 押したところへ動く。引けば選ぶ。右端のつまみで送る。
+//
+// 画面が無いところ（SHARK_UI=off など）では、1 こま描いて hexedit.png に保存する。
+import std.ui;
+import std.file;
+import std.os;
+import std.path;
+import std.math;
+
+// ------------------------------------------------------------------ 色
+// 色は 0xRRGGBB の int（ui.rgb と同じ並び）
+const C_BG = 0x12121a;
+const C_BAR = 0x1e1e2c;
+const C_LINE = 0x2c2c3e;
+const C_STRIPE = 0x16161f;
+const C_ROW = 0x1c1c2a;
+const C_FG = 0xdcdce4;
+const C_DIM = 0x6e6e82;
+const C_ACCENT = 0x4c9be8;
+const C_SEL = 0x2e4a70;
+const C_CUR = 0xf0b43c;
+const C_CUR_TXT = 0x14140c;
+const C_ZERO = 0x5a5a6e;
+const C_FF = 0xe67878;
+const C_WS = 0x5ac0aa;
+const C_HIGH = 0xbe9ef0;
+const C_OK = 0x7ad08c;
+
+const HINT = "F1 keys  ^O open  ^S save  ^Z undo  ^F find  ^G goto  ^I ins/ovr  ^Q quit";
+const OPEN_ROWS = 10;             // 開く画面で一度に見せる候補の数
+
+// F1 で出す一覧（内蔵の字形でも出せるよう ASCII で書く）
+var help_lines = [
+  "Arrows PageUp PageDown Home End   move  (Shift: select)",
+  "Ctrl+Home / Ctrl+End              start / end of data",
+  "0-9 a-f (hex)  any char (text)    overwrite or insert",
+  "Tab                               switch side",
+  "Ctrl+I                            insert <-> overwrite",
+  "Delete / Backspace                delete byte (or selection)",
+  "Ctrl+A  Ctrl+C  Ctrl+X  Ctrl+V    select all / copy / cut / paste (as hex)",
+  "Ctrl+Z / Ctrl+Y                   undo / redo",
+  "Ctrl+G                            go to offset (hex, #dec, +rel, -rel)",
+  "Ctrl+F / F3                       find (hex or text) / find next",
+  "Ctrl+O                            open a file (browse or type a path)",
+  "Window width                      8 / 16 / 32 bytes per row",
+  "Ctrl+= / Ctrl+-                   zoom in / out",
+  "Ctrl+S                            save",
+  "Ctrl+Q / Esc                      quit",
+  "Mouse: click to move, drag to select, the bar on the right scrolls",
+  "",
+  "F1 / Esc closes this",
+];
+var help_open = false;
+
+// ------------------------------------------------------------------ 状態
+// ぜんぶ一番外側の var に置く。処理系は何も覚えないので、ここがすべて
+var fname = "";                    // 開いているファイル。"" なら新しいもの
+var data: list<int> = [];         // 中身。1 要素が 1 バイト（0〜255）
+var cursor = 0;                   // 指しているバイト。data.len() は「末尾に足す位置」
+var nibble = 0;                   // 16 進の側で次に打つ桁。0 が上の桁、1 が下の桁
+var pane = 0;                     // 0 が 16 進の側、1 が文字の側
+var anchor = -1;                  // 選び始めた位置。-1 なら選んでいない
+var top = 0;                      // 一番上に見えている行
+var cols = 16;                    // 1 行のバイト数（窓の幅から layout() が決める）
+var insert_mode = false;          // true なら差し込む、false なら上書き
+
+// 取り消しの履歴。1 回の書き換えを「at から before を after に置き換えた」で覚える
+class Edit {
+  public var at: int;
+  public var before: list<int>;
+  public var after: list<int>;
+  public var cur: int;            // 書き換える前のカーソル
+
+  func init(at: int, before: list<int>, after: list<int>, cur: int) {
+    this.at = at;
+    this.before = before;
+    this.after = after;
+    this.cur = cur;
+  }
+}
+var history: list<Edit> = [];
+var future: list<Edit> = [];
+var saved_mark = 0;               // 保存したときの history の長さ。-1 なら、もうその状態には戻れない
+
+// 問いかけ（位置へ飛ぶ・探す・開く・名前・変えたままでよいか）
+var dialog = "";                  // "" | "goto" | "find" | "open" | "saveas" | "confirm"
+var prompt = "";
+var find_hex = true;              // 探すものを 16 進として読むか、文字として読むか
+var last_find = "";
+var after_confirm = "";           // 「変えたままでよいか」に答えたあとにすること: "quit" | "open"
+var after_save = "";              // 名前を付けて保存したあとにすること（同上。無ければ ""）
+var open_dir = "";                // 開く画面で見ているフォルダ
+var open_entries: list<string> = [];   // その中身。フォルダは末尾に /
+var open_pick = 0;                // 選んでいる候補
+var open_scroll = 0;              // 候補の一番上
+
+// 知らせ（下の行にしばらく出す）
+var message = "";
+var message_left = 0;
+
+// マウス
+var dragging = false;             // 引いて選んでいる最中
+var dragging_bar = false;         // つまみを引いている最中
+var hit_pane = 0;                 // hit_at() の結果: どちらの側か
+var hit_nib = 0;                  // hit_at() の結果: どちらの桁か
+
+// 字と寸法。フォントから決まるので、こまごとに layout() で計算し直す
+var K = 1;                        // 画面の細かさ（ui.scale）
+var font_px = 8;                  // 機種のフォントの大きさ（画素）
+var have_font = false;            // 機種の等幅フォントが読めたか
+var ts = 1;                       // 内蔵の字形のときの倍率
+var cw = 6;                       // 1 文字の幅
+var lh = 8;                       // 字の高さ
+var rh = 12;                      // 1 行の高さ（あきを含む）
+var pad = 6;
+var W = 0;
+var H = 0;
+var x_off = 0;                    // 位置の列
+var x_hex = 0;                    // 16 進の列
+var x_txt = 0;                    // 文字の列
+var x_bar = 0;                    // つまみ
+var bar_w = 8;
+var y_grid = 0;                   // 表の上端
+var grid_h = 0;
+var rows_vis = 1;                 // 見えている行数
+var dlg_x = 0;                    // 問いかけの箱
+var dlg_y = 0;
+var dlg_w = 0;
+var dlg_h = 0;
+var in_x = 0;                     // 問いかけの入力欄
+var in_y = 0;
+var in_w = 0;
+
+// 表引き。0〜255 → "00"〜"FF" と、見える字（見えなければ "."）
+var HEXU = "0123456789ABCDEF";
+var HEXL = "0123456789abcdef";
+var hex_tab: list<string> = [];
+var chr_tab: list<string> = [];
+
+func make_tables() -> void {
+  for var v in range(256) {
+    hex_tab.push(HEXU[v >> 4] + HEXU[v & 15]);
+    if v >= 0x20 && v < 0x7f {
+      var b = b"";
+      b.push(v);
+      chr_tab.push(b.to_string() ?? ".");
+    } else {
+      chr_tab.push(".");
+    }
+  }
+}
+
+// ------------------------------------------------------------------ 字
+func tw(s: string) -> int { return ui.text_width(s, ts); }
+func tx(x: int, y: int, s: string, c: int) -> void { ui.text(x, y, s, c, ts); }
+
+// 機種の等幅フォントを探す。無ければ内蔵の 5×7 のまま（ASCII だけなので困らない）
+func pick_font() -> void {
+  have_font = false;
+  if var p = os.env("HEXEDIT_FONT") {
+    if ui.font(p, font_px) { have_font = true; return; }
+  }
+  var cands = ["/System/Library/Fonts/Menlo.ttc",
+               "/System/Library/Fonts/SFNSMono.ttf",
+               "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+               "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+               "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+               "/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
+               "C:/Windows/Fonts/consola.ttf"];
+  for var p in cands {
+    if file.exists(p) && ui.font(p, font_px) { have_font = true; return; }
+  }
+  ui.font_builtin();
+}
+
+func zoom(d: int) -> void {
+  if have_font {
+    font_px = math.clamp(font_px + d * 2 * K, 8 * K, 48 * K);
+    pick_font();
+  } else {
+    ts = math.clamp(ts + d, 1, 6);
+  }
+}
+
+// ------------------------------------------------------------------ 寸法
+func cell_x(c: int) -> int { return x_hex + c * 3 * cw + (c / 8) * cw; }
+func total_rows() -> int { return data.len() / cols + 1; }   // 末尾に足す位置のぶん、いつも 1 行余分
+func max_top() -> int { return math.max(0, total_rows() - rows_vis); }
+
+// 字の寸法。フォントが決まれば、窓を開く前にも測れる
+func measure() -> void {
+  lh = ui.text_height(ts);
+  cw = math.max(tw("W"), tw("0"));   // 等幅でなくても、いちばん広い字に合わせて升を切る
+  rh = lh + 4;
+  pad = cw;
+  bar_w = math.max(6, cw);
+}
+
+// n 列を並べるのに要る幅と、rows 行を並べるのに要る高さ（窓の大きさを決めるのに使う）
+func width_for(n: int) -> int {
+  var hex_end = pad + 9 * cw + (n - 1) * 3 * cw + ((n - 1) / 8) * cw + 2 * cw;
+  return hex_end + 2 * cw + n * cw + pad + bar_w + 2;
+}
+func height_for(rows: int) -> int { return (rh + 4) + (rh + 2) + rows * rh + (2 * rh + 4); }
+
+func layout() -> void {
+  measure();
+  W = ui.width();
+  H = ui.height();
+  // 1 行のバイト数は窓の幅で決まる。8 の倍数で、入るだけ
+  var old = cols;
+  cols = 8;
+  while cols < 64 && width_for(cols + 8) <= W { cols += 8; }
+  if cols != old { top = top * old / cols; }
+  x_off = pad;
+  x_hex = pad + 9 * cw;
+  x_txt = cell_x(cols - 1) + 4 * cw;
+  x_bar = W - bar_w - 2;
+  y_grid = (rh + 4) + (rh + 2);      // 上の帯 + 列の見出し
+  grid_h = H - y_grid - (2 * rh + 4);
+  rows_vis = math.max(1, grid_h / rh);
+  top = math.clamp(top, 0, max_top());
+
+  dlg_w = math.min(W - 2 * pad, 64 * cw);
+  dlg_h = pad + rh + 2 + rh + pad;
+  dlg_x = (W - dlg_w) / 2;
+  dlg_y = y_grid + rh;
+  in_x = dlg_x + pad;
+  in_y = dlg_y + pad + rh + 2;
+  in_w = dlg_w - 2 * pad;
+}
+
+// ------------------------------------------------------------------ 動く・選ぶ
+func ensure_visible() -> void {
+  var row = cursor / cols;
+  if row < top { top = row; }
+  if row >= top + rows_vis { top = row - rows_vis + 1; }
+  top = math.clamp(top, 0, max_top());
+}
+
+func move_to(pos: int, extend: bool) -> void {
+  if extend {
+    if anchor < 0 { anchor = cursor; }
+  } else {
+    anchor = -1;
+  }
+  cursor = math.clamp(pos, 0, data.len());
+  nibble = 0;
+  ensure_visible();
+}
+
+// 選んでいる範囲。両端を含む
+func sel_lo() -> int { return math.min(anchor, cursor); }
+func sel_hi() -> int { return math.min(math.max(anchor, cursor), data.len() - 1); }
+func has_sel() -> bool { return anchor >= 0 && data.len() > 0 && sel_lo() <= sel_hi(); }
+
+// ------------------------------------------------------------------ 書き換える
+// data の at から n バイトを取り除き、そこに xs を差し込む（履歴には残さない）
+func splice_raw(at: int, n: int, xs: list<int>) -> void {
+  if n == xs.len() {
+    for var i in range(n) { data[at + i] = xs[i]; }
+    return;
+  }
+  if n == 1 && xs.len() == 0 { data.remove(at); return; }
+  if n == 0 && xs.len() == 1 { data.insert(at, xs[0]); return; }
+  var out: list<int> = [];
+  for var i in range(at) { out.push(data[i]); }
+  for var v in xs { out.push(v); }
+  for var i in range(at + n, data.len()) { out.push(data[i]); }
+  data = out;
+}
+
+// 履歴に残しながら書き換える
+func splice(at: int, n: int, xs: list<int>) -> void {
+  var before: list<int> = [];
+  for var i in range(at, at + n) { before.push(data[i]); }
+  if history.len() < saved_mark { saved_mark = -1; }   // 保存した所より前まで戻してから書いた
+  history.push(Edit(at, before, xs, cursor));
+  if history.len() > 5000 {
+    history.remove(0);
+    if saved_mark >= 0 { saved_mark -= 1; }
+  }
+  if future.len() > 0 { future = []; }
+  splice_raw(at, n, xs);
+}
+
+func dirty() -> bool { return history.len() != saved_mark; }
+
+func undo() -> void {
+  if var e = history.pop() {
+    splice_raw(e.at, e.after.len(), e.before);
+    future.push(e);
+    anchor = -1;
+    nibble = 0;
+    cursor = math.clamp(e.cur, 0, data.len());
+    ensure_visible();
+  } else {
+    say("nothing to undo");
+  }
+}
+
+func redo() -> void {
+  if var e = future.pop() {
+    splice_raw(e.at, e.before.len(), e.after);
+    history.push(e);
+    anchor = -1;
+    nibble = 0;
+    cursor = math.clamp(e.at + e.after.len(), 0, data.len());
+    ensure_visible();
+  } else {
+    say("nothing to redo");
+  }
+}
+
+// 選んだぶんを xs に置き換え、カーソルをその先頭に
+func replace_sel(xs: list<int>) -> void {
+  var lo = sel_lo();
+  var n = sel_hi() - lo + 1;
+  anchor = -1;
+  cursor = lo;
+  nibble = 0;
+  splice(lo, n, xs);
+  ensure_visible();
+}
+
+// 16 進の側で 1 桁打った
+func type_hex(d: int) -> void {
+  if has_sel() { replace_sel([]); }
+  var n = data.len();
+  if cursor >= n || (insert_mode && nibble == 0) {
+    splice(cursor, 0, [d << 4]);
+    nibble = 1;
+  } else if nibble == 0 {
+    splice(cursor, 1, [(d << 4) | (data[cursor] & 0x0f)]);
+    nibble = 1;
+  } else {
+    var v = (data[cursor] & 0xf0) | d;
+    // 同じバイトの下の桁は、上の桁と 1 つの書き換えにまとめる（取り消しが 1 回で済む）
+    var last = history.len() - 1;
+    if last >= 0 && history[last].at == cursor && history[last].after.len() == 1
+       && future.len() == 0 && saved_mark != history.len() {
+      history[last].after = [v];
+      data[cursor] = v;
+    } else {
+      splice(cursor, 1, [v]);
+    }
+    nibble = 0;
+    cursor += 1;
+  }
+  ensure_visible();
+}
+
+// 文字の側で 1 文字打った（UTF-8 のバイト列がそのまま入る）
+func type_char(ch: string) -> void {
+  var bs = ch.bytes().list();
+  if bs.len() == 0 { return; }
+  if has_sel() {
+    replace_sel(bs);
+  } else if insert_mode || cursor >= data.len() {
+    splice(cursor, 0, bs);
+  } else {
+    splice(cursor, math.min(bs.len(), data.len() - cursor), bs);
+  }
+  cursor += bs.len();
+  nibble = 0;
+  ensure_visible();
+}
+
+func delete_forward() -> void {
+  if has_sel() { replace_sel([]); return; }
+  if cursor < data.len() {
+    splice(cursor, 1, []);
+    nibble = 0;
+  }
+}
+
+func delete_back() -> void {
+  if has_sel() { replace_sel([]); return; }
+  if cursor > 0 {
+    cursor -= 1;
+    splice(cursor, 1, []);
+    nibble = 0;
+    ensure_visible();
+  }
+}
+
+// ------------------------------------------------------------------ 切り貼り
+func hex_of(lo: int, hi: int) -> string {
+  var parts: list<string> = [];
+  for var i in range(lo, hi + 1) { parts.push(hex_tab[data[i]]); }
+  return parts.join(" ");
+}
+
+func copy_sel() -> bool {
+  if !has_sel() { say("nothing selected"); return false; }
+  var n = sel_hi() - sel_lo() + 1;
+  if ui.set_clipboard(hex_of(sel_lo(), sel_hi())) {
+    say(f"copied {n} bytes as hex");
+    return true;
+  }
+  say("clipboard is not available here");
+  return false;
+}
+
+func cut_sel() -> void {
+  if copy_sel() { replace_sel([]); }
+}
+
+// 16 進の文字（空白や : で区切ってあってもよい）をバイトの並びに。読めなければ none
+func parse_hex_bytes(s: string) -> list<int>? {
+  var t = s.replace(" ", "").replace("\n", "").replace("\r", "").replace("\t", "")
+           .replace(":", "").replace(",", "");
+  if t.starts_with("0x") || t.starts_with("0X") { t = t.sub(2, t.len()); }
+  if t.len() == 0 || t.len() % 2 != 0 { return none; }
+  if var b = t.from_hex() { return b.list(); }
+  return none;
+}
+
+func paste() -> void {
+  var s = ui.clipboard();
+  if s == "" { say("clipboard is empty"); return; }
+  var bs: list<int> = [];
+  if var h = parse_hex_bytes(s) { bs = h; } else { bs = s.bytes().list(); }
+  if has_sel() {
+    replace_sel(bs);
+  } else if insert_mode || cursor >= data.len() {
+    splice(cursor, 0, bs);
+  } else {
+    splice(cursor, math.min(bs.len(), data.len() - cursor), bs);
+  }
+  cursor += bs.len();
+  nibble = 0;
+  ensure_visible();
+  say(f"pasted {bs.len()} bytes");
+}
+
+// ------------------------------------------------------------------ 探す・飛ぶ
+// from から一周して探す。見つからなければ -1
+func find_bytes(pat: list<int>, from: int) -> int {
+  var n = data.len();
+  var m = pat.len();
+  if m == 0 || m > n { return -1; }
+  var first = pat[0];
+  for var k in range(n) {
+    var i = (from + k) % n;
+    if i + m > n || data[i] != first { continue; }
+    var ok = true;
+    for var j in range(1, m) {
+      if data[i + j] != pat[j] { ok = false; break; }
+    }
+    if ok { return i; }
+  }
+  return -1;
+}
+
+func find_next(from: int) -> void {
+  var pat: list<int> = [];
+  if find_hex {
+    if var h = parse_hex_bytes(last_find) {
+      pat = h;
+    } else {
+      say("not hex (Tab in the find box switches to text)");
+      return;
+    }
+  } else {
+    pat = last_find.bytes().list();
+  }
+  if pat.len() == 0 { return; }
+  var at = find_bytes(pat, from);
+  if at < 0 { say("not found"); return; }
+  cursor = at;
+  anchor = at + pat.len() - 1;
+  nibble = 0;
+  ensure_visible();
+  say(f"found at {at:X}");
+}
+
+// 16 進の文字を数に。読めなければ none
+func parse_hex(s: string) -> int? {
+  if s.len() == 0 || s.len() > 15 { return none; }
+  var acc = 0;
+  for var ch in s.chars() {
+    if var d = HEXL.find(ch) {
+      acc = acc * 16 + d;
+    } else {
+      return none;
+    }
+  }
+  return acc;
+}
+
+// 飛ぶ先の書き方: 1a / 0x1a（16 進）、#26（10 進）、+10 / -10（今の場所から 16 進で）
+func parse_offset(q: string) -> int? {
+  var s = q.trim().lower();
+  var rel = 0;
+  if s.starts_with("+") { rel = 1; s = s.sub(1, s.len()); }
+  else if s.starts_with("-") { rel = -1; s = s.sub(1, s.len()); }
+  var dec = false;
+  if s.starts_with("#") { dec = true; s = s.sub(1, s.len()); }
+  if s.starts_with("0x") { s = s.sub(2, s.len()); }
+  var v: int? = none;
+  if dec { v = int(s); } else { v = parse_hex(s); }
+  if var n = v {
+    if rel == 0 { return n; }
+    return cursor + rel * n;
+  }
+  return none;
+}
+
+func goto_offset(q: string) -> void {
+  if var n = parse_offset(q) {
+    move_to(n, false);
+    say(f"at {cursor:X}");
+  } else {
+    say("cannot read offset: " + q);
+  }
+}
+
+// ------------------------------------------------------------------ ファイル
+// 別のファイルに切り替える。履歴もカーソルも初めから
+func open_file(p: string) -> void {
+  fname = p;
+  data = [];
+  history = [];
+  future = [];
+  saved_mark = 0;
+  cursor = 0;
+  anchor = -1;
+  nibble = 0;
+  top = 0;
+  if !file.exists(p) { say("new file: " + p); return; }
+  if var b = file.read_bytes(p) {
+    data = b.list();
+    say(f"opened {p} ({data.len()} bytes)");
+  } else var e {
+    say("cannot read: " + e.message());
+  }
+}
+
+// 開く画面: そのフォルダの中身を読む。フォルダを先に、名前順で
+func open_list(dir: string) -> void {
+  open_dir = dir;
+  var dirs: list<string> = [];
+  var files: list<string> = [];
+  if var names = file.list(dir) {
+    for var n in names {
+      if file.is_dir(path.join(dir, n)) { dirs.push(n + "/"); } else { files.push(n); }
+    }
+  } else var e {
+    say("cannot list: " + e.message());
+  }
+  dirs.sort();
+  files.sort();
+  open_entries = dirs;
+  for var f in files { open_entries.push(f); }
+  open_pick = 0;
+  open_scroll = 0;
+}
+
+// 打った字で絞った候補。隠しファイル（. で始まる）は . を打ったときだけ
+func open_matches() -> list<string> {
+  var out: list<string> = [];
+  var q = prompt.lower();
+  for var e in open_entries {
+    if e.starts_with(".") && !q.starts_with(".") { continue; }
+    if e.lower().starts_with(q) { out.push(e); }
+  }
+  return out;
+}
+
+// 開く画面で Enter。フォルダなら中へ、ファイルなら開く、無ければ新しいファイルとして開く
+func open_enter(m: list<string>) -> void {
+  var q = prompt.trim();
+  var target = "";
+  if q.contains("/") {
+    if path.is_absolute(q) { target = q; } else { target = path.join(open_dir, q); }
+  } else if m.len() > 0 {
+    target = path.join(open_dir, m[open_pick]);
+  } else if q != "" {
+    target = path.join(open_dir, q);
+  } else {
+    return;
+  }
+  target = path.normalize(target);
+  if file.is_dir(target) {
+    open_list(target);
+    prompt = "";
+    return;
+  }
+  close_dialog();
+  open_file(target);
+}
+
+// Ctrl+O。いま開いているファイルのフォルダから見せる
+func start_open() -> void {
+  var start = ".";
+  if fname != "" { start = path.dir(fname); }
+  open_list(path.absolute(start) ?? start);
+  open_dialog("open");
+}
+
+func save() -> bool {
+  if fname == "" { open_dialog("saveas"); return false; }
+  var b = b"";
+  for var v in data { b.push(v); }
+  var r = file.write_bytes(fname, b);
+  if !r.ok() { say("save failed: " + r.error().message()); return false; }
+  saved_mark = history.len();
+  say(f"saved {data.len()} bytes to {fname}");
+  return true;
+}
+
+// ------------------------------------------------------------------ 問いかけ
+func say(s: string) -> void {
+  message = s;
+  message_left = 180;
+}
+
+func open_dialog(kind: string) -> void {
+  dialog = kind;
+  if kind == "find" { prompt = last_find; }
+  else if kind == "saveas" { prompt = fname; }
+  else { prompt = ""; }
+}
+
+func close_dialog() -> void {
+  dialog = "";
+  ui.input_off();
+}
+
+// 長すぎる文字列を、左を削って ... を付けた形にする（フォルダの場所を出すのに使う）
+func shorten_left(s: string, limit: int) -> string {
+  var t = s;
+  while tw("..." + t) > limit && t.len() > 1 { t = t.sub(1, t.len()); }
+  if t != s { return "..." + t; }
+  return t;
+}
+
+func dialog_title() -> string {
+  if dialog == "goto" { return "Go to offset  (hex / #decimal / +rel / -rel)"; }
+  if dialog == "find" {
+    if find_hex { return "Find bytes [hex]   (Tab: search as text)"; }
+    return "Find text [text]   (Tab: search as hex)";
+  }
+  if dialog == "open" { return shorten_left("Open: " + open_dir, dlg_w - 2 * pad); }
+  if dialog == "saveas" { return "Save as  (path)"; }
+  return "Unsaved changes.";
+}
+
+// 変えたままなら「保存する？」と聞いてから what をする。そうでなければすぐ
+func confirm_then(what: string) -> void {
+  if !dirty() { do_after(what); return; }
+  after_confirm = what;
+  open_dialog("confirm");
+}
+
+func do_after(what: string) -> void {
+  if what == "quit" { ui.quit(); }
+  else if what == "open" { start_open(); }
+}
+
+func request_quit() -> void { confirm_then("quit"); }
+
+func handle_dialog() -> void {
+  if dialog == "confirm" {
+    if ui.pressed("y") {
+      if fname == "" {
+        after_save = after_confirm;
+        open_dialog("saveas");
+      } else if save() {
+        do_after(after_confirm);
+      } else {
+        dialog = "";
+      }
+    } else if ui.pressed("n") {
+      do_after(after_confirm);
+    } else if ui.pressed("esc") {
+      dialog = "";
+    }
+    return;
+  }
+  if dialog == "open" {
+    var before = prompt;
+    prompt = ui.input(in_x + 3, in_y, rh, prompt).replace("\n", "").replace("\t", "");
+    if prompt != before { open_pick = 0; open_scroll = 0; }
+    var m = open_matches();
+    if ui.pressed("up") { open_pick -= 1; }
+    if ui.pressed("down") { open_pick += 1; }
+    open_pick = math.clamp(open_pick, 0, math.max(0, m.len() - 1));
+    if open_pick < open_scroll { open_scroll = open_pick; }
+    if open_pick >= open_scroll + OPEN_ROWS { open_scroll = open_pick - OPEN_ROWS + 1; }
+    if ui.pressed("tab") && m.len() > 0 { prompt = m[open_pick]; }
+    if ui.pressed("back") && before == "" { open_list(path.dir(open_dir)); prompt = ""; }
+    if ui.pressed("esc") { close_dialog(); return; }
+    if ui.pressed("enter") { open_enter(m); }
+    return;
+  }
+  // 文字を受け取る欄。呼び続けているあいだだけ受け付ける（変換も出し先に任せる）
+  prompt = ui.input(in_x + 3, in_y, rh, prompt);
+  prompt = prompt.replace("\n", "").replace("\t", "");
+  if dialog == "find" && ui.pressed("tab") { find_hex = !find_hex; }
+  if ui.pressed("esc") {
+    close_dialog();
+    after_save = "";
+    return;
+  }
+  if ui.pressed("enter") {
+    var q = prompt;
+    var kind = dialog;
+    close_dialog();
+    if kind == "goto" {
+      goto_offset(q);
+    } else if kind == "find" {
+      last_find = q;
+      find_next(cursor);
+    } else if kind == "saveas" {
+      if q.trim() != "" {
+        fname = q.trim();
+        if save() && after_save != "" { do_after(after_save); }
+      }
+      after_save = "";
+    }
+  }
+}
+
+// ------------------------------------------------------------------ キー
+func handle_keys() -> void {
+  var ctrl = ui.key("ctrl");
+  var shift = ui.key("shift");
+  if ctrl {
+    if ui.pressed("s") { _ = save(); }
+    else if ui.pressed("z") { undo(); }
+    else if ui.pressed("y") { redo(); }
+    else if ui.pressed("g") { open_dialog("goto"); }
+    else if ui.pressed("f") { open_dialog("find"); }
+    else if ui.pressed("a") {
+      if data.len() > 0 { anchor = 0; cursor = data.len() - 1; nibble = 0; }
+    }
+    else if ui.pressed("c") { _ = copy_sel(); }
+    else if ui.pressed("x") { cut_sel(); }
+    else if ui.pressed("v") { paste(); }
+    else if ui.pressed("i") { insert_mode = !insert_mode; }
+    else if ui.pressed("q") { request_quit(); }
+    else if ui.pressed("o") { confirm_then("open"); }
+    else if ui.pressed("home") { move_to(0, shift); }
+    else if ui.pressed("end") { move_to(data.len(), shift); }
+    else if ui.pressed("=") || ui.pressed("+") { zoom(1); }
+    else if ui.pressed("-") { zoom(-1); }
+    return;
+  }
+  if ui.pressed("left") { move_to(cursor - 1, shift); }
+  if ui.pressed("right") { move_to(cursor + 1, shift); }
+  if ui.pressed("up") { move_to(cursor - cols, shift); }
+  if ui.pressed("down") { move_to(cursor + cols, shift); }
+  if ui.pressed("pageup") {
+    top = math.clamp(top - rows_vis, 0, max_top());
+    move_to(cursor - rows_vis * cols, shift);
+  }
+  if ui.pressed("pagedown") {
+    top = math.clamp(top + rows_vis, 0, max_top());
+    move_to(cursor + rows_vis * cols, shift);
+  }
+  if ui.pressed("home") { move_to(cursor - cursor % cols, shift); }
+  if ui.pressed("end") { move_to(cursor - cursor % cols + cols - 1, shift); }
+  if ui.pressed("tab") { pane = 1 - pane; nibble = 0; }
+  if ui.pressed("delete") { delete_forward(); }
+  if ui.pressed("back") { delete_back(); }
+  if ui.pressed("f3") {
+    if last_find == "" { open_dialog("find"); } else { find_next(cursor + 1); }
+  }
+  if ui.pressed("f1") { help_open = true; return; }
+  if ui.pressed("esc") {
+    if has_sel() { anchor = -1; } else { request_quit(); }
+  }
+  // 打たれた字。16 進の側なら 0〜9 a〜f だけを受け、文字の側ならそのまま入れる
+  var t = ui.typed();
+  if t != "" {
+    for var ch in t.chars() {
+      if pane == 0 {
+        if var d = HEXL.find(ch.lower()) { type_hex(d); }
+      } else {
+        type_char(ch);
+      }
+    }
+  }
+}
+
+// 一覧が出ているあいだは、閉じる操作だけを受ける
+func handle_help() -> void {
+  if ui.pressed("f1") || ui.pressed("esc") || ui.pressed("enter") || ui.clicked(0) {
+    help_open = false;
+  }
+}
+
+// ------------------------------------------------------------------ マウス
+// (mx, my) にあるバイトの番号。表の外なら -1。どちらの側かと桁は hit_pane / hit_nib に残す。
+// loose が true のとき（引いている最中）は、はみ出していても近い升にする
+func hit_at(mx: int, my: int, loose: bool) -> int {
+  if !loose && (my < y_grid || my >= y_grid + grid_h) { return -1; }
+  var r = math.clamp((my - y_grid) / rh, 0, rows_vis - 1);
+  var c = -1;
+  if mx >= x_txt && mx < x_txt + cols * cw {
+    c = (mx - x_txt) / cw;
+    hit_pane = 1;
+    hit_nib = 0;
+  } else {
+    for var i in range(cols) {
+      var x0 = cell_x(i);
+      if mx >= x0 && mx < x0 + 3 * cw {
+        c = i;
+        hit_pane = 0;
+        hit_nib = 0;
+        if mx - x0 >= cw { hit_nib = 1; }
+        break;
+      }
+    }
+  }
+  if c < 0 {
+    if !loose { return -1; }
+    if mx < x_hex { c = 0; } else { c = cols - 1; }
+    hit_pane = pane;
+    hit_nib = 0;
+  }
+  var idx = (top + r) * cols + c;
+  if idx > data.len() {
+    if !loose { return -1; }
+    idx = data.len();
+  }
+  return idx;
+}
+
+func bar_drag(my: int) -> void {
+  var t = total_rows();
+  var frac = float(my - y_grid) / float(math.max(1, grid_h));
+  var row = int(frac * float(t)) - rows_vis / 2;
+  top = math.clamp(row, 0, max_top());
+}
+
+func handle_mouse() -> void {
+  var mx = ui.mouse_x();
+  var my = ui.mouse_y();
+  var in_grid = my >= y_grid && my < y_grid + grid_h;
+  var on_bar = in_grid && mx >= x_bar - 2;
+  if on_bar || dragging_bar { ui.cursor("hand"); }
+  else if in_grid && mx >= x_hex && mx < x_txt + cols * cw { ui.cursor("text"); }
+
+  if ui.clicked(0) {
+    if on_bar {
+      dragging_bar = true;
+      bar_drag(my);
+    } else {
+      var idx = hit_at(mx, my, false);
+      if idx >= 0 {
+        pane = hit_pane;
+        move_to(idx, ui.key("shift"));
+        if idx < data.len() { nibble = hit_nib; }
+        dragging = true;
+      }
+    }
+  }
+  if dragging_bar {
+    if ui.mouse(0) { bar_drag(my); } else { dragging_bar = false; }
+  }
+  if dragging {
+    if ui.mouse(0) {
+      // 表の外まで引いたら、その向きに送る
+      if my < y_grid { top = math.max(0, top - 1); }
+      if my >= y_grid + grid_h { top = math.min(max_top(), top + 1); }
+      var idx = hit_at(mx, my, true);
+      if idx != cursor { move_to(idx, true); }
+    } else {
+      dragging = false;
+    }
+  }
+}
+
+// ------------------------------------------------------------------ 描く
+func byte_color(v: int) -> int {
+  if v == 0 { return C_ZERO; }
+  if v == 255 { return C_FF; }
+  if v >= 0x20 && v < 0x7f { return C_FG; }
+  if v == 9 || v == 10 || v == 13 { return C_WS; }
+  return C_HIGH;
+}
+
+func draw_header() -> void {
+  var bar_h = rh + 4;
+  ui.fill_rect(0, 0, W, bar_h, C_BAR);
+  var name = fname;
+  if name == "" { name = "(new)"; }
+  if dirty() { name += " *"; }
+  tx(pad, 2 + (rh - lh) / 2, name, C_FG);
+  var mode = "OVR";
+  if insert_mode { mode = "INS"; }
+  var side = "HEX";
+  if pane == 1 { side = "TEXT"; }
+  var right = f"{data.len()} bytes   {side}   {mode}";
+  tx(W - tw(right) - bar_w - pad, 2 + (rh - lh) / 2, right, C_DIM);
+
+  // 列の見出し
+  var y = bar_h + (rh - lh) / 2;
+  tx(x_off, y, "offset", C_DIM);
+  var ccol = cursor % cols;
+  for var c in range(cols) {
+    var col = C_DIM;
+    if c == ccol { col = C_ACCENT; }
+    tx(cell_x(c), y, hex_tab[c], col);
+    tx(x_txt + c * cw, y, HEXU[c % 16], col);
+  }
+  ui.hline(0, y_grid - 1, W, C_LINE);
+}
+
+func draw_rows() -> void {
+  var n = data.len();
+  var lo = -1;
+  var hi = -2;
+  if has_sel() { lo = sel_lo(); hi = sel_hi(); }
+  var crow = cursor / cols;
+  ui.clip(0, y_grid, W, grid_h);
+
+  // 下地: 4 行ごとの縞と、いま指している行
+  for var r in range(rows_vis) {
+    var row = top + r;
+    if row * cols > n { break; }
+    var y = y_grid + r * rh;
+    if (row / 4) % 2 == 1 { ui.fill_rect(0, y, x_bar - 2, rh, C_STRIPE); }
+    if row == crow { ui.fill_rect(0, y, x_bar - 2, rh, C_ROW); }
+  }
+  // 8 バイトごとの区切りと、文字の側との区切り
+  for var g in range(1, cols / 8) { ui.vline(cell_x(g * 8) - cw, y_grid, grid_h, C_LINE); }
+  ui.vline(x_txt - cw, y_grid, grid_h, C_LINE);
+
+  for var r in range(rows_vis) {
+    var row = top + r;
+    var off = row * cols;
+    if off > n { break; }
+    var y = y_grid + r * rh;
+    var ty = y + (rh - lh) / 2;
+    var ocol = C_DIM;
+    if row == crow { ocol = C_FG; }
+    tx(x_off, ty, f"{off:08X}", ocol);
+    for var c in range(cols) {
+      var i = off + c;
+      if i > n { break; }
+      var hx = cell_x(c);
+      var txx = x_txt + c * cw;
+      if i >= lo && i <= hi {
+        ui.fill_rect(hx - cw / 2, y, 3 * cw, rh, C_SEL);
+        ui.fill_rect(txx, y, cw, rh, C_SEL);
+      }
+      if i == cursor {
+        // 指している升。いまいる側は塗り、もう一方は枠だけ
+        if pane == 0 {
+          ui.fill_rect(hx - 1, y, 2 * cw + 2, rh, C_CUR);
+          ui.rect(txx, y, cw, rh, C_CUR);
+        } else {
+          ui.rect(hx - 1, y, 2 * cw + 2, rh, C_CUR);
+          ui.fill_rect(txx, y, cw, rh, C_CUR);
+        }
+      }
+      if i < n {
+        var v = data[i];
+        var hcol = byte_color(v);
+        var tcol = hcol;
+        if i == cursor {
+          if pane == 0 { hcol = C_CUR_TXT; } else { tcol = C_CUR_TXT; }
+        }
+        tx(hx, ty, hex_tab[v], hcol);
+        tx(txx, ty, chr_tab[v], tcol);
+        // 16 進の側では、次に打つ桁に下線
+        if i == cursor && pane == 0 {
+          ui.fill_rect(hx + nibble * cw, y + rh - 2, cw, 2, C_CUR_TXT);
+        }
+      }
+    }
+  }
+  ui.clip_off();
+}
+
+func draw_bar() -> void {
+  ui.fill_rect(x_bar, y_grid, bar_w, grid_h, C_BAR);
+  var t = math.max(1, total_rows());
+  var th = math.clamp(grid_h * rows_vis / t, rh, grid_h);
+  var ty = y_grid;
+  if t > rows_vis { ty = y_grid + (grid_h - th) * top / (t - rows_vis); }
+  ui.fill_rect(x_bar + 1, ty, bar_w - 2, th, C_DIM);
+}
+
+func draw_status() -> void {
+  var y0 = y_grid + grid_h;
+  ui.fill_rect(0, y0, W, H - y0, C_BAR);
+  ui.hline(0, y0, W, C_LINE);
+  // 1 行目: 位置と、そのバイトの値（16 進・符号なし・符号つき・2 進・字）と選んだ範囲
+  var l1 = f"{cursor:08X} ({cursor})";
+  if cursor < data.len() {
+    var v = data[cursor];
+    var i8 = v;
+    if v >= 128 { i8 = v - 256; }
+    l1 += f"   {v:02X}  u8 {v}  i8 {i8}  {v:08b}  {chr_tab[v]}";
+  } else {
+    l1 += "   (end: type to append)";
+  }
+  if has_sel() {
+    var lo = sel_lo();
+    var hi = sel_hi();
+    var cnt = hi - lo + 1;
+    l1 += f"   sel {lo:X}-{hi:X} ({cnt})";
+  }
+  // 2 行目: 案内か、知らせ
+  var l2 = HINT;
+  var c2 = C_DIM;
+  if message_left > 0 { l2 = message; c2 = C_OK; }
+  var ty = y0 + 3 + (rh - lh) / 2;
+  ui.clip(0, y0, W, H - y0);
+  tx(pad, ty, l1, C_FG);
+  tx(pad, ty + rh, l2, c2);
+  ui.clip_off();
+}
+
+// 開く画面の候補の一覧。入力欄の下に並べる
+func draw_open_list() -> void {
+  var m = open_matches();
+  var y0 = in_y + rh + pad / 2;
+  if m.len() == 0 {
+    var note = "(empty folder)";
+    if prompt != "" { note = "(no match: Enter makes a new file)"; }
+    tx(in_x, y0 + (rh - lh) / 2, note, C_DIM);
+  }
+  for var i in range(OPEN_ROWS) {
+    var k = open_scroll + i;
+    if k >= m.len() { break; }
+    var y = y0 + i * rh;
+    if k == open_pick { ui.fill_rect(in_x, y, in_w, rh, C_SEL); }
+    var col = C_FG;
+    if m[k].ends_with("/") { col = C_ACCENT; }
+    ui.clip(in_x, y, in_w, rh);
+    tx(in_x + 3, y + (rh - lh) / 2, m[k], col);
+    ui.clip_off();
+  }
+  tx(in_x, y0 + OPEN_ROWS * rh + (rh - lh) / 2,
+     "Enter open   Tab complete   Back parent folder   Esc cancel", C_DIM);
+}
+
+func draw_dialog() -> void {
+  var h = dlg_h;
+  if dialog == "open" { h += OPEN_ROWS * rh + rh + pad; }
+  ui.fill_rect(0, 0, W, H, ui.rgba(0, 0, 0, 120));
+  ui.fill_rect(dlg_x, dlg_y, dlg_w, h, C_BAR);
+  ui.rect(dlg_x, dlg_y, dlg_w, h, C_ACCENT);
+  tx(dlg_x + pad, dlg_y + pad, dialog_title(), C_FG);
+  var ty = in_y + (rh - lh) / 2;
+  if dialog == "confirm" {
+    tx(in_x, ty, "Y: save first    N: discard    Esc: back", C_DIM);
+    return;
+  }
+  ui.fill_rect(in_x, in_y, in_w, rh, C_BG);
+  ui.rect(in_x, in_y, in_w, rh, C_ACCENT);
+  var m = ui.marked();
+  // 長くなったら左にずらして、打っている端が見えるようにする
+  var shift_x = math.max(0, tw(prompt) + tw(m) + 8 - in_w);
+  var px = in_x + 3 - shift_x;
+  ui.clip(in_x + 1, in_y, in_w - 2, rh);
+  tx(px, ty, prompt, C_FG);
+  px += tw(prompt);
+  if m != "" {
+    // 変換中の字は下線つきで
+    tx(px, ty, m, C_ACCENT);
+    ui.hline(px, in_y + rh - 2, tw(m), C_ACCENT);
+    px += tw(m);
+  }
+  ui.fill_rect(px, in_y + 2, 2, rh - 4, C_CUR);
+  ui.clip_off();
+  if dialog == "open" { draw_open_list(); }
+}
+
+func draw_help() -> void {
+  var maxw = 0;
+  for var l in help_lines { maxw = math.max(maxw, tw(l)); }
+  var bw = math.min(W - 2 * pad, maxw + 2 * pad);
+  var bh = help_lines.len() * rh + 2 * pad;
+  var bx = (W - bw) / 2;
+  var by = math.max(y_grid, (H - bh) / 2);
+  ui.fill_rect(0, 0, W, H, ui.rgba(0, 0, 0, 120));
+  ui.fill_rect(bx, by, bw, bh, C_BAR);
+  ui.rect(bx, by, bw, bh, C_ACCENT);
+  ui.clip(bx + 1, by + 1, bw - 2, bh - 2);
+  for var i in range(help_lines.len()) {
+    tx(bx + pad, by + pad + i * rh + (rh - lh) / 2, help_lines[i], C_FG);
+  }
+  ui.clip_off();
+}
+
+func draw() -> void {
+  ui.clear(C_BG);
+  draw_header();
+  draw_rows();
+  draw_bar();
+  draw_status();
+  if dialog != "" { draw_dialog(); }
+  if help_open { draw_help(); }
+}
+
+// ------------------------------------------------------------------ 画面が無いときの見本
+func demo_data() -> void {
+  data = "Shark hex editor. Type over the bytes; Tab switches the side.\n".bytes().list();
+  for var v in range(256) { data.push(v); }
+  for var i in range(16) { data.push(0); }
+  for var i in range(16) { data.push(255); }
+  cursor = 0x24;
+  anchor = 0x2b;
+  insert_mode = false;
+  say("no screen: drew one frame to hexedit.png");
+}
+
+// ------------------------------------------------------------------ 自分で確かめる
+var fails = 0;
+func expect(cond: bool, what: string) -> void {
+  if cond { print("ok   " + what); } else { print("FAIL " + what); fails += 1; }
+}
+
+func selftest() -> int {
+  data = "Hello".bytes().list();
+  // 上書き: 先頭の 48 を 4A に（2 桁で 1 つの書き換え）
+  type_hex(4);
+  type_hex(10);
+  expect(hex_of(0, 4) == "4A 65 6C 6C 6F", "overwrite two nibbles");
+  expect(cursor == 1 && nibble == 0, "cursor advanced after low nibble");
+  expect(history.len() == 1, "two nibbles make one edit");
+  undo();
+  expect(hex_of(0, 4) == "48 65 6C 6C 6F" && cursor == 0, "undo restores byte and cursor");
+  redo();
+  expect(hex_of(0, 4) == "4A 65 6C 6C 6F", "redo applies again");
+  // 末尾に足す
+  cursor = 5;
+  nibble = 0;
+  type_hex(2);
+  type_hex(1);
+  expect(data.len() == 6 && data[5] == 0x21, "append at end");
+  // 差し込み
+  insert_mode = true;
+  cursor = 1;
+  type_hex(15);
+  type_hex(15);
+  expect(hex_of(0, 6) == "4A FF 65 6C 6C 6F 21", "insert mode inserts");
+  insert_mode = false;
+  undo();
+  expect(hex_of(0, 5) == "4A 65 6C 6C 6F 21", "undo insert");
+  // 文字の側
+  pane = 1;
+  cursor = 1;
+  type_char("a");
+  expect(data[1] == 0x61 && cursor == 2, "typed char overwrites");
+  // 選んで消す
+  anchor = 1;
+  cursor = 3;
+  delete_forward();
+  expect(hex_of(0, data.len() - 1) == "4A 6F 21" && cursor == 1, "delete selection");
+  undo();
+  expect(hex_of(0, data.len() - 1) == "4A 61 6C 6C 6F 21", "undo range delete");
+  redo();
+  // 探す
+  last_find = "6f 21";
+  find_hex = true;
+  find_next(0);
+  expect(cursor == 1 && anchor == 2, "find hex selects the match");
+  last_find = "J";
+  find_hex = false;
+  find_next(1);
+  expect(cursor == 0, "find text wraps around");
+  last_find = "zz";
+  find_next(0);
+  expect(cursor == 0 && message == "not found", "missing text says not found");
+  // 飛ぶ先の読み方
+  cursor = 1;
+  expect((parse_offset("2") ?? -1) == 2, "offset hex");
+  expect((parse_offset("0x1f") ?? -1) == 31, "offset 0x");
+  expect((parse_offset("#10") ?? -1) == 10, "offset decimal");
+  expect((parse_offset("+1") ?? -1) == 2, "offset relative forward");
+  expect((parse_offset("-1") ?? -1) == 0, "offset relative back");
+  expect(parse_offset("zz") == none, "offset invalid");
+  // 貼るものの読み方
+  if var h = parse_hex_bytes("de ad:be,ef") { expect(h.len() == 4 && h[3] == 0xef, "hex bytes with separators"); }
+  else { expect(false, "hex bytes with separators"); }
+  expect(parse_hex_bytes("abc") == none, "odd hex is invalid");
+  expect(parse_hex_bytes("さめ") == none, "non-hex is invalid");
+  // 保存の印
+  expect(dirty(), "dirty after edits");
+  saved_mark = history.len();
+  expect(!dirty(), "clean after save");
+  undo();
+  expect(dirty(), "dirty after undoing past the save");
+  redo();
+  expect(!dirty(), "clean again after redo");
+  undo();                       // 保存した所より 1 つ前へ
+  type_hex(0);                  // ここで新しく書くと、保存した状態には戻れなくなる
+  undo();
+  expect(dirty(), "saved state is unreachable after a new edit");
+  if fails == 0 { print("all good"); return 0; }
+  print(f"{fails} failed");
+  return 1;
+}
+
+// ------------------------------------------------------------------ 入口
+func main() -> int {
+  make_tables();
+  var args = os.args();
+  if args.len() >= 2 && args[1] == "--selftest" { return selftest(); }
+  if args.len() >= 2 { open_file(args[1]); }
+
+  K = ui.scale();
+  font_px = 8 * K;
+  ts = K;
+  pick_font();
+  measure();
+  // 窓は 16 列 × 16 行がちょうど入る大きさで開く。縁を引けば列の数も付いてくる
+  ui.open("hexedit", width_for(16), height_for(16));
+  say("F1 shows the keys");
+
+  // 画面が無いときは、1 こまだけ描いて PNG に残す
+  if !ui.visible() {
+    if data.len() == 0 { demo_data(); }
+    layout();
+    draw();
+    var r = file.write_bytes("hexedit.png", ui.to_png());
+    if !r.ok() {
+      print(f"保存できません: {r.error().message()}");
+      return 1;
+    }
+    print("画面がないので hexedit.png に保存しました");
+    return 0;
+  }
+
+  while ui.poll() {
+    layout();
+    if dialog != "" { handle_dialog(); }
+    else if help_open { handle_help(); }
+    else {
+      handle_keys();
+      handle_mouse();
+    }
+    if message_left > 0 { message_left -= 1; }
+    draw();
+    ui.present();
+    ui.frame();
+  }
+  ui.close();
+  if dirty() { print("注意: 保存していない変更は捨てられました"); }
+  return 0;
+}
