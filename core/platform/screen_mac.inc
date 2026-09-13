@@ -1,13 +1,13 @@
-// screen_mac.inc — macOS の窓（desktop.cpp から読む）
+// screen_mac.inc — macOS 向け Cocoa/AppKit ウィンドウバックエンド（desktop.cpp からインクルード）
 //
-// 窓の道具（GUI ツールキット）には頼らない（spec/runtime/platform.md）。
-// macOS の窓は OS そのものが持っているので、**実行時に**取りに行く。
+// 外部 GUI ツールキットに依存しない設計（spec/runtime/platform.md 参照）。
+// macOS ネイティブのウィンドウシステムを動的に呼び出す。
 //
-//   ・libobjc と AppKit / CoreGraphics を dlopen で開く。作るときには何も要らない
-//   ・呼び出しは objc_msgSend を、そのつど正しい形に見立てて呼ぶ
-//   ・画素は CGImage にして、窓の層（CALayer）に貼る。拡大は補間しない
+//   ・libobjc、AppKit、CoreGraphics を dlopen で動的ロード（リンク不要）
+//   ・メソッド呼び出しは objc_msgSend を適切な関数ポインタ型にキャストして実行
+//   ・ピクセルバッファは CGImage を生成し、CALayer の contents に転送（ニアレストネイバー拡大）
 //
-// 開けなければ false を返すだけ。そのとき desktop.cpp は次の出し先を試す。
+// 初期化失敗時は false を返却し、desktop.cpp 側でフォールバックバックエンドを試行する。
 #if !defined(__APPLE__)
 
 const PlatformScreen* mac_screen() { return 0; }
@@ -108,7 +108,7 @@ struct State {
 };
 State g;
 
-// 文字入力（IME）の受け皿。中身は下の text_input で作る
+// IME 入力プロキシビュー（NSTextView）。後述の text_input で初期化
 Obj g_sink = 0;
 bool g_text_on = false;
 bool g_text_multi = false;   // 複数行の入力欄か（改行を落とさず、行のキーはコアに任せる）
@@ -470,8 +470,8 @@ void pump() {
         g.app, S("nextEventMatchingMask:untilDate:inMode:dequeue:"),
         ~0ull, g.distant_past, g.run_mode, 1);
     if (!ev) break;
-    // このイベントを、こちらで受け取りきったか。受け取りきったものまで AppKit に
-    // 渡すと、受け皿のないキーで OS が音を鳴らす（noResponderFor: → NSBeep）
+    // このイベントを本ハンドラで処理済みか。処理済みイベントを AppKit に
+    // 伝播させると、レスポンダのないキー操作でビープ音が発生する（noResponderFor: → NSBeep）
     bool eaten = false;
     long type = sendl(ev, "type");
     switch (type) {
@@ -488,11 +488,11 @@ void pump() {
         if (down && (mods & (1ul << 20)) && (cp == 'q' || cp == 'Q')) {   // Cmd-Q
           ScreenEvent e; e.kind = SEV_Close; push(e);
         }
-        // Cmd の切り貼り。menu bar を持たないので、こちらから受け皿に頼む
+        // Cmd キーによるクリップボード操作。メニューバーを持たないため、IME プロキシビュー（NSTextView）へ直接要求
         if (down && g_text_on && g_sink && (mods & (1ul << 20))) {
-          // 取り消し（Cmd-Z）とやり直し（Shift-Cmd-Z）は**コアが持つ**。
-          // 受け皿の取り消し帳（NSUndoManager）に頼むと、機種ごとに別物になるうえ、
-          // こちらが中身を入れ直したときに食い違う。キーはそのまま上で渡してある
+          // Undo（Cmd-Z）および Redo（Shift-Cmd-Z）は**コア側で管理**。
+          // ネイティブビューの NSUndoManager に委譲するとプラットフォーム差異や
+          // バッファ再設定時の不整合が生じるため、キーイベントとしてコアへ伝達済み
           if (cp == 'z') break;
           const char* act = 0;
           if (cp == 'c') act = "copy:";
@@ -507,7 +507,7 @@ void pump() {
           if (act) break;   // 受けられなくても、キーはここで使い切る
         }
         // 打たれた文字。修飾キーつきのものと、機能キーは渡さない。
-        // 文字入力（IME）の最中は、受け皿が受け取るのでこちらからは渡さない
+        // IME 入力中はプロキシビュー（NSTextView）側が文字を処理するため、本ハンドラからは発行しない
         if (down && !g_text_on && !(mods & ((1ul << 18) | (1ul << 20)))) {
           const char* s = utf8(send(ev, "characters"));
           int c0 = first_cp(s);
@@ -522,10 +522,10 @@ void pump() {
         }
         // キーはここで読み終わっている。menu bar を持たないので、渡しても OS の
         // 側にすることは無い（Cmd-Q も上で自分で見ている）。
-        // 文字入力の最中だけは、変換を進めるために受け皿へ渡す
+        // IME 入力中のみ、変換処理を継続させるためプロキシビューへディスパッチ
         eaten = !(g_text_on && g_sink);
-        // 改行はコアが入れる（受け皿に渡すと二重に入る）。複数行の入力欄では、
-        // 行にまつわるキーもコアが受け持つ。折り返す幅が受け皿とこちらで違うため
+        // 改行はコア側で挿入（プロキシビューへ渡すと二重入力になる）。複数行入力欄では、
+        // 行移動関連キーもコア側で処理（折り返し幅の計算基準が異なるため）
         if (!eaten && !composing &&
             (k == SKEY_Enter ||
              (g_text_multi && (k == SKEY_Up || k == SKEY_Down || k == SKEY_Home ||
@@ -550,7 +550,7 @@ void pump() {
           e.y = -fy;
           push(e);
         }
-        eaten = true;   // 見えない受け皿に渡すと、そちらが巻物を動かしてしまう
+        eaten = true;   // スーパービューへ伝播すると不要なスクロールが発生するためイベントを消費
         break;
       }
       case 12:   // FlagsChanged
@@ -612,9 +612,9 @@ void text_input(bool on, const char* initial, int x, int y, int h, bool multi) {
     if (!g_sink) return;
     sendb(g_sink, "setDrawsBackground:", false);
     sendb(g_sink, "setRichText:", false);
-    // 受け皿は**見えないもの**。ここを透けさせておかないと、OS の入力欄が持っている
-    // カーソルまで出てきて、こちらが描くカーソルと2本に見える。
-    // 透かすのは見た目だけなので、キーも変換も今までどおり受け取れる
+    // プロキシビューは**完全に透明化**して配置する。非透明だと OS ネイティブの
+    // キャレットが表示され、Shark 側で描画するキャレットと二重に表示されてしまう。
+    // 透明化は視覚表現のみであり、キーイベントや IME 変換は通常どおり機能する
     ((void (*)(Obj, Sel, double))msgSend)(g_sink, S("setAlphaValue:"), 0.0);
     // 新しい macOS はカーソルを別の層に描く。そちらは透明の色で消す
     Obj clear = send(C("NSColor"), "clearColor");
@@ -734,24 +734,24 @@ void clipboard_set(const char* s) {
   ((signed char (*)(Obj, Sel, Obj, Obj))msgSend)(pb, S("setString:forType:"), nsstr(s), pb_type());
 }
 
-// --- 機種のファイル選び ---------------------------------------------------
-// NSOpenPanel / NSSavePanel を出す。出しているあいだは OS が回すので、
-// こちらのこまは止まる（選ぶか取りやめるまで返らない）
+// --- ネイティブファイルダイアログ ---------------------------------------------------
+// NSOpenPanel / NSSavePanel をモーダル表示する。表示中は OS のイベントループが
+// 実行されるため、フレーム更新はブロックされる（選択またはキャンセルまで復帰しない）
 bool pick_file(bool save, const char* title, const char* name, Str* out) {
   if (!load()) return false;
-  // 画面のある席にいなければ、選び窓は出せない（窓を開くときと同じ見方）
+  // GUI セッションが有効でない環境（SSH 接続等）ではダイアログを表示できない
   if (cgSession) {
     void* d = cgSession();
     if (!d) return false;
     if (cfRelease) cfRelease(d);
   }
-  // 窓を開かずに呼ばれることもある。そのときは、ここで下ごしらえする
+  // ウィンドウを開かずに直接呼ばれた場合の NSApplication 初期化
   if (!g.app) {
     g.app = send(C("NSApplication"), "sharedApplication");
     if (!g.app) return false;
     ((void (*)(Obj, Sel, long))msgSend)(g.app, S("setActivationPolicy:"), 0);   // Regular
   }
-  sendb(g.app, "activateIgnoringOtherApps:", true);   // 選び窓を前に出す
+  sendb(g.app, "activateIgnoringOtherApps:", true);   // ダイアログを最前面に表示
   Obj panel = save ? send(C("NSSavePanel"), "savePanel") : send(C("NSOpenPanel"), "openPanel");
   if (!panel) return false;
   if (title && title[0]) sendv1(panel, "setTitle:", nsstr(title));
@@ -860,14 +860,15 @@ bool poll(ScreenEvent* out) {
 
 }  // namespace mac
 
-// 窓は「離した」も出せる
+// macOS Cocoa 画面バックエンド定義
+// キーリリースイベント、IME 入力（NSTextView 連携）、クリップボード、ファイルダイアログに対応
 const PlatformScreen kMacScreen = {mac::screen_scale,  mac::open,           mac::close,
                                   mac::present,       mac::poll,           true,
                                   mac::text_input,    mac::text_state,
                                   mac::text_selection, mac::text_select,
                                   mac::text_replace,  mac::clipboard_get,  mac::clipboard_set,
                                   mac::set_redraw,    mac::set_cursor,     mac::set_resizable,
-                                  false,    // 刻みはこちらで作る（眠って起きる）
+                                  false,    // フレームレート制御は Shark 側で実行（スリープによるウェイト）
                                   mac::pick_file,
                                   mac::pixel_ratio};
 

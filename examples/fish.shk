@@ -1,4 +1,4 @@
-// クラス・継承・インタフェース・並べ替え
+// クラス・継承・インターフェース・ソートの実装例
 class Fish : Comparable {
   public var name: string;
   public var size: int;
@@ -28,13 +28,13 @@ class Shark : Fish {
 
 func main() -> int {
   var aquarium = [Fish("あじ", 30), Shark("さめ", 50), Fish("ぶり", 90)];
-  aquarium.sort();                       // Comparable なので並べ替えられる
+  aquarium.sort();                       // Comparable を実装しているためソート可能
   for var f in aquarium {
-    print(f.describe());                 // virtual なので中身の型で決まる
+    print(f.describe());                 // virtual メソッドにより実行時型（動的ディスパッチ）で解決
   }
 
-  var copy = aquarium[0];                // 代入はコピー
+  var copy = aquarium[0];                // 値セマンティクス（代入時にコピー）
   copy.name = "変えた";
-  print(aquarium[0].name);               // 元は変わらない
+  print(aquarium[0].name);               // 元のインスタンスは変更されない
   return 0;
 }

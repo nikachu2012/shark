@@ -1,6 +1,6 @@
 // desktop.cpp — Windows / macOS / Linux 向けの移植層
 //
-// ここを自分の機種のものに差し替える（spec/skeleton.md）。
+// ターゲット環境向けに差し替える移植層の実装（spec/skeleton.md）。
 #if defined(_WIN32)
 #define _CRT_RAND_S   // 暗号用の乱数 rand_s を使う。stdlib.h より前に要る
 // windows.h は大きいので、要らないところを外し、min/max の置き換えも止める
@@ -59,12 +59,12 @@ namespace shark {
 namespace {
 
 #if defined(_WIN32)
-// --- 字の符号（Windows だけ）---------------------------------------------
+// --- 文字コード変換（Windows 専用）---------------------------------------
 //
-// Shark は道も名前も、中も外もぜんぶ UTF-8。ところが Windows の char を取る
-// API は「その機械の言語の符号」（日本語の Windows なら CP932）として読むので、
-// UTF-8 のまま渡すと日本語の入ったファイル名が開けない。
-// そこで OS を呼ぶ手前で UTF-16（W 付きの API）に直し、返ってきたら戻す。
+// Shark 内部はパス名・文字列含めすべて UTF-8 で統一されている。しかし Windows の ANSI API（char*）は
+// システム既定のコードページ（日本語環境では CP932 / Shift_JIS）として解釈するため、
+// UTF-8 のまま渡すと日本語ファイル名等を開けない。
+// そのため OS API 呼び出し直前に UTF-16（Wide 版 API）へ変換し、戻り値を UTF-8 に復元する。
 struct Wide {
   wchar_t small_[512];
   wchar_t* p;
@@ -810,7 +810,7 @@ void s_set_resizable(bool on) {
 void s_set_cursor(int kind) {
   if (g_active && g_active->set_cursor) g_active->set_cursor(kind);
 }
-// ファイル選びは、窓を開いていなくても出せる出し先がある（macOS と Windows はそう）
+// ファイルダイアログは、ウィンドウを開いていなくても呼び出し可能なバックエンドが存在する（macOS および Windows）
 bool s_pick_file(bool save, const char* title, const char* name, Str* out) {
   if (g_active && g_active->pick_file) return g_active->pick_file(save, title, name, out);
   if (ui_off()) return false;
@@ -820,8 +820,8 @@ bool s_pick_file(bool save, const char* title, const char* name, Str* out) {
   return false;
 }
 
-// 画面の細かさ。**開く前にも呼べる**ので、まだ選んでいなければ開けそうな順に尋ねる。
-// 窓を開かないと決まっているとき（SHARK_UI=off）は 1。見えない面に細かさは無い
+// ディスプレイスケーリング比。ウィンドウ生成前にも呼び出し可能なため、未確定時は優先順にバックエンドへ問い合わせる。
+// ウィンドウを開かない設定時（SHARK_UI=off）は 1（オフスクリーン描画にはスケール不要）。
 int s_scale() {
   if (g_active) return g_active->scale ? g_active->scale() : 1;
   if (ui_off()) return 1;
@@ -831,7 +831,7 @@ int s_scale() {
   return 1;
 }
 
-// 丸めない細かさ。持っていない出し先では、丸めた数をそのまま渡す
+// 非整数スケーリング比。未対応バックエンドでは整数 scale 値を浮動小数点数として返却
 double one_ratio(const PlatformScreen* s) {
   if (s->pixel_ratio) return s->pixel_ratio();
   return s->scale ? (double)s->scale() : 1.0;
@@ -864,7 +864,7 @@ struct ScreenInit {
     kScreen.set_redraw = s_set_redraw;
     kScreen.set_cursor = s_set_cursor;
     kScreen.set_resizable = s_set_resizable;
-    kScreen.host_paced = false;   // 刻みはこちらで作る（眠って起きる）
+    kScreen.host_paced = false;   // フレームペーシングは処理系側で制御（スリープ待機）
     kScreen.pick_file = s_pick_file;
     kScreen.pixel_ratio = s_pixel_ratio;
   }
@@ -878,7 +878,7 @@ const Platform kDesktop = {
     d_now, d_mono, d_sleep, d_local_offset,
     d_write_out, d_write_err, d_read_line, d_exit,
     &kFile, &kOS, &kRandom, desktop_screen(),
-    0};   // 字は FreeType が読む（core/lib/font_ft.inc）ので、移植層は持たない
+    0};   // フォントラスタライズは FreeType（core/lib/font_ft.inc）が担当するため移植層側は nullptr
 
 }  // namespace
 

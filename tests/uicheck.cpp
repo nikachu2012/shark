@@ -1,8 +1,8 @@
-// uicheck.cpp — 宣言的な層の部品を、偽の出し先で押して・合わせて見張る
+// uicheck.cpp — モック環境での宣言的 UI ウィジェットのインタラクション検証
 //
-// 描いた絵は見比べれば済むが（tests/cases/18_ui.shk）、**押されたときにどう動くか**は
-// 出来事が要るので .shk では書けない。ここでは偽の出し先から押した・合わせた を
-// 流し込んで、ui.show() が返す名札と ui.value() の数を見る。
+// レンダリング結果のピクセル比較（tests/cases/18_ui.shk）とは別に、**クリックやホバー時の動的挙動**を
+// 検証するためのテストスイート。モック描画バックエンドへマウスやキーイベントを注入し、
+// ui.show() が返すウィジェット ID や ui.value() の値を検証する。
 #include <stdio.h>
 #include <string.h>
 
@@ -60,14 +60,14 @@ struct Case {
   virtual ~Case() {}
 };
 
-// 台本は**1こま描くごとに**進める。e.step() は「命令をいくつ動かすか」なので、
-// 1回で何こまも進んでしまい、こま数とは揃わない
+// テストシナリオは 1 フレーム描画ごとに進行する。e.step() は VM 命令ステップ数のため、
+// 1 回の呼び出しで複数フレーム進むことがありフレーム単位の同期が取れない。
 static Case* g_case = 0;
 static int g_step = 0;
-// 巻物はなめらかに動くので、押す前に**止まるまで待つ**。
-// 台本から settle() を呼ぶと、絵が変わらなくなるまで、こまを空回しする
+// スクロールコンテナはスムーズスクロール（イージング）で動作するため、クリック操作前にアニメーションの静止を待機する。
+// テストシナリオから settle() を呼び出すと、描画内容が静止するまでフレームを空回しして待機する。
 static int g_settle = 0;
-static int g_settle_used = 0;   // 止まるまでに、こまがいくつ要ったか
+static int g_settle_used = 0;   // 静止までに要したフレーム数
 static void settle() { g_settle = 3; g_settle_used = 0; }
 
 static void one_frame() {
@@ -75,7 +75,7 @@ static void one_frame() {
   if (g_settle > 0) {
     g_settle_used++;
     if (fake::still()) g_settle--;
-    else g_settle = 3;      // まだ動いている。数え直す
+    else g_settle = 3;      // アニメーション継続中のためカウンタをリセット
     if (g_settle > 0) return;
   }
   g_case->done(g_step, line);
@@ -114,7 +114,7 @@ static void run(const char* label, const char* src, Case* c) {
   }
 }
 
-// 部品を1つ出して、動いた名札と数を1行ずつ出すだけのプログラム
+// ウィジェットを配置し、操作されたウィジェット ID と値を 1 行ずつ出力するテストスクリプト
 static Str program(const char* widget, const char* state) {
   Str s("import std.ui;\n");
   s += state;
@@ -135,9 +135,9 @@ static Str program(const char* widget, const char* state) {
   return s;
 }
 
-// 名札の代わりに関数を渡した形。ui.run がしているのと同じように、
-// 押された部品が持っていた関数を呼ぶ。**名札が無いので、焦点や一覧の持ち主は
-// 置かれた場所から決めている**（core/lib/ui.cpp の widget_key）。そこも見る
+// コールバック関数を渡す形式。ui.run と同様に、
+// 操作されたウィジェットが保持するコールバック関数を実行する。ID 指定がないため、フォーカスやメニューの所有元は
+// 配置座標から解決される（core/lib/ui.cpp の widget_key）。その動作も検証する
 static Str program_fn(const char* widget, const char* state) {
   Str s("import std.ui;\n");
   s += state;
@@ -217,7 +217,7 @@ struct RadioCase : Case {
     if (step == 0) fake::click(4, 4);
   }
   void done(int step, const Str& line) {
-    if (step == 1) expect_line("押すと名札が返る", line, "r 1");
+    if (step == 1) expect_line("選択するとIDが返る", line, "r 1");
   }
 };
 
@@ -248,8 +248,8 @@ struct NumberCase : Case {
   }
 };
 
-// --- 名札の無い形（関数を渡す）--------------------------------------------
-// 一覧の持ち主を置かれた場所から決めているので、選んだものがちゃんと届くか
+// --- コールバック形式（関数を渡す）----------------------------------------
+// ドロップダウンリストの所有元を配置座標から識別し、選択項目が正しく通知されるかを検証
 struct ComboFnCase : Case {
   int steps() { return 4; }
   void act(int step) {
@@ -414,8 +414,8 @@ struct AreaWheelCase : Case {
   }
 };
 
-// --- ref で受ける形（update() も名札も ui.value() も要らない）--------------
-// 動いたら、渡した変数が**直に書き換わる**。処理系が覚えるのは「どの var か」だけ
+// --- ref 参照バインディング形式（ID や update()、ui.value() は不要）---------
+// 操作時に渡した変数が**直接更新される**。ランタイム側は対象変数のスロット番号のみを追跡
 struct RefToggleCase : Case {
   int steps() { return 6; }
   void act(int step) {
@@ -509,9 +509,9 @@ struct FieldMenuDragCase : Case {
   }
 };
 
-// --- 取り消しとやり直し ---------------------------------------------------
-// Ctrl-Z（macOS は Cmd-Z）で戻し、Shift を足すとやり直す。
-// 受け皿の取り消し帳ではなくコアが持つので、どの機種でも同じに効く
+// --- アンドゥ / リドゥ（Undo / Redo）--------------------------------------
+// Ctrl-Z（macOS は Cmd-Z）でアンドゥ、Shift を追加するとリドゥ。
+// OS 側の UndoManager ではなくコアランタイム側で履歴を管理するため、全プラットフォームで一貫して動作する
 struct UndoCase : Case {
   int steps() { return 12; }
   void act(int step) {
@@ -589,20 +589,20 @@ struct SliderFloatCase : Case {
   }
 };
 
-// --- 巻物（ui.scroll）-----------------------------------------------------
-// 車輪で送れて、**隠れているところは押せない**
+// --- スクロールコンテナ（ui.scroll）---------------------------------------
+// ホイールスクロール可能で、クリッピングにより隠れている領域の要素はクリック不可
 struct ScrollCase : Case {
   int steps() { return 10; }
   void act(int step) {
-    if (step == 0) fake::click(10, 100);                 // 巻物の外（何も起きない）
-    else if (step == 2) fake::click(10, 6);              // 1つめのボタン
+    if (step == 0) fake::click(10, 100);                 // スクロールコンテナ外（無操作）
+    else if (step == 2) fake::click(10, 6);              // 1つ目のボタンをクリック
     else if (step == 4) { fake::hover(10, 20); fake::wheel(4); settle(); }
-    else if (step == 6) fake::click(10, 6);              // 送ったので、別のボタンが来ている
+    else if (step == 6) fake::click(10, 6);              // スクロールにより別のボタンが移動してきている
   }
   void done(int step, const Str& line) {
-    if (step == 1) expect_line("外を押しても何も起きない", line, " 0");
-    if (step == 3) expect_line("見えているものは押せる", line, "b0 1");
-    if (step == 7) expect_true("送ったあとは、別のものが来ている", line != Str("b0 1"));
+    if (step == 1) expect_line("領域外のクリックでイベントが発生しない", line, " 0");
+    if (step == 3) expect_line("可視領域内のボタンはクリック可能", line, "b0 1");
+    if (step == 7) expect_true("スクロール後は異なるボタンがクリックされる", line != Str("b0 1"));
   }
 };
 
@@ -639,7 +639,7 @@ struct FilterCase : Case {
 };
 
 // --- 絵を出す部品（ui.image）----------------------------------------------
-// 乗っているところが絵の中のどこかで分かり、名札を渡してあれば押せる
+// 画像内の相対ホバー座標を取得でき、ID が指定されていればクリック可能
 struct ImageCase : Case {
   int steps() { return 6; }
   void act(int step) {
@@ -647,8 +647,8 @@ struct ImageCase : Case {
     else if (step == 2) fake::click(10, 6);
   }
   void done(int step, const Str& line) {
-    if (step == 1) expect_line("乗っているところが、絵の中のどこかで分かる", line, " 10 6");
-    if (step == 3) expect_line("名札があれば押せる", line, "img 10 6");
+    if (step == 1) expect_line("ホバー位置の画像内相対座標が取得できる", line, " 10 6");
+    if (step == 3) expect_line("ID があればクリック可能", line, "img 10 6");
   }
 };
 
@@ -865,12 +865,12 @@ static void run_once(const char* label, const char* src, const char* want) {
   expect_line(label, take_line(), want);
 }
 
-// 丸めない細かさ（ui.pixel_ratio）。Windows の 125%・150% 表示やブラウザの拡大では
-// 細かさが半端な数になる。整数に丸めた ui.scale() で面を取ると、面の1画素が
-// 画面の1画素に乗らず、機種の側で引き伸ばし直されてにじむ。
-// ここは「丸めない数で取れば、面がきっちり画面の画素の数になる」ことを見張る
+// 浮動小数点スケーリング（ui.pixel_ratio）。Windows の 125%・150% 表示やブラウザの拡大など、
+// 非整数のスケーリング環境で、整数丸めの ui.scale() を用いると物理ピクセルと不一致が生じ、
+// プラットフォーム側での再サンプリングにより表示が滲む。
+// ここでは、浮動小数点比率を用いることでキャンバス解像度が正確に物理ピクセルと一致することを検証する。
 static void check_pixel_ratio() {
-  printf("  丸めない細かさ（ui.pixel_ratio）\n");
+  printf("  浮動小数点スケーリング（ui.pixel_ratio）\n");
   struct { double ratio; const char* want; } t[] = {
       {1.0,  "1 420 300 12"},
       {1.25, "1 525 375 15"},   // 丸めると 1。420 のままでは画面より粗い
@@ -943,7 +943,7 @@ int main() {
       &number);
 
   ComboFnCase combo_fn;
-  run("選ぶ（名札の代わりに関数を渡す形）",
+  run("ドロップダウン（ID の代わりに関数を渡す形式）",
       program_fn("ui.combo(func() -> void { pick = ui.value(); }, [\"あか\", \"あお\"], pick)",
                  "var pick = 0;\n"
                  "func shown() -> string { return f\"{pick}\"; }\n")
@@ -1156,7 +1156,7 @@ int main() {
             "  }\n"
             "  return 0;\n"
             "}\n");
-    run("巻物（送る・隠れたところは押せない）", src.c_str(), &scroll);
+    run("スクロールコンテナ（スクロール・非表示領域のクリック無効化）", src.c_str(), &scroll);
   }
 
   MultiListCase multi_list;
@@ -1321,9 +1321,9 @@ int main() {
   }
 
   if (g_fail) {
-    printf("uicheck: %d 件おかしい\n", g_fail);
+    printf("uicheck: %d 件失敗\n", g_fail);
     return 1;
   }
-  printf("uicheck: ぜんぶ通った\n");
+  printf("uicheck: 全テスト合格\n");
   return 0;
 }

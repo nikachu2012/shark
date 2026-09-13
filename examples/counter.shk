@@ -1,25 +1,24 @@
-// counter.shk — 宣言的な書き方の例（spec/library/ui.md）
+// counter.shk — 宣言的 UI の実装例（spec/library/ui.md）
 //
 //   ./shark run examples/counter.shk
 //
-// くり返しも描き直しも ui.run() が引き受ける。書くのは「いまどうあるべきか」と、
-// **押されたときの動き**だけ。動きは名前を付けず、部品を書いたその場に置ける。
-// 入力欄は ref で変数を渡すと、打たれるたびにその変数が書き換わる。
+// イベントループと画面の再描画は ui.run() が自動管理します。開発者は「あるべき画面状態（view）」と、
+// **イベント発生時のアクション** を記述するだけです。コールバック関数はインラインで無名関数として定義できます。
+// 入力欄に ref で変数を渡すと、入力が行われるたびに変数の値が直接更新されます。
 //
-// 日本語は ui.run() が機種のフォントを読むので、そのまま出る。
-// FreeType を入れずに作ったときは □ になる（README の「日本語の字を出す」）。
+// 日本語テキストは ui.run() がシステムフォントを自動読み込みして描画します。
 import std.ui;
 import std.file;
 
-// 状態はふつうの変数。処理系は覚えない。
-// 入力欄に ref で渡すものは、ここ（一番外側）に置く
+// アプリケーション状態は通常の変数で管理。
+// 入力欄に ref で渡す変数はトップレベル（グローバルスコープ）に配置する
 var count = 0;
 var sound = true;
 var volume = 60;
 var name = "さめ";
 
-// いまどうあるべきか（部品を ui.col で縦に組んで、1つ返す）。
-// 押されたときの動きは、その場に書く
+// 現在の画面ツリーを構築（ui.col でウィジェットを縦方向に配置して返す）。
+// ボタン押下時のハンドラは無名関数としてインラインで記述
 func view() -> Widget {
   return ui.col([
     ui.center([ui.label("かうんた").color(ui.rgb(120, 200, 255))]),
@@ -39,7 +38,7 @@ func view() -> Widget {
     ui.label(f"{volume}"),
     ui.space(4),
     ui.label("なまえ（押してから打つ。右で押すと切り貼り）"),
-    ui.field(ref name),              // 打たれるたびに name が書き換わる
+    ui.field(ref name),              // 入力時に name が直接更新される
     ui.label(f"こんにちは、{name} さん"),
     ui.space(4),
     ui.button("おわる", func() -> void { ui.quit(); }).align("right"),
@@ -51,7 +50,7 @@ func main() -> int {
 
   ui.run("かうんた", 420, 360, view);
 
-  // 画面が無いときは、ui.run が1回だけ描いて返り、面はそのまま残る
+  // ヘッドレス環境では ui.run() が 1 フレーム描画して復帰する
   if ui.width() > 0 {
     _ = file.write_bytes("counter.png", ui.to_png());
     print("画面がないので counter.png に保存しました");

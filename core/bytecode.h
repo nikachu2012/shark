@@ -1,8 +1,8 @@
-// bytecode.h — バイトコードの保存と読み戻し（spec/runtime/bytecode.md）
+// bytecode.h — バイトコードのシリアライズおよびデシリアライズ（spec/runtime/bytecode.md 参照）
 //
-// ・書くのは型検査を通した Program。読むのは仮想マシンだけを持つ実行装置（runtime.h）
-// ・ファイルは触らない。バイト列を作って返すだけで、書き出すのはフロントエンド
-// ・命令の並びはそのまま入れる。仮想マシンが要らないもの（構文木・診断の位置）は入れない
+// ・シリアライズ対象は型検査済みの Program。デシリアライズ側は VM 実行エンジン（runtime.h 参照）
+// ・ファイル I/O は行わずバイト列（Str）を入出力。ファイル書き出しはフロントエンド側が担当
+// ・バイトコード命令列をそのまま保持。VM 実行に不要な構文木やソース位置情報は含めない
 #ifndef SHARK_BYTECODE_H
 #define SHARK_BYTECODE_H
 
@@ -13,33 +13,33 @@
 
 namespace shark {
 
-// ファイルの先頭 4 バイト。単一バイナリの中に埋めたときも同じ
+// マジックナンバー（先頭 4 バイト）。スタンドアロンバイナリ埋め込み時も共通
 extern const char kBytecodeMagic[4];   // "SHKC"
-const int kBytecodeVersion = 4;   // 4 で、print/write が sep と end を最後の2引数として受ける形にした
-// 見張り（checksum）の置き場所。目印 4 バイトと版 4 バイトのうしろ
+const int kBytecodeVersion = 4;   // バージョン 4: print/write の sep/end 引数対応
+// チェックサム（CRC32）のオフセット（マジック 4B + バージョン 4B の直後）
 const int kChecksumAt = 8;
 
-// 先頭に置く覚え書き。実行装置はこれを見てから中身を読む
+// バイトコードヘッダ。ランタイムはヘッダ情報を検証した上でペイロードをロードする
 struct BytecodeHeader {
   int version;
-  Str main_file;       // 診断に出す名前（"examples/hello.shk"）
-  Lang lang;           // panic の言い方に使う
-  int memory_mb;       // 動かすときに使ってよい量。0 は上限なし
-  uint32_t modules;    // 入れた標準ライブラリの組み合わせ
-  uint64_t natives;    // 関数の表の指紋（registry_signature）
+  Str main_file;       // 診断出力用ソースファイル名（例: "examples/hello.shk"）
+  Lang lang;           // panic 出力言語（LANG_JA / LANG_EN）
+  int memory_mb;       // メモリ使用量上限（MB）。0 は無制限
+  uint32_t modules;    // リンクされた標準モジュールのビットマスク
+  uint64_t natives;    // ネイティブ関数レジストリのシグネチャ（registry_signature）
   BytecodeHeader() : version(kBytecodeVersion), lang(LANG_JA), memory_mb(256), modules(0), natives(0) {}
 };
 
-// 設定 ⇔ 覚え書きのビット
+// 設定 ⇔ モジュールビットマスク変換
 uint32_t modules_bits(const Config& cfg);
 void modules_to_config(uint32_t bits, Config* cfg);
 
-// 型検査を通した Program をバイト列にする
+// 型検査済み Program をバイトコード列にシリアライズ
 bool bytecode_write(Program& prog, const Registry& reg, const BytecodeHeader& h, Str* out,
                     Str* err);
-// 覚え書きだけ読む（どのモジュールを入れて作られたかを、表を作る前に知るため）
+// ヘッダのみ読み込み（必要なモジュールを事前に判別するため）
 bool bytecode_read_header(const Str& in, BytecodeHeader* h, Lang lang, Str* err);
-// 中身を読む。prog は空のものを渡す。types と reg は覚え書きに合わせて作ったもの
+// バイトコードペイロードをデシリアライズ。空の prog を渡し、ヘッダ情報に基づいて初期化した types と reg を渡す
 bool bytecode_read(const Str& in, Program* prog, TypeTable& types, const Registry& reg, Lang lang,
                    Str* err);
 

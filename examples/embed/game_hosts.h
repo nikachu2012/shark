@@ -1,11 +1,11 @@
-// game_hosts.h — ゲーム側の操作（move / turn / at_goal）と、その登録
+// game_hosts.h — ゲーム側の操作（move / turn / at_goal）とホスト関数の登録
 //
-// バイトコードは処理系の関数を**番号**で指す（spec/runtime/bytecode.md）。
-// 番号は登録した順で決まるので、**作る側（build_stage）と動かす側（play_stage）で
-// 同じものを同じ順に登録する**必要がある。そこを間違えないように、
-// 設定も登録も、このファイル1つにまとめてある。
+// バイトコードはランタイム側の関数をスロット番号（インデックス）で参照します（spec/runtime/bytecode.md）。
+// インデックスは登録順で決定されるため、**コンパイル側（build_stage）と実行側（play_stage）で
+// 同一の関数群を同一順序で登録する**必要があります。
+// 不整合を防ぐため、設定および登録処理を本ヘッダーに集約しています。
 //
-// 食い違ったまま動かそうとしても、読むときに指紋が合わずに止まる。
+// シグネチャや順序に不整合がある場合は、バイトコードロード時にフィンガープリント検証でエラーとなります。
 #ifndef SHARK_EXAMPLE_GAME_HOSTS_H
 #define SHARK_EXAMPLE_GAME_HOSTS_H
 
@@ -52,7 +52,7 @@ static NativeStatus h_at_goal(VM& vm, Value* args, int n, Value& out) {
   return N_Ok;
 }
 
-// --- 作る側と動かす側で、同じにするもの -----------------------------------
+// --- コンパイラとランタイムで共通の設定 -----------------------------------
 static Config game_config() {
   Config cfg;
   cfg.lang = LANG_JA;
@@ -62,8 +62,8 @@ static Config game_config() {
   return cfg;
 }
 
-// Engine（作る側）と Runtime（動かす側）は同じ形の register_host を持つので、
-// どちらにも同じ手で登録できる
+// Engine（コンパイラ側）と Runtime（実行側）は共通の register_host インターフェースを持つため、
+// テンプレート関数で共通化して登録可能
 template <class T>
 void register_game_hosts(T& e) {
   TypeTable& t = e.types();

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# gen.py — stdlib/*.shk から HTML のリファレンスを作る（make docs）。
+# gen.py — stdlib/*.shk から HTML リファレンスを生成する（make docs）。
 #
 #   python3 docs/gen.py [出力先]              # 既定は docs/reference/
-#   python3 docs/gen.py out --stdlib mylib    # 自分の宣言ファイルから作る
+#   python3 docs/gen.py out --stdlib mylib    # 独自の宣言ファイルから生成
 #
-# ライブラリごとに1枚と、目次（索引つき）を作る。中身は宣言ファイルが正で、
-# ここは並べるだけ。実装（core/lib/*.cpp）と食い違っていれば最後に知らせる。
+# モジュール別のリファレンスページと目次（索引付き）を生成。
+# 宣言ファイルを正本とし、C++ 実装（core/lib/*.cpp）との乖離があれば警告を出力する。
 import html
 import os
 import shutil
@@ -16,8 +16,8 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import mdpage  # noqa: E402
 import shkdoc  # noqa: E402
 
-# Windows の端末は既定が UTF-8 ではない。Shark も、この道具の知らせも UTF-8 なので、
-# 出す側と読む側の両方をそろえておく（そろえないと日本語が化け、読むときは落ちる）
+# Windows 環境ではコンソールの既定コードページが UTF-8 ではない場合があるため、
+# 標準入出力を UTF-8 に統一する（文字化けやエンコーディングエラーの防止）。
 if sys.platform == 'win32':
     import ctypes
     ctypes.windll.kernel32.SetConsoleOutputCP(65001)
@@ -34,7 +34,7 @@ def anchor(page, item, owner=''):
 
 
 def call_name(page, item, owner):
-    """一覧と見出しに出す呼び名。math.sqrt / string.len()"""
+    """一覧および見出し用の修飾名を取得。math.sqrt / string.len()"""
     mod = page['module']
     short = mod.split('.')[-1] if mod.startswith('std.') else ''
     if owner:
@@ -42,7 +42,7 @@ def call_name(page, item, owner):
     return '%s.%s' % (short, item['name']) if short else item['name']
 
 
-# ---------------------------------------------------------------- 1件ずつ
+# ---------------------------------------------------------------- シンボル単位のレンダリング
 def render_item(page, item, owner=''):
     out = []
     name = call_name(page, item, owner)
@@ -55,16 +55,16 @@ def render_item(page, item, owner=''):
         head = '<span class="nm">%s</span>%s(%s)%s' % (esc(name), esc(item['generic']), params, ret)
 
     out.append('<dl class="item" id="%s">' % esc(aid))
-    out.append('<dt>%s<a class="pl" href="#%s" title="ここへのリンク">¶</a></dt>' % (head, esc(aid)))
+    out.append('<dt>%s<a class="pl" href="#%s" title="パーマリンク">¶</a></dt>' % (head, esc(aid)))
     out.append('<dd>')
     for para in item['doc'].split('\n\n'):
         if para.strip():
             out.append('<p>%s</p>' % esc(shkdoc.flow(para.strip())))
     if item['overloads']:
-        pre = name[:-len(item['name'])]        # math. / string. などの前置き
-        out.append('<p class="ovl">ほかの形: %s</p>' %
+        pre = name[:-len(item['name'])]        # math. / string. などのプレフィックス
+        out.append('<p class="ovl">オーバーロード: %s</p>' %
                    ' '.join('<code>%s%s</code>' % (esc(pre), esc(o)) for o in item['overloads']))
-    if any(a[2] for a in item['args']):      # 説明が書かれているときだけ出す
+    if any(a[2] for a in item['args']):      # 引数ドキュメントが存在する場合のみテーブル出力
         out.append('<table class="args"><tbody>')
         for a in item['args']:
             out.append('<tr><th>%s</th><td class="ty">%s</td><td>%s</td></tr>'
@@ -81,7 +81,7 @@ def render_item(page, item, owner=''):
 
 
 def quick_index(page):
-    """ページの頭に置く、名前だけの一覧"""
+    """ページ先頭に配置するクイックインデックス（シンボル一覧）"""
     links = []
     for it in page['items']:
         links.append((call_name(page, it, ''), anchor(page, it)))
@@ -94,7 +94,7 @@ def quick_index(page):
     return '<div class="quick">%s</div>' % cells
 
 
-# ---------------------------------------------------------------- ページ
+# ---------------------------------------------------------------- ページ単位のレンダリング
 def render_page(page, pages):
     body = [nav(pages, page['file'])]
     body.append('<h1>%s</h1>' % esc(page['title']))
@@ -130,16 +130,16 @@ def nav(pages, here):
     return '<nav>%s</nav>' % ' '.join(links)
 
 
-# --- 言語そのものの使い方（docs/reference.md）------------------------------
-# 中身は Markdown が正。ここは HTML に直して、リファレンスと同じ見た目で並べるだけ。
-# **ブラウザ版（web/dist）にも入る**ので、外へのリンクは作らない（tools/mdpage.py）
+# --- 言語リファレンス（docs/reference.md）----------------------------------
+# Markdown ソースから HTML を生成し、API リファレンスと同一のデザインで出力する。
+# Web 版（web/dist）にもバンドルされるため、外部への相対リンクは無効化する（tools/mdpage.py）
 def render_guide(root, pages):
     path = os.path.join(root, 'docs/reference.md')
     with open(path, encoding='utf-8') as f:
         text = f.read()
 
     def link(href):
-        # 同じところに出しているページへは繋ぐ。それ以外（元のファイル）は文字のまま
+        # 同一ディレクトリに出力されるページへのリンクを解決。それ以外のリンクはプレーンテキスト化
         if href.startswith('#'):
             return href
         name = os.path.basename(href)
@@ -151,7 +151,7 @@ def render_guide(root, pages):
         return None
 
     body = [nav(pages, 'guide')]
-    # 見出しからの目次。長い文書なので、上から飛べるようにする
+    # 見出し（H2）から目次を生成
     heads = [h for h in mdpage.headings(text) if h[0] == 2]
     if heads:
         body.append('<nav class="toc"><b>目次</b> ')
@@ -164,9 +164,9 @@ def render_guide(root, pages):
 def render_index(pages):
     body = [nav(pages, 'index')]
     body.append('<h1>Shark リファレンス</h1>')
-    body.append('<p class="lead">この処理系が持っている関数と型の一覧。'
-                '中身は <code>stdlib/*.shk</code>（宣言ファイル）から作っている。'
-                '言語そのものの使い方は <a href="guide.html">言語リファレンス</a>。</p>')
+    body.append('<p class="lead">Shark 標準ライブラリの関数および型のリファレンス。'
+                '<code>stdlib/*.shk</code>（宣言ファイル）から自動生成されています。'
+                '言語仕様の概要については <a href="guide.html">言語リファレンス</a> を参照してください。</p>')
 
     body.append('<h2>ライブラリ</h2>')
     body.append('<table class="toc"><tbody>')
@@ -205,14 +205,14 @@ def frame(title, body):
 <body>
 <main>
 %s
-<footer>docs/gen.py が stdlib/*.shk から作ったもの。直すのは宣言ファイルの方。</footer>
+<footer>docs/gen.py により stdlib/*.shk から自動生成。記述の修正は宣言ファイルを編集してください。</footer>
 </main>
 </body>
 </html>
 """ % (esc(title), body)
 
 
-STYLE = """/* style.css — docs/gen.py が置く。Shark リファレンスの見た目 */
+STYLE = """/* style.css — docs/gen.py により出力される Shark リファレンスのスタイルシート */
 :root {
   --bg: #ffffff; --ink: #1a2430; --dim: #5b6b7a; --line: #dde5ec;
   --link: #0e7490; --code-bg: #f5f8fa; --mark: #f0f6f9;
@@ -283,7 +283,7 @@ table.toc th { text-align: left; font-weight: 600; padding: 5px 14px 5px 0;
 table.toc td { padding: 5px 0; color: var(--dim); }
 table.toc td.n { text-align: right; white-space: nowrap; padding-left: 14px; }
 
-/* 言語リファレンス（guide.html。Markdown から作ったところ）*/
+/* 言語リファレンス（guide.html。Markdown からレンダリングされた領域）*/
 main > table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14px; }
 main > table th, main > table td { border: 1px solid var(--line); padding: 6px 10px;
                                    text-align: left; vertical-align: top; }
@@ -315,7 +315,7 @@ def build(root, out_dir, stdlib='stdlib'):
 
 
 def report(root, pages):
-    """例が無いもの・実装と食い違うものを知らせる"""
+    """コード例の有無および実装との乖離をチェックしてレポート"""
     total = no_ex = 0
     for page in pages:
         items = list(page['items']) + [i for c in page['classes'] for i in c['items']]
@@ -323,12 +323,12 @@ def report(root, pages):
             total += 1
             if not it['example']:
                 no_ex += 1
-                print('  例が無い: %s.%s' % (page['file'], it['name']))
+                print('  コード例未記載: %s.%s' % (page['file'], it['name']))
     missing, extra = shkdoc.crosscheck(pages, shkdoc.core_names(root))
     for n in missing:
-        print('  宣言が無い（実装にはある）: %s' % n)
+        print('  未宣言のシンボル（実装のみ存在）: %s' % n)
     for n in extra:
-        print('  実装に無い（宣言にはある）: %s' % n)
+        print('  未実装のシンボル（宣言のみ存在）: %s' % n)
     return total, no_ex, len(missing) + len(extra)
 
 
@@ -341,12 +341,12 @@ def main():
         else:
             out_dir = a
     if os.path.isdir(out_dir):
-        for fn in os.listdir(out_dir):       # 消えた宣言のページを残さない
+        for fn in os.listdir(out_dir):       # 削除された古いページの残存を防止
             if fn.endswith(('.html', '.css')):
                 os.remove(os.path.join(out_dir, fn))
     pages = build(ROOT, out_dir, stdlib)
     total, no_ex, drift = report(ROOT, pages)
-    print('%s に %d ページ（%d 件、例つき %d 件）'
+    print('%s に %d ページ生成完了（シンボル数 %d 件、コード例付き %d 件）'
           % (os.path.relpath(out_dir, ROOT), len(pages) + 2, total, total - no_ex))
     return 1 if drift else 0
 

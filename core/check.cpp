@@ -150,39 +150,39 @@ void Checker::make_builtin_classes() {
     Type* tw = t_.class_type(c_widget_);
     Vec<Type*> no_params;
     struct { const char* name; Type* type; } wf[] = {
-        {"kind", t_.t_int()},        // 部品の種類（lib/ui.cpp の WidgetKind）
-        {"text", t_.t_string()},     // 出す文字・ラベル
-        {"id", t_.t_string()},       // 名札。押されると ui.show() がこれを返す
-        {"a", t_.t_int()},           // 値（checkbox の入切、slider のいま、space の高さ、
-                                     //      field が書き戻す var の番号）
-        {"b", t_.t_int()},           // slider の下
-        {"c", t_.t_int()},           // slider の上
-        {"kids", t_.list_of(tw)},    // col / row / grid の中身
-        // ここから下は見た目の指定（鎖でつないで変える）。-1 と 0 は「指定なし」
-        {"fg", t_.t_int()},          // 文字の色
-        {"bg", t_.t_int()},          // 下地の色
-        {"pad", t_.t_int()},         // 内側の余白
-        {"wid", t_.t_int()},         // 幅（画素。0 なら中身から決める）
+        {"kind", t_.t_int()},        // ウィジェット種別（lib/ui.cpp の WidgetKind）
+        {"text", t_.t_string()},     // 表示テキスト・ラベル文字列
+        {"id", t_.t_string()},       // ウィジェット ID。操作時に ui.show() がこれを返す
+        {"a", t_.t_int()},           // 状態値（checkbox の真偽、slider の現在値、space の高さ、
+                                     //       field がバインドする変数スロット番号）
+        {"b", t_.t_int()},           // slider の最小値
+        {"c", t_.t_int()},           // slider の最大値
+        {"kids", t_.list_of(tw)},    // 子ウィジェット一覧（col / row / grid / stack / scroll）
+        // スタイル指定（メソッドチェーンで設定）。-1 または 0 は「指定なし」
+        {"fg", t_.t_int()},          // 前景色・文字色
+        {"bg", t_.t_int()},          // 背景色
+        {"pad", t_.t_int()},         // パディング（内側余白）
+        {"wid", t_.t_int()},         // 幅（px。0 の場合はコンテンツから自動計算）
         {"hei", t_.t_int()},         // 高さ（同上）
-        {"wfr", t_.t_float()},       // 幅の取り分（fr）。0 なら指定なし
-        {"hfr", t_.t_float()},       // 高さの取り分（同上）
-        {"al", t_.t_int()},          // 寄せ方。0=左 1=中央 2=右
-        {"act", t_.func_type(no_params, t_.t_void())},   // 押されたときに呼ぶ関数
-        {"tip", t_.t_string()},      // カーソルを合わせたときに出す説明
-        {"hint", t_.t_string()},     // 何も入っていないときに、うすく出す字
-        {"var", t_.t_int()},         // ref で受けたときの、書き戻す var の番号
-        {"bd", t_.t_int()},          // 縁の色（-1 は指定なし）
-        {"bdw", t_.t_int()},         // 縁の太さ（画素）
-        {"rad", t_.t_int()},         // 角の丸み（-1 は指定なし）
-        {"flg", t_.t_int()},         // こまごました入切（lib/ui.cpp の WidgetFlag）
-        {"fa", t_.t_float()},        // 小数の値（float のつまみ・ドラッグ）
-        {"fb", t_.t_float()},        // 小数の下
-        {"fc", t_.t_float()},        // 小数の上
-        {"opt", t_.t_string()},      // こまかい指定（入力に通す字など）
-        {"px", t_.t_bytes()},        // 画像の画素（ui.image）
-        {"va", t_.t_int()},          // 縦の寄せ方。0=上 1=まんなか 2=下（-1 は指定なし）
-        {"dec", t_.t_int()},         // 出す小数の桁（-1 は限りの広さから決める）
-        {"sel", t_.list_of(t_.t_int())},   // いくつも選べる一覧で、選ばれている番号
+        {"wfr", t_.t_float()},       // 幅の伸縮比率（fr）。0 は指定なし
+        {"hfr", t_.t_float()},       // 高さの伸縮比率（同上）
+        {"al", t_.t_int()},          // 水平配置（align）。0=左 1=中央 2=右
+        {"act", t_.func_type(no_params, t_.t_void())},   // クリック時コールバック関数
+        {"tip", t_.t_string()},      // ツールチップ文字列
+        {"hint", t_.t_string()},     // プレースホルダーテキスト（未入力時のヒント文字列）
+        {"var", t_.t_int()},         // ref 参照変数のスロットインデックス
+        {"bd", t_.t_int()},          // ボーダー色（-1 は未指定）
+        {"bdw", t_.t_int()},         // ボーダー幅（px）
+        {"rad", t_.t_int()},         // 角丸半径（-1 は未指定）
+        {"flg", t_.t_int()},         // 各種フラグビットマスク（lib/ui.cpp の WidgetFlag）
+        {"fa", t_.t_float()},        // 浮動小数点値（スライダー / ドラッグ入力値）
+        {"fb", t_.t_float()},        // 浮動小数点最小値
+        {"fc", t_.t_float()},        // 浮動小数点最大値
+        {"opt", t_.t_string()},      // オプション文字列（フィルター文字種等）
+        {"px", t_.t_bytes()},        // 画像ピクセルデータ（ui.image）
+        {"va", t_.t_int()},          // 垂直配置（valign）。0=上 1=中央 2=下（-1 は未指定）
+        {"dec", t_.t_int()},         // 表示小数点以下桁数（-1 は範囲から自動決定）
+        {"sel", t_.list_of(t_.t_int())},   // 複数選択リストボックスの選択インデックス一覧
     };
     for (int i = 0; i < (int)(sizeof(wf) / sizeof(wf[0])); i++) {
       FieldInfo f;

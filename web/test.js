@@ -448,12 +448,12 @@ createShark().then((M) => {
   const tapped = turn(4);
   check('押した場所が、面の画素で届く', tapped.out.indexOf('click 30,24') >= 0, tapped.out);
 
-  // 文字入力（IME）。ブラウザでは見えない textarea に任せる
-  check('入力欄の間は、変換の受け皿ができる', !!dom.textarea(), '受け皿なし');
+  // 文字入力（IME）。ブラウザでは非表示の textarea プロキシに任せる
+  check('入力フォーカス中に IME プロキシ（textarea）が生成される', !!dom.textarea(), 'textarea なし');
   const ta = dom.textarea();
   if (ta) ta.value = 'さめ';
   const named = turn(4);
-  check('受け皿に入った文字が、そのまま渡る', named.out.indexOf('name さめ') >= 0, named.out);
+  check('IME プロキシに入力された文字列がコアへ伝達される', named.out.indexOf('name さめ') >= 0, named.out);
 
   // --- マウスの形 --------------------------------------------------------
   // 押せるところに合わせたら手に、入力欄なら文字の形に変わる
@@ -507,10 +507,10 @@ createShark().then((M) => {
   check('無い名前のフォントは false', fl[4] === 'missing false', font.out);
   check('ui.font_builtin() で内蔵に戻る', fl[5] === 'back  true', font.out);
 
-  // --- ゲーム（2D と 3D）--------------------------------------------------
-  // examples/ のものをそのまま読んで、ブラウザの道でも動くかを見る。
-  // 3D は ui.tri() と ui.depth()（奥行き）を、2D は絵（Canvas）と半透明を通る。
-  // 見るのは「窓が開き、こまが進み、絵が変わり、途中で止まらない」の4つ
+  // --- ゲームおよびグラフィックス（2D / 3D）------------------------------
+  // examples/ 内のコードを読み込み、Web (Canvas) 環境での実行とレンダリングを検証。
+  // 3D は ui.tri() および深度バッファ（ui.depth()）、2D は Canvas 描画とアルファブレンドを検証。
+  // 描画ループの検証: ウィンドウ初期化、フレーム更新、描画内容の変化、正常終了の4点を確認
   function play(rel, ms, press) {
     const src = fs.readFileSync(path.join(root, rel), 'utf8');
     let presents = 0;
@@ -530,7 +530,7 @@ createShark().then((M) => {
       status = api.pump(400000);
       take();
       if (status !== 0) break;
-      // 玉を打ち出すなど、動き始めに要るキーを1度だけ押す
+      // ボール打ち出しなど、開始に必要なキーイベントを 1 回送信
       if (press && !sent && dom.canvas) {
         dom.key(dom.canvas, 'keydown', press);
         dom.key(dom.canvas, 'keyup', press);
@@ -542,44 +542,43 @@ createShark().then((M) => {
     const now = dom.ctx.last ? dom.ctx.last.data : null;
     let moved = false;
     if (first && now) for (let i = 0; i < first.length; i++) if (first[i] !== now[i]) { moved = true; break; }
-    // 最後のこまに、どれだけ描かれているか（部品が組み上がったかの目印）
+    // 最終フレームの描画ピクセル数（UIコンポーネントが正常にレンダリングされたかの指標）
     let ink = 0;
     if (now) for (let i = 0; i < now.length; i += 4) if (now[i] + now[i + 1] + now[i + 2] > 120) ink++;
     const out = { status, presents, moved, ink, err: status === 2 ? api.error() : '',
                   w: dom.ctx.last ? dom.ctx.last.width : 0,
                   h: dom.ctx.last ? dom.ctx.last.height : 0 };
-    api.abort();                                  // 遊びっぱなしにしない
+    api.abort();                                  // 実行終了後に停止
     for (let i = 0; i < 200 && api.pump(200000) === 0; i++) take();
     take();
-    api.uiClose();                                // 終わったら窓も片づく（app.js の finish）
+    api.uiClose();                                // UI リソースをクリーンアップ（app.js の finish 相当）
     dom.ctx.putImageData = orig;
     return out;
   }
 
-  // 面の大きさは ui.scale()（偽 DOM の devicePixelRatio は 2）の倍になる
+  // キャンバスの描画解像度は ui.scale()（モック DOM の devicePixelRatio = 2）倍になる
   const g3 = play('examples/cube3d.shk', 700);
-  check('3D のゲーム（cube3d.shk）が canvas に出る',
+  check('3D レンダリング（cube3d.shk）が canvas に出力される',
         g3.status === 0 && g3.presents > 5 && g3.moved && g3.w === 720 && g3.h === 540,
         JSON.stringify(g3));
 
-  // ブロック崩しは space で打ち出すまで止まっているので、1度押してから見る
+  // ブロック崩しは space キーで開始するまで待機状態のため、キー入力を送信して検証
   const g2 = play('examples/breakout.shk', 700, ' ');
-  check('2D のゲーム（breakout.shk）が canvas に出る',
+  check('2D ゲーム（breakout.shk）が canvas に出力される',
         g2.status === 0 && g2.presents > 5 && g2.moved && g2.w === 640 && g2.h === 480,
         JSON.stringify(g2));
 
-  // 部品をぜんぶ出す見本。ブラウザの道でも、上の層がまるごと組み上がって描かれるか
-  // （押したときの動きは tests/uicheck.cpp が見る。ここは「組み上がって出る」まで）
+  // ウィジェットカタログ（widgets.shk）の描画検証。Web 環境でも高レベル UI ウィジェットが正しく描画されるか
+  // （クリック等の動的インタラクションは tests/uicheck.cpp で検証。ここでは組み立てと初回描画を検証）
   const gw = play('examples/widgets.shk', 900);
-  check('部品をぜんぶ出す見本（widgets.shk）が canvas に出る',
+  check('ウィジェットカタログ（widgets.shk）が canvas に出力される',
         gw.status === 0 && gw.presents > 5 && gw.w === 1400 && gw.h === 1080 &&
             gw.ink > 20000 && !gw.err,
         JSON.stringify(gw));
 
-  // --- お手本（examples.js に入るもの）------------------------------------
-  // 一覧（web/examples.py の ITEMS）と examples/ が食い違っていないかは、
-  // 作るときに examples.py が見ている。こちらは「載ったものが**ブラウザの道でも
-  // 読める**か」を見る。examples/ に足したものが web で通らない、を防ぐ
+  // --- サンプルコード整合性検証（examples.js）-------------------------------
+  // web/examples.py の ITEMS に登録されたサンプルコードが、Web 実行環境でも構文エラーなく
+  // 正常にロード可能かを検証。
   {
     const src = fs.readFileSync(path.join(__dirname, 'dist/examples.js'), 'utf8');
     const box = {};
@@ -590,15 +589,15 @@ createShark().then((M) => {
       api.config(64, 0, 0);
       if (api.load(path.basename(e.path), e.code) > 0) bad.push(e.path + ' → ' + api.diagnostics());
     }
-    check('お手本がぜんぶブラウザで読める（' + items.length + ' 件）',
+    check('サンプルコードがすべて Web 環境でロード可能（' + items.length + ' 件）',
           items.length > 10 && bad.length === 0, bad.join('\n'));
   }
 
-  // --- こまの速さ（ui.frame と host_paced）--------------------------------
-  // app.js と同じく「画面を描く合図ごとに1度だけ pump する」で走らせる。
-  // ui.frame() は刻限の半こま手前で起きるので、合図に間に合って 60 出る。
-  // ここが sleep(0.016) だと、描いた分だけ足が出て合図を1つ飛ばし、30 に落ちる
-  // （移植層が PlatformScreen::host_paced を名乗らなくなっても、ここで落ちる）
+  // --- フレームレート制御（ui.frame と host_paced）------------------------
+  // app.js と同様に、画面更新（requestAnimationFrame）に合わせて pump を実行。
+  // ui.frame() は目標時刻の半フレーム手前で待機解除されるため、VSync に同期して 60fps を維持できる。
+  // 単純な sleep(0.016) の場合、描画処理時間の累積によりフレームドロップが発生し 30fps に半減する
+  // （PlatformScreen::host_paced が false の場合も同様にフレーム落ちする）。
   function playVsync(src, ms) {
     let presents = 0;
     const orig = dom.ctx.putImageData;
@@ -637,12 +636,12 @@ createShark().then((M) => {
       '  ui.close();\n' +
       '  return 0;\n' +
       '}\n', 800);
-  check('ui.frame() は合図ごとに1こま進む（sleep だと半分になるところ）',
+  check('ui.frame() は VSync ごとに 1 フレーム進む（sleep だと 30fps に半減）',
         paced.ticks > 20 && paced.presents >= paced.ticks - 2,
         JSON.stringify(paced));
 
-  // 止めたあとに窓が居座らないか。app.js は実行が終わるたびに shk_ui_close() を呼ぶ
-  check('止めたあとの窓が片づく（居座らない）',
+  // 実行終了後に UI リソースが適切に破棄されるか。app.js は実行完了時に shk_ui_close() を呼び出す
+  check('実行終了後に UI リソースが解放される',
         dom.closes >= 3 && !M.sharkScreen, String(dom.closes));
 
   dom.restore();

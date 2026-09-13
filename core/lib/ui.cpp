@@ -46,18 +46,18 @@ static bool g_key[SKEY_Max], g_press[SKEY_Max], g_rel[SKEY_Max], g_hit[SKEY_Max]
 static Str g_typed;
 static int g_mx = 0, g_my = 0;
 static bool g_mb[3], g_mpress[3], g_mrel[3];
-// この回に車輪（ホイール）が送られたぶん。**1/100 行**で、下と右が正
-// （移植層がここまで細かく渡す。platform.h）。
-// 巻物を持つ部品（一覧・複数行の入力欄・メニュー）が使うと、そこで 0 に戻る
+// この回にマウスホイールが送られた量。**1/100 行**単位で、下方向および右方向が正
+// （移植層からサブピクセル精度で渡される。platform.h 参照）。
+// スクロール可能なウィジェット（リスト・テキストエリア・メニュー等）が消費すると 0 にリセットされる
 static int g_wheel_x = 0, g_wheel_y = 0;
-// ui.wheel() が返す**行の数**。1行に満たないぶんは g_wheel_sub に持ち越す
+// ui.wheel() が返す**行数単位のスクロール量**。1行未満の端数は g_wheel_sub に累積する
 static int g_wheel_lines_x = 0, g_wheel_lines_y = 0;
 static int g_wheel_sub_x = 0, g_wheel_sub_y = 0;
-// 部品が画素に直すときの、1画素に満たないぶんのため置き（1/100 画素）。
-// これが無いと、ゆっくり動かしたぶんが毎回切り捨てられて、いつまでも動かない
+// ウィジェットがピクセル単位に変換する際の1ピクセル未満の端数累積（1/100 ピクセル単位）。
+// これにより微小なトラックパッド入力等が切り捨てられずに正しく反映される
 static int g_wheel_px_sub = 0;
-// マウスの形。毎回 ui.poll() で「ふつう」に戻り、その回に頼まれた形が
-// ui.present() で機種に伝わる（頼まれるのは ui.cursor() と、宣言的な層の部品）
+// マウスカーソル形状。毎フレーム ui.poll() でデフォルト（Arrow）に戻り、
+// 当該フレームで要求された形状が ui.present() でプラットフォーム側に伝達される
 static int g_cursor_want = SCUR_Arrow;
 static int g_cursor_set = SCUR_Arrow;
 
@@ -78,9 +78,9 @@ static void input_stop();   // 下で定義
 static void font_close();   // 下で定義（字の出どころを内蔵に戻す）
 static bool ui_live_redraw(int w, int h);   // 下で定義（窓の縁を引いている間の置き直し）
 
-static void depth_free();   // 下で定義（奥行きの面）
+static void depth_free();   // 下で定義（Z バッファ）
 
-// 次のこまの刻限（単調時計のナノ秒）。0 はまだ数え始めていない（ui.frame）
+// 次フレームの目標刻限（単調時計のナノ秒）。0 は未初期化（ui.frame）
 static int64_t g_frame_at = 0;
 
 static void drop_surface() {
@@ -102,11 +102,11 @@ static void drop_surface() {
   ui_reset_widgets();
 }
 
-// 処理系を捨てるときに呼ばれる（registry.h）。
-// 画面を開いたまま終わっても、面と字形は返しておく
+// 処理系シャットダウン時に呼び出される（registry.h）。
+// 画面を開いたまま終了した場合でも描画バッファとフォントリソースを解放する
 void ui_shutdown() {
   drop_surface();
-  font_close();   // 読んだフォントと、字形の覚え書きも返す
+  font_close();   // ロード済みフォントおよびグリフキャッシュを解放
 }
 
 static bool need_open(VM& vm) {
@@ -126,7 +126,7 @@ static void resize_surface(int w, int h) {
   if (h > 16384) h = 16384;
   if (w == g_w && h == g_h) return;
   size_t bytes = (size_t)w * (size_t)h * sizeof(uint32_t);
-  // 使ってよいメモリに入らないなら、面は今の大きさのまま（窓には引き伸ばして出る）
+  // メモリ上限を超える場合はバッファ解像度を変更せず維持（ウィンドウ上では拡大描画される）
   if (sk_mem_limit() != 0 && bytes > sk_mem_limit()) return;
   uint32_t* np = (uint32_t*)sk_alloc(bytes);
   for (int y = 0; y < h; y++)
@@ -311,17 +311,17 @@ static NativeStatus u_present(VM& vm, Value* a, int n, Value& out) {
   return N_Ok;
 }
 
-// 次のこまの刻限まで待つ。
+// 次のフレーム目標時刻まで待機する。
 //
-// 「1こま描いてから 16ms 眠る」と書くと、**描くのにかかった分だけ足が出る**。
-// ここは眠る長さではなく**刻限**を決めて、そこまで待つので、描くのが速い機種でも
-// 遅い機種でも同じ速さで進む。
+// 「1フレーム描画してから 16ms 眠る」と記述すると、**描画処理時間分だけ遅延が蓄積する**。
+// 本関数は固定スリープではなく**目標時刻**を計算してそこまで待機するため、
+// 描画処理が速い環境でも遅い環境でも一定のフレームレートを保つ。
 //
-// ホストが刻みを握っている機種（ブラウザの requestAnimationFrame）では、
-// 刻限の少し手前で起きる。刻限のすぐ後ろに起きると、その回のきっかけに間に合わず
-// 次のきっかけまで丸ごと待つことになり、速さが半分になるため。
-// 半こま手前にしてあるのは、描くのにその半分より長くかかっていれば、
-// どのみち間に合っていないから（spec/library/ui.md「こまの速さ」）
+// ホスト側が描画タイミングを主導する環境（ブラウザの requestAnimationFrame 等）では、
+// 目標時刻の少し手前で起床する。目標時刻直後に起床するとそのフレームのレンダリングに
+// 間に合わず次フレームまで丸ごと待機となり、フレームレートが半減するため。
+// 半フレーム手前に設定しているのは、描画にそれ以上かかる場合はどのみちフレーム落ちしているため
+// （spec/library/ui.md「フレームレート制御」参照）。
 static NativeStatus u_frame(VM& vm, Value* a, int n, Value& out) {
   if (!need_open(vm)) return N_Panic;
   TaskState* t = vm.task();
@@ -908,76 +908,74 @@ static int g_scroll = 0;                // 左に隠している文字の数
 // 1行の入力欄で、変換を始める前のカーソル。変換中は移植層の数え方に
 // 変換中の字が入ってしまうので、こちらで覚えておいたところを使う（place_field）
 static int g_fcaret = 0;
-// 巻物の位置は**画素**で持つ。行の数で持つと、送るたびに1行まるごと飛んで
-// 途中が出ない。いま（cur）と目当て（to）の2つを持ち、毎こし少しずつ寄せる
-static int g_area_px = 0, g_area_to = 0;   // 複数行の入力欄で、上に隠しているぶん
-static Str g_area_id;                   // その巻物が、どの入力欄のものか
-static int g_vcaret = -1;               // 前の回に「見えるように」したカーソル
-// 複数行の入力欄のカーソルと錨。移植層が選択を持つ機種でも、**どちら端に
-// カーソルがあるか**までは取れないので、こちらで覚えておく
+// スクロール位置はピクセル単位で保持する。行単位だとスクロール時に不連続な飛びが発生するため。
+// 現在値（cur）と目標値（to）を保持し、フレームごとにイージング補間する
+static int g_area_px = 0, g_area_to = 0;   // 複数行テキスト入力欄の垂直スクロール量
+static Str g_area_id;                   // スクロール対象のテキストエリアID
+static int g_vcaret = -1;               // 直前フレームで可視化処理を行ったカーソル位置
+// 複数行テキスト入力欄のキャレットと選択アンカー。OS 側で選択範囲を保持する環境でも、
+// どちら端にキャレットがあるかまでは取得できないため内部で保持する
 static int g_acaret = 0, g_aanchor = 0;
-static int g_agoal = -1;                // 上下に動くときの、目当ての横の位置（画素）
-// 一覧（ui.listbox）で、上に隠している行の数。最後に触った一覧のぶんだけ覚える
+static int g_agoal = -1;                // 上下移動時の目標X座標（ピクセル単位）
+// リストボックス（ui.listbox）のスクロールオフセット。直近に操作したリストボックスのみ保持
 static Str g_list_id;
-static int g_list_px = 0, g_list_to = 0;   // 上に隠しているぶん（画素）と、その目当て
-static int g_list_sel = -1;      // 前の回に「見えるように」した番号
-static bool g_list_drag = false;   // 右の帯をつかんでいる最中か
-// 数の入力欄（ui.number）を打っている途中の字。値にできない形（空や "-"）も通るので、
-// 焦点のあるあいだだけここに置く。中身そのものは、いつもどおり呼んだ側が持つ
+static int g_list_px = 0, g_list_to = 0;   // 垂直スクロール量（現在値と目標値）
+static int g_list_sel = -1;      // 直前フレームで可視化処理を行った選択項目インデックス
+static bool g_list_drag = false;   // スクロールバーのつまみをドラッグ中か
+// 数値入力欄（ui.number）の編集途中の文字列。数値として未完全な状態（空文字や "-" のみ）も許容するため、
+// フォーカス中のみ一時保持する。確定値自体は呼び出し側が管理する
 static Str g_num_id, g_num_text;
-// つまみ（ui.slider）をつかんでいる最中か。**つかんだら、外へ出ても付いてくる**。
-// 押しっぱなしで動かすものは、部品の外に出たとたん止まると使いにくい
+// スライダー（ui.slider）をドラッグ中か。ドラッグ開始後はウィジェット外に出ても追従する
 static Str g_slide_id;
 static bool g_sliding = false;
 
-// 引いて変える欄（ui.drag）。押したところと、そのときの値を覚えておく
+// ドラッグ数値入力（ui.drag）。クリック開始位置と基準値を保持
 static Str g_dnum_id;
 static int g_dnum_x = 0;
 static bool g_dnum_moved = false;
 static double g_dnum_base = 0;
-// 取り消し帳。入力欄の中身を、変わる**前**の姿で控えておく
-static Str g_undo_id;                      // どの入力欄のものか
-static Vec<Str> g_undo, g_redo;            // 変わる前の中身
+// アンドゥ／リドゥ履歴バッファ。変更前の状態をスナップショットとして保持
+static Str g_undo_id;                      // 対象の入力ウィジェットID
+static Vec<Str> g_undo, g_redo;            // テキスト履歴
 static Vec<int> g_undo_at, g_redo_at;      // そのときのカーソル
 static int64_t g_undo_last = 0;            // 最後に控えた刻限
-// 続けて押したときの数え（2回で語、3回で行、4回でぜんぶ）
-// 色を選ぶ板（ui.color）。出しているのはどの部品か、と、いま選んでいる色み
+// カラーピッカー（ui.color）。表示元ウィジェットIDと現在編集中の色値
 static Str g_color_id;
 static int g_color_x = 0, g_color_y = 0;
 static double g_color_h = 0, g_color_s = 0, g_color_v = 0;
-static uint32_t g_color_keep = 0;   // 開いたときの色（透けぶんを持ち越す）
-static int g_color_drag = 0;        // 1 = 四角をつかんでいる、2 = 色みの帯
-static bool g_color_moved = false;  // この回、板の中で色が動いたか
+static uint32_t g_color_keep = 0;   // ポップアップオープン時の初期色（アルファ値を維持）
+static int g_color_drag = 0;        // 1 = SVパレット操作中、2 = 色相バー操作中
+static bool g_color_moved = false;  // 当該フレームで色が変更されたか
 
-// 巻物（ui.scroll）の、いま隠しているぶん。部品ごとに名札で覚える
+// スクロールビュー（ui.scroll）のスクロールオフセット。ウィジェットIDごとに保持する
 static Vec<Str> g_sc_id;
 static Vec<int> g_sc_px, g_sc_to;
-static Str g_sc_drag;      // 右の帯をつかんでいる巻物
+static Str g_sc_drag;      // スクロールバードラッグ中のスクロールビューID
 
 static Str g_multi_id;
 static int g_multi_n = 0;
 static int64_t g_multi_at = 0;
 static int g_multi_x = 0, g_multi_y = 0;
-// カーソルを合わせたときに出す説明（.tooltip）。この回、どれに乗っているか
+// ツールチップ（.tooltip）。ホバー中の情報
 static Str g_tip_text, g_tip_prev;
 static int g_tip_x = 0, g_tip_y = 0;
 static int64_t g_tip_since = 0;
-static bool g_dragging = false;         // なぞって選んでいる最中
+static bool g_dragging = false;         // 範囲選択ドラッグ中
 static int g_drag_anchor = 0;           // なぞり始めた文字
-// 押されたところ。焦点が移るのは次の回で、変換の受け皿（IME）もそのときできる。
-// 受け皿に位置を入れられるのはそれからなので、どこを押されたかを持ち越す
+// クリック位置。フォーカス遷移は次フレームで発生し、IMEテキスト入力プロキシもその際に生成される。
+// プロキシへカーソル位置を設定可能になるまでクリック位置を持ち越す
 static int g_want_caret = -1;
 static int g_want_len = 0;              // 語や行を選んだときは、その長さも
-static Str g_want_id;                   // その位置を入れたい入力欄の名札
-static bool g_lang_ja = true;           // 内蔵メニューの言い方
+static Str g_want_id;                   // カーソル位置を設定する対象の入力ウィジェットID
+static bool g_lang_ja = true;           // コンテキストメニューの言語
 
-// 右で押したときのメニュー
+// 右クリックコンテキストメニュー
 static bool g_menu_on = false;
 static int g_menu_x = 0, g_menu_y = 0;
 static Vec<Str> g_menu_items;
-static Vec<Str> g_menu_keys;            // 項目ごとの、キーの書き方（無ければ空）
-static int g_menu_pick = -1;            // この回に選ばれた番号
-static Str g_menu_owner;                // 入力欄が出したメニューなら、その名札
+static Vec<Str> g_menu_keys;            // ショートカットキー表示文字列（空なら非表示）
+static int g_menu_pick = -1;            // 当該フレームで選択された項目インデックス
+static Str g_menu_owner;                // コンテキストメニューの親ウィジェットID
 static int g_menu_min_w = 0;            // 最低この幅で出す（ui.combo が押した部品に揃える）
 static int g_menu_px = 0, g_menu_to = 0;   // 上に隠しているぶん（画素）と、その目当て
 static int64_t g_menu_step_at = 0;      // 次に1つ送る刻限。0 は「送るしるしに合わせていない」
@@ -1044,7 +1042,7 @@ static Str sel_replace(const Str& text, const Str& ins) {
   sel_get(text, &st, &ln);
   if (sel_from_platform() && platform().screen->text_replace) {
     platform().screen->text_replace(ins.c_str());
-    return text;   // 次の回に、受け皿から読み直す
+    return text;   // 次フレームでプラットフォームのテキスト状態から再同期
   }
   int b0 = utf8_offset(text, st), b1 = utf8_offset(text, st + ln);
   Str out = text.sub(0, b0);
@@ -1054,7 +1052,7 @@ static Str sel_replace(const Str& text, const Str& ins) {
   return out;
 }
 
-// --- 切り貼りの置き場 -----------------------------------------------------
+// --- クリップボード操作 ---------------------------------------------------
 static bool clip_get(Str* out) {
   const PlatformScreen* s = platform().screen;
   return s && s->clipboard_get && s->clipboard_get(out);
@@ -1064,8 +1062,8 @@ static void clip_set(const Str& s) {
   if (p && p->clipboard_set) p->clipboard_set(s.c_str());
 }
 
-// 改行を落として1行にする。1行の入力欄（ui.field・ui.input）は、
-// 貼り付けなどで改行が混ざってもこれで平らにする
+// 改行を除去して単一行にする。単一行テキストフィールド（ui.field / ui.input）において、
+// ペースト等で改行が混入した場合に平坦化する
 static Str flatten(const Str& s) {
   Str r;
   for (int i = 0; i < s.size(); i++)
@@ -1079,14 +1077,14 @@ static void input_frame(int x, int y, int h, const Str& value, Str* conf, Str* m
   marked->clear();
   if (has_ime()) {
     const PlatformScreen* sc = platform().screen;
-    // 呼んだ側が中身を変えていたら、渡し直す
+    // 呼び出し元で値が変更された場合、再シードする
     bool reseed = !g_input_on || !(value == g_input_seed);
     sc->text_input(true, reseed ? value.c_str() : 0, x, y, h, multiline);
     g_input_on = true;
     Str c;
     if (sc->text_state(&c, marked)) {
-      // 受け皿は改行をそのまま持つ。1行の入力欄なら、ここで落とす。
-      // 落としたものは覚えている中身と食い違うので、次の回に受け皿へ入れ直される
+      // プラットフォーム側の入力バッファは改行を保持する。単一行入力欄の場合はここで除去する。
+      // 除去した結果はシード値と不一致になるため、次フレームでプラットフォーム側に反映される
       *conf = multiline ? c : flatten(c);
       if (!multiline) *marked = flatten(*marked);
       g_input_seed = c;
@@ -1333,10 +1331,10 @@ static NativeStatus u_has_ime(VM& vm, Value* a, int n, Value& out) {
 }
 
 
-// --------------------------------------------------------- 機種のファイル選び
-// OS の選び窓を出して、選ばれた道（パス）を返す。出しているあいだ、
-// プログラムは止まる（OS が窓を持っているため）。
-// 選び窓を持たない機種と、取りやめたときは「値なし」
+// --------------------------------------------------------- ネイティブファイルダイアログ
+// OS ネイティブのファイル選択／保存ダイアログを表示し、選択されたパスを返す。
+// ダイアログ表示中は実行がブロックされる。
+// ダイアログ非対応環境やキャンセル時は none を返す。
 static NativeStatus pick(VM& vm, bool save, const Str& title, const Str& name, Value& out) {
   (void)vm;
   const PlatformScreen* s = platform().screen;
@@ -1414,7 +1412,7 @@ static Str encode_png(const uint32_t* px, int w, int h) {
   }
 
   Str z;
-  z.push(0x78); z.push(0x01);   // zlib の覚え書き（縮めていない）
+  z.push(0x78); z.push(0x01);   // zlib ヘッダー（無圧縮）
   int at = 0;
   do {
     int len = raw.size() - at;
@@ -2122,10 +2120,10 @@ static NativeStatus u_font_name(VM& vm, Value* a, int n, Value& out) {
 //   func view(count: int) -> Widget {
 //     return ui.col([ui.label(f"{count} 回"), ui.button("押す", "inc")]);
 //   }
-//   var hit = ui.show(view(count));     // 描いて、押されたものの名札が返る
+//   var hit = ui.show(view(count));     // 描画し、クリックされたウィジェットIDが返る
 //
-// 部品は毎回作り直され、状態は持たない。押されたかどうかだけを名札で返し、
-// 値は呼んだ側が持つ。だから「今の状態」と「画面」がずれない。
+// ウィジェットは毎フレーム再構築され、自身で状態を持たない即時モード設計。イベント発生時はウィジェットIDを返し、
+// 状態は呼び出し側で管理する。これにより状態と描画の不整合を排除する。
 enum WidgetKind {
   WK_Label = 0, WK_Button, WK_Checkbox, WK_Slider, WK_Field, WK_Space, WK_Column, WK_Row,
   WK_Divider, WK_Grid, WK_Area, WK_Radio, WK_Combo, WK_List, WK_Tabs, WK_Number, WK_Spacer,
@@ -2141,7 +2139,7 @@ enum WidgetField {
 enum WidgetAlign { WA_Left = 0, WA_Center, WA_Right };
 // 縦の寄せ方。-1（指定なし）のときは、置く側の決めた既定になる
 enum WidgetVAlign { WV_Top = 0, WV_Middle, WV_Bottom };
-// こまごました入切（WF_Flags）
+// フラグ属性（WF_Flags）
 enum WidgetFlag {
   WFL_Float = 1,    // 値が小数（ui.slider / ui.drag の float の形）
   WFL_Show = 2,     // 隠した字を見せる（ui.password）
@@ -2226,11 +2224,11 @@ static bool make_widget(VM& vm, int kind, const Str& text, const Str& id, int64_
   o->fields.push(mk_int(-1));      // 縁の色（.border）。-1 は指定なし
   o->fields.push(mk_int(0));       // 縁の太さ（画素）
   o->fields.push(mk_int(-1));      // 角の丸み（.radius）。-1 は指定なし
-  o->fields.push(mk_int(0));       // こまごました入切（WidgetFlag）
+  o->fields.push(mk_int(0));       // 各種フラグ（WidgetFlag）
   o->fields.push(mk_float(0));     // 小数の値
   o->fields.push(mk_float(0));     // 小数の下
   o->fields.push(mk_float(0));     // 小数の上
-  o->fields.push(mk_str(Str()));   // こまかい指定（入力に通す字など）
+  o->fields.push(mk_str(Str()));   // 詳細指定（入力許可文字など）
   o->fields.push(mk_bytes(Str())); // 画像の画素（ui.image）
   o->fields.push(mk_int(-1));      // 縦の寄せ方（.valign）。-1 は指定なし
   o->fields.push(mk_int(-1));      // 出す小数の桁（.decimals）。-1 は限りの広さから決める
@@ -2451,7 +2449,7 @@ static int64_t w_field(const Value& v, int i) {
   InstObj* o = as_inst(v);
   return i < o->fields.size() ? o->fields[i].i : 0;
 }
-// 動いたときに書き戻す先の var の番号（-1 なら、名札か関数で受ける形）
+// 値変更時に書き戻す対象の var スロット番号（-1 の場合はウィジェットIDまたはコールバックで受ける形式）
 static int w_var(const Value& v) { return (int)w_field(v, WF_Var); }
 static double w_fieldf(const Value& v, int i) {
   InstObj* o = as_inst(v);
@@ -2549,7 +2547,7 @@ static int field_w() { return ui_unit() * 15; }       // 入力欄の長さ
 static int num_w() { return ui_unit() * 5; }         // 数の入力欄の、字を出すところ
 static int step_w() { return ui_unit() * 5 / 4; }    // − と ＋ のボタンの幅
 static int arrow_w() { return ui_unit() / 2; }       // 「開く」しるしの三角
-// 複数行の入力欄で、右に空けておく巻物の帯のぶん。出ていない間も空けておく
+// 複数行テキストエリアで、右側に確保しておくスクロールバーの幅。非表示時も領域を確保しておく
 // （出たり消えたりで折り返しが変わると、字が踊って読みにくい）
 static int bar_w() {
   int n = ui_unit() / 4;
@@ -2615,8 +2613,8 @@ static int take_wheel_px(int lp) {
   return px;
 }
 
-// 巻物を、目当てのところへ**少しずつ**寄せる。残りの 2/5 ずつ詰め、
-// 端数は 1 画素ずつ。60 こま／秒なら 0.2 秒たらずで着く
+// スクロールを目標位置へ向けてイージング（補間）する。残りの 2/5 ずつ詰め、
+// 端数は 1 ピクセル単位。60 fps なら約 0.2 秒で到達する
 static int ease_to(int cur, int to) {
   int d = to - cur;
   if (d == 0) return cur;
@@ -2725,34 +2723,30 @@ static uint32_t blend(uint32_t a, uint32_t b, double t) {
   return r;
 }
 
-// --- この回に起きたこと ---------------------------------------------------
-static Str g_focus;        // いま文字を受け取っている入力欄の名札
-static Str g_hit_id;       // この回に押された部品の名札
-static Value g_hit_action;  // その部品が持っていた関数（無ければ値なし）
-static bool g_hit_any = false;   // 名札が無くても、何か押されたか
+// --- 当該フレームのイベント状態 ------------------------------------------
+static Str g_focus;        // 現在フォーカスを持つテキスト入力ウィジェットのID
+static Str g_hit_id;       // 当該フレームで操作されたウィジェットのID
+static Value g_hit_action;  // ウィジェットのコールバック関数（指定なしなら void）
+static bool g_hit_any = false;   // IDの有無を問わず、いずれかのウィジェットが操作されたか
 static int64_t g_hit_val = 0;
-static double g_hit_valf = 0;   // 小数を持つ部品のときの、新しい値
-static Value g_hit_list;        // いくつも選べる一覧の、新しい番号の並び
+static double g_hit_valf = 0;   // 浮動小数点数を持つウィジェットの新しい値
+static Value g_hit_list;        // 複数選択リストの新しい選択インデックスリスト
 static Str g_hit_text;
-// カーソルが乗っている絵（ui.image）の中の位置。乗っていなければ -1。
-// 絵に描く道具（お絵かき）は、これと ui.mouse() で書ける
+// ホバー中のイメージビュー（ui.image）内のピクセル座標。乗っていなければ -1。
+// ペイントツール等の描画処理はこれと ui.mouse() を組み合わせて実装可能
 static int g_point_x = -1, g_point_y = -1;
-static bool g_click_seen = false;   // この回にどこかが押されたか（焦点を外すのに使う）
+static bool g_click_seen = false;   // 当該フレームでクリックが発生したか（フォーカス解除判定用）
 static Str g_focus_next;
 
-// マウスが無くても操れるように、置いた順に焦点を回す。ゲーム機のように
-// マウスが無い機種では、これが唯一の操り方になる（spec/library/ui.md）。
-//
-// 置いていく途中で、触れる部品の名札をこの並びにためる。ぜんぶ置き終わってから
-// tab を見て、次（shift+tab なら前）へ移す。1こま遅れるが、目には見えない。
+// キーボードナビゲーション用フォーカスリング。配置順にフォーカスを巡回する
 static Vec<Str> g_ring;
-static bool g_edited = false;      // この回、ref で受けた部品が変数を書き換えたか
-// 最後に ui.show() に渡された部品。窓の縁を引いている間、これを新しい大きさで置き直す
+static bool g_edited = false;      // 当該フレームで ref バインド変数が更新されたか
+// 最後に ui.show() に渡されたルートウィジェット。ウィンドウリサイズ時のリアルタイム再レイアウト用
 static Value g_last_view;
 static bool g_has_view = false;
 static int g_last_x = 0, g_last_y = 0;
-static bool g_replay = false;      // いま置き直しの最中か（入力の処理は飛ばす）
-// ui.show() を呼んだ処理系。ref で受けた入力欄の書き戻しに使う（下の write_var）
+static bool g_replay = false;      // リサイズ再レイアウト実行中か（入力イベント処理はスキップ）
+// ui.show() を実行中の VM インスタンス。ref バインド変数の書き戻しに使用（write_var）
 static VM* g_vm = 0;
 
 static void clear_hit_action() {
@@ -2760,7 +2754,7 @@ static void clear_hit_action() {
   g_hit_action = mk_void();
 }
 
-// その var に、新しい数（か入切）を入れ直す
+// 対象 var スロットに新しい数値または真偽値を書き戻す
 static void write_var_num(VM& vm, int slot, int64_t n, bool as_bool) {
   if (slot < 0 || slot >= vm.globals.size()) return;
   Value v = as_bool ? mk_bool(n != 0) : mk_int(n);
@@ -2768,8 +2762,8 @@ static void write_var_num(VM& vm, int slot, int64_t n, bool as_bool) {
   vm.globals[slot] = v;
 }
 
-// 押されたことを覚える。名札と、持っていれば関数も。
-// ref で受けた形なら、**その var を直に書き換える**（名札も update() も要らない）
+// 操作イベントを記録する（ウィジェットIDおよびコールバック関数）。
+// ref 渡しの場合は、**対象 var スロットへ直接値を書き戻す**
 static void hit(const Value& v, int64_t val) {
   int slot = w_var(v);
   if (slot >= 0 && g_vm) {
@@ -2902,9 +2896,9 @@ static void write_var(VM& vm, int slot, const Str& s) {
   vm.globals[slot] = v;
 }
 
-// ref で受けた入力欄の名札。どの欄に焦点があるかは名札で覚えているので、番号から作る。
-// 先頭に付ける 0x01 は名札に書くような字ではないので、自分で付けた名札とはぶつからない。
-// この名札は ui.show() から返さないので、書く人の目に触れることもない
+// ref 渡しされた入力フィールド用の内部ウィジェットIDを生成する。フォーカス管理はIDで行うため、スロット番号から合成する。
+// プレフィックス 0x01 を付与することで、ユーザー定義のIDとの名前衝突を防止する。
+// この内部IDは ui.show() から返されることはない。
 static Str var_field_id(int slot) {
   Str id("\x01");
   id += str_from_int(slot);
@@ -2959,7 +2953,7 @@ static Box intrinsic(const Value& v, int wrap_w) {
     }
     case WK_Button: {
       ListObj* k = w_kids(v);
-      if (k->v.size() > 0) {   // 中身に部品を入れた形（ui.button(部品, 名札)）
+      if (k->v.size() > 0) {   // 子ウィジェットを内包する形式（ui.button(widget, id)）
         Box c = measure(k->v[0], wrap_w > 0 ? wrap_w - pad_x() * 2 : 0);
         b.w = c.w + pad_x() * 2;
         b.h = c.h + pad_y() * 2;
@@ -3076,7 +3070,7 @@ static Box intrinsic(const Value& v, int wrap_w) {
       }
       break;
     }
-    // 巻物。中身は縦に並ぶ。高さを決めていなければ中身のぶん（巻かれない）
+    // スクロールビュー。子要素は垂直配置。高さを明示しない場合はコンテンツ全体の高さ
     case WK_Scroll: {
       RowAxis axis(false);
       ListObj* k = w_kids(v);
@@ -3141,8 +3135,8 @@ static double eff_fr(const Value& v, bool horiz) {
   if (horiz ? w_wid(v) > 0 : w_hei(v) > 0) return 0;   // 画素で決めてあれば、そこで止まる
   ListObj* k = w_kids(v);
   int kind = w_kind(v);
-  // 巻物は、縦には受け継がない。中身がいくら伸びたがっても、巻物の高さは
-  // 書く人が決めるもので（決めなければ中身のぶん）、伸ばすと巻けなくなる
+  // スクロールビューは垂直方向の flex（fr）を子要素から自動継承しない。
+  // スクロールビュー自体の高さを明示（または親から flex 指定）しない限りスクロールが発生しないため
   if (kind == WK_Scroll && !horiz) return 0;
   // 中身を見に行くあいだは、その入れ物の向きにする（上の spacer が見る）
   RowAxis axis(kind == WK_Row);
@@ -3275,7 +3269,7 @@ static bool shows_focus(int k) {
          k == WK_Drag || k == WK_Color;
 }
 
-// 焦点で指すときの名札。入力欄は名札そのもの、ほかは置き場所からも作る
+// フォーカス管理用キー。入力ウィジェットは自身のID、その他は配置座標等から生成
 static Str focus_key(const Value& v, int x, int y) {
   int k = w_kind(v);
   if (k == WK_Field || k == WK_Area) {
@@ -3317,7 +3311,7 @@ static void place_button(const Value& v, int x, int y, const Box& b) {
   span(x + 1, y, b.w - 2, edge);
   span(x + 1, y + b.h - 1, b.w - 2, edge);
   for (int i = 1; i < b.h - 1; i++) { put(x, y + i, edge); put(x + b.w - 1, y + i, edge); }
-  // 中身に部品を入れてあれば、それを真ん中に置く（ui.button(部品, 名札)）
+  // 子ウィジェットがある場合は中央に配置（ui.button(widget, id)）
   ListObj* k = w_kids(v);
   if (k->v.size() > 0) {
     Box cb = measure(k->v[0], b.w);
@@ -3391,7 +3385,7 @@ static void place_slider(const Value& v, int x, int y, const Box& b) {
     } else {
       int64_t nv = lo + (int64_t)rel * (hi - lo) / usable;
       hit(v, nv);
-      val = nv;               // 描くのも新しいところ（1こま遅れない）
+      val = nv;               // 描画も新しい値を使用（1フレーム遅延しない）
     }
   }
 
@@ -3480,8 +3474,8 @@ static int menu_w() {
   w += pad_x() * 2;                               // 左の余白
   return w < g_menu_min_w ? g_menu_min_w : w;
 }
-// 面に入りきらないときは、**上下に送るしるし**（▲▼）をつけて巻物にする。
-// その帯に合わせているあいだ、少しずつ送る（押したまま端まで動かしても送れる）
+// 画面内に収まらない場合は**スクロールインジケータ**（▲▼）を表示してスクロール可能にする。
+// インジケータ領域にマウスを置いている間、順次スクロールする（ドラッグ中も有効）
 static int menu_arrow_h() {
   int a = menu_item_h() / 2;
   return a < 4 ? 4 : a;
@@ -3732,13 +3726,13 @@ static int edge_x(const Str& s, int from, int upto, int x0) {
   return x0 + text_px_width(sub_chars(s, from, upto - from), cur_text_px()) - 1;
 }
 
-// --- 取り消しとやり直し ---------------------------------------------------
-// 入力欄の中身を、変わる**前**の姿で控えておく。Cmd-Z（Windows と Linux は
-// Ctrl-Z）で戻し、Shift を足すとやり直す。
+// --- アンドゥとリドゥ -----------------------------------------------------
+// 入力フィールドの変更前テキストを履歴スタックに保持する。Cmd-Z / Ctrl-Z で元に戻し、
+// Cmd-Shift-Z / Ctrl-Y（または Shift+Ctrl-Z）でやり直す。
 //
-// 受け皿（macOS の NSTextView など）の取り消し帳には頼らない。機種ごとに
-// 別物になるうえ、こちらが中身を入れ直したときに食い違うため。
-static const int kUndoMax = 200;           // これ以上は古いほうから捨てる
+// プラットフォーム側の Undo マネージャ（macOS の NSUndoManager 等）には依存せず、自前で管理する。
+// プラットフォーム間で挙動を統一し、外部からのテキスト同期時の不整合を防ぐため。
+static const int kUndoMax = 200;           // 履歴の最大保持数
 
 static void undo_forget(const Str& id) {
   g_undo_id = id;
@@ -3920,9 +3914,8 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
     int st0 = 0, ln0 = 0;
     click_range(text, i, multi_click(id), &st0, &ln0);
     sel_set(text, st0, ln0);
-    // 選んでいるところを移植層が持つ形（macOS の窓）では、**受け皿はこのあと
-    // input_frame で用意される**ので、いまの sel_set はまだ効かない。
-    // 選んだところを覚えておいて、用意できてから入れ直す
+    // 選択状態をプラットフォーム側で管理する環境（macOS 等）では、テキスト入力プロキシが後続の
+    // input_frame で初期化されるため、選択範囲を保持してプロキシ初期化後に適用する
     if (sel_from_platform()) { g_want_caret = st0; g_want_len = ln0; g_want_id = id; }
     g_drag_anchor = i;
     g_dragging = ln0 == 0;   // 語や行を選んだあとは、なぞりで上書きしない
@@ -3967,8 +3960,8 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
       Str back;
       int back_at = 0;
       if (undo_take(id, redo, text, st1 + ln1, &back, &back_at)) {
-        // 中身をまるごと戻す。受け皿を持つ機種では、下の input_frame が
-        // 「呼んだ側の中身が変わった」と見て入れ直してくれる
+        // テキストを Undo 状態に復元する。テキスト入力プロキシを持つ環境では、
+        // 後続の input_frame で差分が自動的に同期される
         text = back;
         sel_set(text, back_at > utf8_len(text) ? utf8_len(text) : back_at, 0);
       }
@@ -3977,7 +3970,7 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
     }
     Str conf;
     input_frame(tx, ty, line_h(cur_text_px()), text, &conf, &marked);
-    // 入れてよい字だけ通す（.filter）。落とした字は、次の回に受け皿へも入れ直される
+    // 許可された文字のみを通過させる（.filter）。除外された文字は次フレームでテキスト入力プロキシ側にも再同期される
     conf = filter_keep(w_str(v, WF_Opt), conf);
     if (g_press[SKEY_Enter] && !was_composing) g_focus_next.clear();
     if (!(conf == text)) {   // 打たれて変わった。変わる前の姿を控える
@@ -3986,7 +3979,7 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
       undo_push(id, text, st1 + ln1);
     }
     text = conf;
-    // 受け皿ができた最初の回。押されたところにカーソルを合わせる
+    // テキスト入力プロキシ初期化の初回フレーム。クリック位置へカーソルを設定する
     if (g_want_caret >= 0 && g_want_id == id) {
       sel_set(text, g_want_caret, g_want_len);
       g_want_caret = -1;
@@ -3998,7 +3991,7 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
       if (slot >= 0 && g_vm) {   // ref で受けた形。その var を直に書き換える
         write_var(*g_vm, slot, conf);
         g_edited = true;
-      } else {                   // 名札で受ける形。ui.show() が名札を返す
+      } else {                   // ウィジェットID形式。ui.show() がウィジェットIDを返す
         hit(v, 0);
       }
       g_hit_text = conf;
@@ -4112,11 +4105,10 @@ static void place_field(const Value& v, int x, int y, const Box& b) {
 
 // --- 複数行の入力欄 -------------------------------------------------------
 //
-// 中身は改行を持つ**1つの文字列**。見た目の行は、改行と、置ける幅からの折り返しで
-// 決まる。折り返す幅を知っているのはこちらなので、**行にまつわるキー
-// （enter・上下・home・end）はここが受け持つ**。移植層の受け皿には渡さない
-// （platform.h の text_input の multiline）。渡すと、向こうの折り返し方で
-// もう一度動いてしまう。
+// 中身は改行を含む**単一の文字列**。行の分割と折り返し（ワードラップ）は表示幅に基づいて
+// コア側で計算する。折り返し幅を把握しているのはコア側のみであるため、**ナビゲーションキー
+// （Enter・上下矢印・Home・End）の処理はコア側で担当する**。移植層のテキスト入力プロキシには渡さない
+// （platform.h の text_input の multiline 参照）。OS 側のワードラップ処理と競合するのを防ぐため。
 //
 // 数え方はどこも**文字**（バイトではない）。starts[i] はその行の最初の文字、
 // counts[i] はその行の文字の数で、行末の改行は数に入れない
@@ -4275,8 +4267,8 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
     g_aanchor = st0;
     g_acaret = st0 + ln0;
     if (ln0 > 0) i = st0 + ln0;
-    // 選んでいるところを移植層が持つ形では、受け皿は焦点が移る次の回にできる。
-    // 押されたところを覚えておいて、受け皿ができてから入れ直す（ui.field と同じ）
+    // 選択状態をプラットフォーム側で管理する環境では、テキスト入力プロキシが次フレームで生成される。
+    // クリック位置を保持し、プロキシ初期化後に選択範囲を適用する（ui.field と同様）
     if (sel_from_platform()) { g_want_caret = st0; g_want_len = ln0; g_want_id = id; }
     g_drag_anchor = i;
     g_dragging = ln0 == 0;   // 語や行を選んだあとは、なぞりで上書きしない
@@ -4317,8 +4309,8 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
   if (focused && !g_replay) {
     bool was_composing = g_marked.size() > 0;
     bool shift = g_key[SKEY_Shift];
-    // 押されたばかりで、受け皿がまだできていない回。カーソルは下で入れ直すので、
-    // この回だけ行を動かすキーを見送る（覚えているカーソルがまだ当てにならない）
+    // クリック直後でテキスト入力プロキシが初期化待ちのフレーム。カーソル位置確定前のため、
+    // 行移動キーの処理を1フレーム保留する
     bool settling = g_want_caret >= 0 && g_want_id == id;
     // 行にまつわるキーは、折り返しを知っているこちらが受け持つ。
     // 変換の最中は、そのキーは変換のもの（確定・取り消し・候補選び）なので触らない
@@ -4367,7 +4359,7 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
       Str back;
       int back_at = 0;
       if (undo_take(id, redo, text, g_acaret, &back, &back_at)) {
-        text = back;   // 中身をまるごと戻す（受け皿は input_frame が入れ直す）
+        text = back;   // テキストを Undo 状態に復元する（テキスト入力プロキシ側へは input_frame で再同期される）
         int n = utf8_len(text);
         g_aanchor = g_acaret = back_at > n ? n : back_at;
         sel_set(text, g_acaret, 0);
@@ -4387,7 +4379,7 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
     conf = filter_keep(w_str(v, WF_Opt), conf);           // 入れてよい字だけ通す（.filter）
     if (!(conf == text)) undo_push(id, text, g_acaret);   // 変わる前の姿を控える
     text = conf;
-    // 受け皿ができた最初の回。押されたところにカーソルを合わせる
+    // テキスト入力プロキシ初期化の初回フレーム。クリック位置へカーソルを設定する
     if (g_want_caret >= 0 && g_want_id == id) {
       sel_set(text, g_want_caret, g_want_len);
       g_aanchor = g_want_caret;
@@ -4401,7 +4393,7 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
       if (slot >= 0 && g_vm) {   // ref で受けた形。その var を直に書き換える
         write_var(*g_vm, slot, conf);
         g_edited = true;
-      } else {                   // 名札で受ける形。ui.show() が名札を返す
+      } else {                   // ウィジェットID形式。ui.show() がウィジェットIDを返す
         hit(v, 0);
       }
       g_hit_text = conf;
@@ -4449,7 +4441,7 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
   if (cur < 0) cur = 0;
   top = lp > 0 ? cur / lp : 0;
   off = cur - top * lp;
-  // 巻物の位置を覚えるのは、触った入力欄のぶんだけ
+  // スクロール位置を保持するのは、操作された入力欄のみ
   if (mine || focused) {
     g_area_id = id;
     g_area_px = cur;
@@ -4538,8 +4530,8 @@ static void place_area(const Value& v, int x, int y, const Box& b) {
 
 // --- ラジオ・選ぶ・一覧・タブ・数 ------------------------------------------
 //
-// どれも「値は呼んだ側が持ち、部品は状態を持たない」は同じ。動いたときに
-// ui.show() が名札を返し、新しい値は ui.value() で受け取る。
+// いずれも「値は呼び出し側が保持し、ウィジェット自体は状態を持たない」ステートレス設計。操作発生時に
+// ui.show() がウィジェットの ID を返し、新しい値は ui.value() で受け取る。
 
 // 塗った丸（ラジオボタン用）。ui.fill_circle と同じ書き方
 static void disc(int cx, int cy, int r, uint32_t c) {
@@ -4569,9 +4561,9 @@ static int opt_widest(const Value& v) {
   return w;
 }
 
-// 名札の無い形（関数を渡した形）でも、焦点や一覧の持ち主を見分けられるように、
-// 置かれた場所から名札を作る。先頭の 0x02 は名札に書くような字ではないので、
-// 自分で付けた名札とはぶつからない
+// ID の指定がない形式（コールバック関数を渡した形式など）でもフォーカスやメニューの所有元を識別できるよう、
+// 配置座標から内部キーを生成する。先頭の 0x02 は通常の ID では使用されない文字のため、
+// ユーザーが明示的に付けた ID とは衝突しない
 static Str widget_key(const Value& v, int x, int y) {
   const Str& id = w_id(v);
   if (id.size() > 0) return id;
@@ -4665,7 +4657,7 @@ static void place_radio(const Value& v, int x, int y, const Box& b) {
     disc(cx, cy, dot, edge);
   }
   put_text(x + bw + mark_gap(), ty, w_text(v), cur_text_px(), w_fg(v));
-  // ref の形なら「自分の数」、名札なら 1
+  // ref 形式なら自身の値、ID 形式なら 1
   if ((over && g_mpress[0]) || key_press(widget_key(v, x, y))) hit(v, w_b(v));
 }
 
@@ -4701,8 +4693,8 @@ static void place_combo(const Value& v, int x, int y, const Box& b) {
   if (g_menu_pick >= 0 && g_menu_owner.size() > 0 && g_menu_owner == key) hit(v, g_menu_pick);
 }
 
-// 一覧から1つ選ぶ。入りきらないときは巻物の帯が出て、
-// 押して焦点が来ているあいだは上下の矢印でも選べる
+// 一覧から1つ選ぶ。収まりきらないときはスクロールバーが表示され、
+// フォーカスがある間は上下の矢印キーでも選べる
 static void place_list(const Value& v, int x, int y, const Box& b) {
   int n = opt_count(v);
   bool multi = is_multi(v);
@@ -4715,43 +4707,43 @@ static void place_list(const Value& v, int x, int y, const Box& b) {
   int shown = area_rows_shown(b.h - field_pad_y() * 2);
   int row_w = b.w - field_pad_x() * 2 - bar_w();
 
-  // 右の帯（入りきらないときだけ出る）。つまんで動かせる
+  // スクロールバー（収まりきらない場合のみ表示）。ドラッグで操作可能
   int bw = bar_w() - 1;
   if (bw < 2) bw = 2;
   int bx = x + b.w - 1 - bw, by = y + 2, bh = b.h - 4;
   bool has_bar = n > shown;
   bool on_bar = has_bar && g_mx >= bx;
-  int th = has_bar ? bh * shown / n : bh;   // つまみの長さ
+  int th = has_bar ? bh * shown / n : bh;   // スクロールバーのノブの高さ
   if (th < 4) th = 4;
   if (th > bh) th = bh;
 
-  int max_px = has_bar ? (n - shown) * lp : 0;   // いちばん下まで送ったときの隠れぶん
+  int max_px = has_bar ? (n - shown) * lp : 0;   // 最下部までスクロールしたときの最大スクロール量
 
   bool mine = g_list_id.size() > 0 && g_list_id == key;
-  bool first = !mine;   // 初めて出す回。ここは寄せずに、その場で合わせる
+  bool first = !mine;   // 初回描画。補間せず即座に反映する
   if (has_bar && g_mpress[0] && inside(bx, by, bw + 1, bh)) {
-    g_list_drag = true;                      // 帯をつかんだ
+    g_list_drag = true;                      // スクロールバーを掴んだ
     g_focus_next = key;
     g_list_id = key;
     mine = true;
   }
   if (!g_mb[0]) g_list_drag = false;
   bool dragging = g_list_drag && mine;
-  // 車輪（ホイール）で送る。押さなくても、乗せているだけで送れる
+  // マウスホイールによるスクロール。ホバーしているだけでスクロール可能
   int wheel = 0;
   if (has_bar && over && g_wheel_y != 0) {
-    wheel = take_wheel_px(lp);               // この一覧が使い切る
+    wheel = take_wheel_px(lp);               // このリストがホイール入力を消費
     g_list_id = key;
     mine = true;
-    first = false;                           // 送ったのだから、寄せて見せる
+    first = false;                           // スクロール操作のため補間表示
   }
 
-  // 見せるところを先に決める。押されたところを数えるのに要る。
-  // 覚えているのは最後に触った一覧のぶんだけ（触っていなければ、選から出し直す）
+  // 表示位置を先に決定。クリックされた項目の判定に使用する。
+  // 保持しているのは最後に操作したリストのみ（未操作の場合は選択項目から算出）
   int to = mine ? g_list_to : 0, cur = mine ? g_list_px : 0;
   if (dragging) {
-    // つまみの真ん中が、カーソルのところに来るように。
-    // つまんでいる間は指に付いてくるべきなので、寄せずにその場で合わせる
+    // ノブの中心がカーソル位置に来るよう追随させる。
+    // ドラッグ中は直接追随させるため、イージングは行わない
     int room = bh - th;
     to = room > 0 ? (g_my - by - th / 2) * max_px / room : 0;
     cur = to;
@@ -4880,10 +4872,10 @@ static void place_tabs(const Value& v, int x, int y, const Box& b) {
   }
 }
 
-// 数の入力欄。**上と下の限りから外に出られない**。
-// 打てるのは数字（と、下が負なら先頭の -）だけで、それ以外の字は入らない。
-// 打っている途中の字だけは、値にできない形（空や "-"）もあるので、
-// 焦点のあるあいだだけこちらで覚えておく（巻物の位置と同じ、見た目のための覚え）
+// 数値入力欄。**min / max の範囲外には設定できない**。
+// 入力可能な文字は数字（最小値が負の場合は先頭の '-' を含む）のみ。
+// 入力途中の文字列（空文字や "-" 単体など、数値にパースできない状態）は、
+// フォーカスがある間のみ一時的に保持する（スクロール位置等と同様の描画用ステート）
 static bool num_parse(const Str& s, int64_t* out) {
   if (s.size() == 0) return false;
   int i = 0;
@@ -5232,9 +5224,9 @@ static void place_drag(const Value& v, int x, int y, const Box& b) {
   g_cy1 = ky1;
 }
 
-// 絵を出す部品（ui.image）。大きさを決めていなければ、絵そのものの大きさで出す。
-// 名札を渡してあれば押されたことも返り、カーソルが乗っている間は
-// **絵の中のどこか**（ui.point_x / ui.point_y）が分かる
+// 画像表示ウィジェット（ui.image）。サイズが指定されていない場合は画像本来のサイズで表示する。
+// ID を渡してあればクリックイベントも通知され、カーソルがホバーしている間は
+// **画像内の相対座標**（ui.point_x / ui.point_y）を取得できる
 static void place_image(const Value& v, int x, int y, const Box& b) {
   int sw = (int)w_a(v), sh = (int)w_b(v);
   const Str& px = w_bytes(v, WF_Px);
@@ -5459,7 +5451,7 @@ static void place_tree(const Value& v, int x, int y, const Box& b) {
   }
 }
 
-// 色の入力（ui.color）。見本と 16 進を出し、押すと選ぶ板が下に出る
+// カラーピッカー（ui.color）。プレビューと16進数を表示し、クリックでパレットを表示
 static void place_color(const Value& v, int x, int y, const Box& b) {
   uint32_t c = (uint32_t)w_a(v);
   Str key = widget_key(v, x, y);
@@ -5467,7 +5459,7 @@ static void place_color(const Value& v, int x, int y, const Box& b) {
   bool over = inside(x, y, b.w, b.h);
   if (over) g_cursor_want = SCUR_Hand;
 
-  // 板で動かされていれば、その色にする（1こま遅れない）
+  // パレットで変更された色を即座に反映（1フレーム遅延しない）
   if (open && g_color_moved) {
     uint32_t nv = hsv_rgb(g_color_h, g_color_s, g_color_v) | (g_color_keep & 0xff000000u);
     if (nv != c) hit(v, (int64_t)nv);
@@ -5477,7 +5469,7 @@ static void place_color(const Value& v, int x, int y, const Box& b) {
   int rad = (int)w_field(v, WF_Radius);
   if (rad < 0) rad = ui_unit() / 4;
   uint32_t edge = blend(g_bg, open ? g_accent : g_fg, open ? 1.0 : (over ? 0.7 : 0.4));
-  int sw = b.h;                        // 見本は正方形
+  int sw = b.h;                        // プレビューは正方形
   fill_round(x, y, b.w, b.h, rad, blend(g_bg, g_fg, 0.08));
   fill_round(x + 1, y + 1, sw - 2, b.h - 2, rad, c);
   stroke_round(x, y, b.w, b.h, rad, 1, edge);
@@ -5498,12 +5490,12 @@ static void place_color(const Value& v, int x, int y, const Box& b) {
       g_color_keep = c;
       g_color_drag = 0;
     }
-    g_mpress[0] = false;   // この押しは見本が使い切る
+    g_mpress[0] = false;   // カラープレビューのクリックイベントを消費
   }
 }
 
-// 巻物（ui.scroll）。中身は縦に並び、はみ出したぶんは右の帯で送る。
-// 覚えているのは「いま隠しているぶん」だけで、中身は毎回作り直されたままでよい
+// スクロールコンテナ（ui.scroll）。中身は縦に並び、はみ出したぶんはスクロールバーでスクロールする。
+// 覚えているのは「いまスクロールしているぶん」だけで、中身は毎回作り直されたままでよい
 static int sc_slot(const Str& id) {
   for (int i = 0; i < g_sc_id.size(); i++) if (g_sc_id[i] == id) return i;
   g_sc_id.push(id);
@@ -5519,7 +5511,7 @@ static void place_scroll(const Value& v, int x, int y, const Box& b) {
   Str key = widget_key(v, x, y);
   int lp = line_pitch(cur_text_px());
 
-  // 中身の高さを測る。帯が出ると中身のもらえる幅が狭まるので、そのときは測り直す
+  // 中身の高さを測る。スクロールバーが出ると中身のもらえる幅が狭まるので、そのときは測り直す
   int inner_w = b.w;
   int content = 0;
   for (int pass = 0; pass < 2; pass++) {
@@ -5539,7 +5531,7 @@ static void place_scroll(const Value& v, int x, int y, const Box& b) {
   int to = g_sc_to[slot], cur = g_sc_px[slot];
   bool over = inside(x, y, b.w, b.h);
 
-  // 右の帯。つまんで動かせる
+  // スクロールバー。ドラッグで操作可能
   int bw = bar_w() - 1;
   if (bw < 2) bw = 2;
   int bx = x + b.w - bw, by = y, bh = b.h;
@@ -5549,18 +5541,18 @@ static void place_scroll(const Value& v, int x, int y, const Box& b) {
   bool on_bar = has_bar && over && g_mx >= bx;
   if (has_bar && g_mpress[0] && inside(bx, by, bw, bh)) {
     g_sc_drag = key;
-    g_mpress[0] = false;      // この押しは帯が使い切る
+    g_mpress[0] = false;      // スクロールバーがクリックイベントを消費
   }
   if (!g_mb[0] && g_sc_drag.size() > 0 && g_sc_drag == key) g_sc_drag.clear();
   bool dragging = has_bar && g_sc_drag.size() > 0 && g_sc_drag == key;
 
   if (dragging) {
-    // つまみの真ん中がカーソルに来るように。つまんでいる間は寄せずにその場で合わせる
+    // ノブの中心がカーソル位置に来るよう追随。ドラッグ中はイージングせず即座に反映
     int room = bh - th;
     to = room > 0 ? (g_my - by - th / 2) * max_px / room : 0;
     cur = to;
   } else if (has_bar && over && g_wheel_y != 0) {
-    to += take_wheel_px(lp);   // この巻物が送りを使い切る
+    to += take_wheel_px(lp);   // このスクロールコンテナがホイール入力を消費
   }
   if (to < 0) to = 0;
   if (to > max_px) to = max_px;
@@ -5810,8 +5802,8 @@ static NativeStatus u_button(VM& vm, Value* a, int n, Value& out) {
   return make_widget(vm, WK_Button, as_str(*A(a, 0))->s, as_str(*A(a, 1))->s, 0, 0, 0, 0, out)
              ? N_Ok : N_Panic;
 }
-// 絵を出す部品。画素の並びは**そのまま借りる**（写さない）ので、
-// 毎こま作り直しても重くならない（絵を書き換えれば、写しはそのときに起きる）
+// 画像表示ウィジェット。ピクセルバッファは**参照として共有**（ディープコピーしない）するため、
+// 毎フレーム生成してもオーバーヘッドを抑えられる設計（画像変更時にのみコピーが発生）
 static bool make_image(VM& vm, const Str& id, Value* img, Value& out, Value* action) {
   if (!is_canvas(vm, *img)) {
     vm.panic(vm.L("絵ではありません", "not a canvas"));
@@ -5863,7 +5855,7 @@ static NativeStatus u_button_w_fn(VM& vm, Value* a, int n, Value& out) {
   val_release(kids);
   return ok ? N_Ok : N_Panic;
 }
-// 関数を渡す形。押されたら、その関数が呼ばれる（名札は要らない）
+// コールバック関数を渡す形式。クリックされたらその関数が呼び出される（ID は不要）
 static NativeStatus u_button_fn(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_widget(vm, WK_Button, as_str(*A(a, 0))->s, Str(), 0, 0, 0, 0, out, A(a, 1))
@@ -5897,8 +5889,8 @@ static NativeStatus u_field(VM& vm, Value* a, int n, Value& out) {
   return make_widget(vm, WK_Field, as_str(*A(a, 1))->s, as_str(*A(a, 0))->s, -1, 0, 0, 0, out)
              ? N_Ok : N_Panic;
 }
-// ref で受ける形。打たれるたびに、渡された var が書き換わる（名札は要らない）。
-// 覚えるのは借用そのものではなく var の番号で、書き戻すのは ui.show() の中
+// ref で受け取る形式。入力があるたびに渡された変数が直接更新される（ID は不要）。
+// 保持するのは参照そのものではなく変数のスロット番号で、値の書き戻しは ui.show() 内で行われる
 static NativeStatus u_field_ref(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   Value* p = val_deref(&a[0]);
@@ -6085,7 +6077,7 @@ static NativeStatus u_slider_f_fn(VM& vm, Value* a, int n, Value& out) {
   return make_float_widget(vm, WK_Slider, Str(), A(a, 1)->f, A(a, 2)->f, A(a, 3)->f, out,
                            A(a, 0)) ? N_Ok : N_Panic;
 }
-// 引いて変える欄。数の入力欄と同じ形（名札・関数・ref）で受ける
+// ドラッグ入力欄。数値入力欄と同様の形式（ID・関数・ref）で受け取る
 static NativeStatus u_drag(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   int64_t lo = A(a, 2)->i, hi = A(a, 3)->i;
@@ -6119,9 +6111,9 @@ static NativeStatus u_drag_f_fn(VM& vm, Value* a, int n, Value& out) {
 }
 
 // --- ref で受ける形 -------------------------------------------------------
-// 変数を ref で渡すと、動いたときに**その変数が直に書き換わる**。
-// 名札も update() も ui.value() も要らない。値を持つのは今までどおり書く人で、
-// 処理系は「どの var か」だけを覚える（ui.field(ref ...) と同じ仕組み）
+// 変数を ref で渡すと、操作時に**その変数が直接更新される**。
+// ID も update() も ui.value() も不要。値の管理は呼び出し側で行い、
+// 処理系側は「どの var か」のスロット番号のみを保持する（ui.field(ref ...) と同様の仕組み）
 static bool ref_slot(VM& vm, Value* a, int at, const char* what, int* slot, Value** got) {
   Value* p = val_deref(&a[at]);
   *slot = var_slot(vm, p);
@@ -6285,7 +6277,7 @@ static NativeStatus u_center(VM& vm, Value* a, int n, Value& out) {
   o->fields[WF_Align] = mk_int(WA_Center);
   return N_Ok;
 }
-// 色の入力。色そのものを持つのは書く人（ref か名札）
+// カラーピッカー。値は呼び出し側で保持（ref または ID 形式）
 static NativeStatus u_color(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_widget(vm, WK_Color, Str(), as_str(*A(a, 0))->s, (int64_t)to_color(A(a, 1)->i),
@@ -6307,7 +6299,7 @@ static NativeStatus u_color_ref(VM& vm, Value* a, int n, Value& out) {
   return N_Ok;
 }
 
-// 折りたためる木。開いているかどうかは書く人が持つ（ref か名札）
+// ツリービュー。展開状態は呼び出し側で保持（ref または ID 形式）
 static NativeStatus u_tree(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_widget(vm, WK_Tree, as_str(*A(a, 0))->s, as_str(*A(a, 1))->s,
@@ -6334,7 +6326,7 @@ static NativeStatus u_stack(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_widget(vm, WK_Stack, Str(), Str(), 0, 0, 0, A(a, 0), out) ? N_Ok : N_Panic;
 }
-// 巻物。高さを決めて（.height）、はみ出したぶんを送って見る
+// スクロールコンテナ。高さを指定（.height）し、超過分をスクロールして表示
 static NativeStatus u_scroll(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   return make_widget(vm, WK_Scroll, Str(), Str(), 0, 0, 0, A(a, 0), out) ? N_Ok : N_Panic;
@@ -6670,7 +6662,7 @@ void register_ui(Registry& r) {
   // ref で受ける形。覚えるのは借用ではなく「どの var か」なので、
   // 型検査は一番外側の var だけを通す（check.cpp の E0307）
   r.mark_ref0_var(r.add("ui.field", u_field_ref, tw, ts));
-  // 複数行の入力欄。受け取り方は ui.field と同じ2つ（ref と名札）
+  // 複数行テキスト入力欄（テキストエリア）。受け取り方は ui.field と同様の2通り（ref または ID）
   r.add("ui.textarea", u_textarea, tw, ts, ts);
   r.add("ui.textarea", u_textarea, tw, ts, ts, ti);
   r.mark_ref0_var(r.add("ui.textarea", u_textarea_ref, tw, ts));
@@ -6728,15 +6720,15 @@ void register_ui(Registry& r) {
   r.add("ui.tabs", u_tabs_fn, tw, tact, tls, ti);
   r.add("ui.number", u_number, tw, ts, ti, ti, ti);
   r.add("ui.number", u_number_fn, tw, tact, ti, ti, ti);
-  // 小数のつまみと、引いて変える欄
+  // 浮動小数点スライダーおよびドラッグ入力欄
   r.add("ui.slider", u_slider_f, tw, ts, tf, tf, tf);
   r.add("ui.slider", u_slider_f_fn, tw, tact, tf, tf, tf);
   r.add("ui.drag", u_drag, tw, ts, ti, ti, ti);
   r.add("ui.drag", u_drag_fn, tw, tact, ti, ti, ti);
   r.add("ui.drag", u_drag_f, tw, ts, tf, tf, tf);
   r.add("ui.drag", u_drag_f_fn, tw, tact, tf, tf, tf);
-  // 変数を ref で渡す形。動いたらその変数が直に書き換わるので、
-  // 名札も update() も ui.value() も要らない
+  // 変数を ref で渡す形式。操作時に変数が直接更新されるため、
+  // ID や update()、ui.value() は不要
   r.mark_ref_var(r.add("ui.checkbox", u_checkbox_ref, tw, ts, tb), 1);
   r.mark_ref_var(r.add("ui.radio", u_radio_ref, tw, ts, ti, ti), 1);
   r.mark_ref_var(r.add("ui.slider", u_slider_ref, tw, ti, ti, ti), 0);

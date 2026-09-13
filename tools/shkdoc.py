@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-# shkdoc.py — stdlib/*.shk（宣言ファイル）を読む。
+# shkdoc.py — stdlib/*.shk（インターフェース宣言ファイル）のパーサー
 #
-# 標準ライブラリの「名前・型・説明・例」は stdlib/ の宣言ファイルが正。
-# ここはそれを読んで構造にするだけで、出力は持たない。使う側は2つ。
+# 標準ライブラリのシンボル名・シグネチャ型・ドキュメント・コード例は stdlib/ の宣言ファイルが正本。
+# 本スクリプトはこれらを解析して構造化データとして抽出し、以下のツールに提供する:
 #
-#   docs/gen.py   HTML のリファレンス（ライブラリごとに1枚）
-#   web/api.py    プレイグラウンドの入力補完（api.js）
+#   docs/gen.py   HTML API リファレンス生成（モジュール別）
+#   web/api.py    Web プレイグラウンド用入力補完定義生成（api.js）
 #
-# 宣言ファイルの書き方は stdlib/README.md にある。要点だけ:
+# 宣言ファイルの記述規約は stdlib/README.md を参照。主なフォーマット:
 #
 #   /// 説明。1行目が一覧に出る。
 #   ///
@@ -18,7 +18,7 @@
 #   ///   print(math.sqrt(2.0));   // 1.4142135623730951
 #   func sqrt(x: float) -> float;
 #
-# 実装（core/lib/*.cpp）と突き合わせて、片方にしか無いものは呼ぶ側に返す。
+# 実装（core/lib/*.cpp）と突き合わせて、差異（未宣言・未実装）を呼び出し元に返す。
 import os
 import re
 
@@ -31,7 +31,7 @@ CONST = re.compile(r'^\s*const\s+([A-Za-z_]\w*)\s*:\s*([^;]+);')
 
 
 def split_params(s):
-    """かっこの中を , で分ける。list<map<K, V>> のような入れ子は分けない"""
+    """引数リストの文字列をカンマで分割。list<map<K, V>> などのネストされた型パラメータは分割しない"""
     out, depth, cur = [], 0, ''
     for c in s:
         if c in '<([':
@@ -50,7 +50,7 @@ def split_params(s):
 
 
 def parse_doc(lines):
-    """/// の中身を、説明・引数・例・注意に分ける"""
+    """doc コメント（///）をパースし、説明文・引数・例・注意事項に分類"""
     doc = {'text': [], 'args': [], 'example': '', 'note': [], 'run': True}
     section, body = '', []
 
@@ -86,7 +86,7 @@ def parse_doc(lines):
 
 
 def summarize(text):
-    """一覧に出す1行。最初の段落を1行にして、長ければ最初の文まで"""
+    """一覧表示用のサマリー文字列を抽出。最初の段落を 1 行化し、長すぎる場合は先頭の文のみ採用"""
     para = flow(text.split('\n\n')[0])
     if len(para) > 60 and '。' in para:
         para = para.split('。')[0] + '。'
@@ -94,7 +94,7 @@ def summarize(text):
 
 
 def flow(text):
-    """段落の中の改行をつなぐ。日本語どうしはそのまま、英数字の間には空白を入れる"""
+    """段落内の改行を連結。日本語同士はスペースなし、英数字との境界には半角スペースを挿入"""
     out = ''
     for line in text.split('\n'):
         if not line:
@@ -143,7 +143,7 @@ def make_item(kind, name, owner, params, ret, doc, generic=''):
 
 
 def parse_file(path):
-    """1つの宣言ファイル → {'module':..., 'title':..., 'doc':..., 'items':[...]}"""
+    """宣言ファイルを解析し、モジュール情報とシンボル定義リストを辞書形式で返す"""
     name = os.path.basename(path)[:-4]
     out = {'file': name, 'module': '', 'title': name, 'doc': '', 'summary': '',
            'items': [], 'classes': []}
@@ -209,7 +209,7 @@ def parse_file(path):
 
 
 def merge_overloads(items):
-    """同じ名前の宣言を1つにまとめる（print(v: string) と print(v: int)）"""
+    """同名シンボルのオーバーロード宣言を 1 つのエントリに統合（例: print(v: string) と print(v: int)）"""
     out, seen = [], {}
     for it in items:
         first = seen.get(it['name'])
@@ -227,19 +227,19 @@ def merge_overloads(items):
 
 
 def qualified(page, item, owner=''):
-    """実装（registry）での名前。math.sqrt / time.Time.year / string.len"""
+    """C++ 実装（registry）側の完全修飾名。math.sqrt / time.Time.year / string.len"""
     mod = page['module']
     short = mod.split('.')[-1] if mod and mod != 'builtin' else ''
     parts = [p for p in (short, owner, item['name']) if p]
     return '.'.join(parts)
 
 
-# 宣言ではなく実装のファイル（Shark 自身で書いた部分）。ページにはしない
+# 宣言ファイルではなく実装ファイル（Shark 自身で記述された標準ライブラリコード）。ドキュメント生成対象外
 IMPL_FILES = ('prelude.shk', 'prelude_ui.shk')
 
 
 def parse(root, stdlib='stdlib'):
-    """宣言ファイルを全部読む。prelude*.shk は宣言ではなく実装なので読まない"""
+    """すべての宣言ファイルを解析。prelude*.shk は実装ファイルのためスキップ"""
     d = os.path.join(root, stdlib)
     pages = []
     for fn in sorted(os.listdir(d)):
@@ -254,7 +254,7 @@ def parse(root, stdlib='stdlib'):
     return pages
 
 
-# ---------------------------------------------------------------- 実装との突き合わせ
+# ---------------------------------------------------------------- 実装との整合性検証
 def lib_sources(root):
     lib = os.path.join(root, 'core/lib')
     for fn in sorted(os.listdir(lib)):
@@ -264,21 +264,21 @@ def lib_sources(root):
 
 
 def core_names(root):
-    """実装が本当に持っている名前（core/lib/*.cpp の r.add と、core/check.cpp のメソッド）"""
+    """C++ 実装側に登録されているシンボル名を抽出（core/lib/*.cpp の r.add および core/check.cpp のメソッド群）"""
     names, modules = set(), set()
     for src in lib_sources(root):
         for m in re.finditer(r'r\.add(?:_untyped)?\("([^"]+)"', src):
             names.add(m.group(1))
         for m in re.finditer(r'enable_module\("std\.(\w+)"\)', src):
             modules.add(m.group(1))
-    # Shark 自身で書いたモジュールの関数（stdlib/prelude_ui.shk の public func）
+    # Shark 自身で実装されたモジュール関数（stdlib/prelude_ui.shk の public func）
     ui_impl = os.path.join(root, 'stdlib/prelude_ui.shk')
     if os.path.exists(ui_impl):
         with open(ui_impl, encoding='utf-8') as f:
             for m in re.finditer(r'^public func (\w+)', f.read(), re.M):
                 names.add('ui.' + m.group(1))
 
-    # 型のメソッドは型検査の表にも載る（Shark 自身で書いた sort、比較の compare）
+    # 型メソッド（型チェッカー core/check.cpp に登録されているメソッド群）
     with open(os.path.join(root, 'core/check.cpp'), encoding='utf-8') as f:
         src = f.read()
     methods = {}
@@ -291,7 +291,7 @@ def core_names(root):
         for m in re.finditer(r'name == "(\w+)"', block):
             if m.group(1) not in ('This', 'init') and not m.group(1).startswith('__'):
                 methods.setdefault(recv, set()).add(m.group(1))
-    # 処理系が持つクラス（Error / Comparable）。make_builtin_classes に書いてある
+    # ビルトインクラス（Error / Comparable 等、Checker::make_builtin_classes 内で定義）
     body = re.search(r'void Checker::make_builtin_classes\(\)(.*?)\n\}\n', src, re.S)
     cls = None
     for m in re.finditer(r'c_\w+_->name = Str\("(\w+)"\)|f->name = Str\("(\w+)"\)'
@@ -304,7 +304,7 @@ def core_names(root):
 
 
 HIDDEN = ('conv.', '__', 'task.channel_cap')
-# 型変換は中では conv.* という名前で入っている
+# 内部型変換関数（conv.* プレフィックス）
 CONV = {'int': 'conv.int_from_float', 'float': 'conv.float_from_int',
         'string': 'conv.string_from', 'bool': 'conv.bool_from_string'}
 # check.cpp の case → 宣言ファイルでの型名
@@ -318,9 +318,9 @@ CASE_TO_TYPE = {
 
 
 def canonical(name):
-    """突き合わせ用の形。registry と型検査で名前の付け方が違うのを吸収する
+    """整合性比較用の正規化名。registry と型チェッカーの名前空間命名規則の差異を吸収
 
-    time.Time.year → Time.year（モジュールを落とす）／ result.ok → Result.ok
+    time.Time.year → Time.year（モジュール名を削除）／ result.ok → Result.ok
     """
     part = name.split('.')
     if len(part) == 3:
@@ -331,7 +331,7 @@ def canonical(name):
 
 
 def crosscheck(pages, facts):
-    """宣言と実装のずれ。(実装にあるのに宣言が無い, 宣言はあるのに実装に無い)"""
+    """宣言と実装の差異を検出。(実装に存在するが未宣言のシンボル, 宣言されているが未実装のシンボル)"""
     declared = set()
     for page in pages:
         for it in page['items']:

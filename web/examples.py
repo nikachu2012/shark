@@ -1,48 +1,47 @@
 #!/usr/bin/env python3
-# examples.py — .shk のお手本を、ブラウザから選べる形（examples.js）にまとめる。
-# web/build.sh から呼ばれる。使い方: examples.py <リポジトリの場所> <web の場所> <出力先>
+# examples.py — サンプルコード（.shk）を Web プレイグラウンド用データ（examples.js）に統合する。
+# web/build.sh から呼び出される。使用方法: examples.py <リポジトリパス> <web ディレクトリ> <出力先>
 import json
 import os
 import sys
 
 root, here, out = sys.argv[1], sys.argv[2], sys.argv[3]
 
-# 並べる順と、選ぶところに出す名前。
-# **手で並べているのは、順と名前を決めたいから。**そのぶん、examples/ に足した
-# ものがここに入っていないと、ブラウザからは見えないまま古くなる。
-# なので下で突き合わせて、食い違っていれば止める（Makefile の RT_SRC と同じ考え）。
+# サンプルの表示順と Web UI 上の表示タイトル。
+# 表示順とタイトルを明示的に管理するためリスト形式で定義。
+# examples/ および web/examples/ 内の全 .shk ファイルが漏れなく登録されているかを下部で整合性検証する。
 ITEMS = [
-    ("examples/hello.shk", "はじめの一歩"),
+    ("examples/hello.shk", "はじめの一歩（Hello World）"),
     ("examples/fizzbuzz.shk", "FizzBuzz"),
-    ("web/examples/ask.shk", "入力を読む"),
+    ("web/examples/ask.shk", "標準入力の読み込み"),
     ("examples/fish.shk", "クラスと継承"),
-    ("examples/tasks.shk", "並行処理"),
-    ("examples/config.shk", "失敗するかもしれない処理"),
-    ("tests/unit_test.shk", "テストを書く"),
-    ("web/examples/ui.shk", "画面に出す（std.ui）"),
-    ("examples/paint.shk", "マウスで描く（下の層）"),
-    ("examples/node_editor.shk", "ノードエディタ（つないでコードにする）"),
-    ("examples/hexedit.shk", "Hex エディタ（キーとマウスで書き換える）"),
-    ("examples/counter.shk", "部品を組んで返す（上の層）"),
-    ("examples/widgets.shk", "部品をぜんぶ出す（std.ui）"),
-    ("examples/breakout.shk", "2D のゲーム（ブロック崩し）"),
-    ("examples/cube3d.shk", "3D を描く（回る立方体）"),
-    ("examples/cube_ui.shk", "3D を部品で動かす（上の層）"),
-    ("web/examples/forever.shk", "止まらない繰り返し"),
+    ("examples/tasks.shk", "並行処理（Task / Channel）"),
+    ("examples/config.shk", "エラーハンドリング（Result / Option）"),
+    ("tests/unit_test.shk", "ユニットテスト"),
+    ("web/examples/ui.shk", "グラフィックス描画（std.ui プリミティブ）"),
+    ("examples/paint.shk", "ペイント（低レベル描画 API）"),
+    ("examples/node_editor.shk", "ノードエディタ（コード生成グラフ）"),
+    ("examples/hexedit.shk", "バイナリエディタ（Hex Editor）"),
+    ("examples/counter.shk", "カウンター（宣言的 UI コンポーネント）"),
+    ("examples/widgets.shk", "ウィジェットカタログ（高レベル UI コンポーネント）"),
+    ("examples/breakout.shk", "2D ゲーム（ブロック崩し）"),
+    ("examples/cube3d.shk", "3D レンダリング（回転する立方体）"),
+    ("examples/cube_ui.shk", "3D 描画と UI コントロールの統合"),
+    ("web/examples/forever.shk", "無限ループと協調的マルチタスク"),
 ]
 
-# お手本を置いてよいところ。ここの .shk は、ぜんぶ上の一覧に入っていること
+# サンプルコードの対象ディレクトリ。すべての .shk が ITEMS に登録されている必要がある
 DIRS = ["examples", "web/examples"]
 
 listed = [path for path, _ in ITEMS]
 bad = []
 
-# 一覧にあるのに、ファイルが無い
+# 一覧に定義されているが実ファイルが存在しない
 for path in listed:
     if not os.path.exists(os.path.join(root, path)):
-        bad.append("一覧にあるのに、ファイルがありません: %s" % path)
+        bad.append("一覧に定義されていますが、ファイルが存在しません: %s" % path)
 
-# ファイルはあるのに、一覧に無い（ブラウザから見えないまま古くなる）
+# 実ファイルが存在するが一覧に登録されていない（Web からアクセスできなくなるのを防止）
 for d in DIRS:
     full = os.path.join(root, d)
     if not os.path.isdir(full):
@@ -52,13 +51,13 @@ for d in DIRS:
             continue
         rel = "%s/%s" % (d, name)
         if rel not in listed:
-            bad.append("ファイルはあるのに、一覧にありません: %s" % rel)
+            bad.append("ファイルが存在しますが、一覧に登録されていません: %s" % rel)
 
 if bad:
-    sys.stderr.write("お手本の一覧（web/examples.py の ITEMS）が食い違っています:\n")
+    sys.stderr.write("エラー: サンプルコード一覧（web/examples.py の ITEMS）に不整合があります:\n")
     for line in bad:
         sys.stderr.write("  %s\n" % line)
-    sys.stderr.write("  → ITEMS に足すか、そのファイルを消します\n")
+    sys.stderr.write("  → ITEMS に追加するか、不要なファイルを削除してください\n")
     sys.exit(1)
 
 items = []
@@ -67,9 +66,9 @@ for path, title in ITEMS:
         items.append({"title": title, "path": path, "code": f.read()})
 
 with open(out, "w", encoding="utf-8") as f:
-    f.write("// examples.js — web/build.sh が作る。ここを直に書き換えても次の作り直しで消える\n")
+    f.write("// examples.js — web/build.sh により自動生成。直接編集しないでください\n")
     f.write("window.SHARK_EXAMPLES = ")
     json.dump(items, f, ensure_ascii=False, indent=1)
     f.write(";\n")
 
-print("お手本 %d 件" % len(items))
+print("サンプルコード %d 件を登録" % len(items))

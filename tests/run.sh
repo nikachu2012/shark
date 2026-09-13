@@ -1,20 +1,19 @@
 #!/bin/sh
-# tests/run.sh — .shk を動かし、.expected と見比べる
+# tests/run.sh — .shk テストを実行し、.expected と出力を比較検証する
 #
 #   make test        で呼ばれる
 #   sh tests/run.sh  でも動く
 set -u
 root=$(cd "$(dirname "$0")/.." && pwd)
-# std.ui は画面を開かない。開くと機種によって結果が変わり、窓も出てしまう
-# （spec/library/ui.md）。見えない面に描くだけになる
+# std.ui はウィンドウを開かない。環境による差異やウィンドウ表示を防ぐため
+# （spec/library/ui.md）、オフスクリーンバッファ描画モードとする
 SHARK_UI=off
 export SHARK_UI
 shark="$root/shark"
 pass=0
 fail=0
 
-# 見比べる前に行末の CR を落とす。Windows で書いたソースは行が CR LF で終わり、
-# 端末に出すときも LF が CR LF になるので、そのままだと中身が同じでも食い違う
+# 比較前に行末の CR を除去（Windows 改行コード CRLF による差分を正規化）
 norm() { tr -d '\r'; }
 expnorm="${TMPDIR:-/tmp}/shark_expected.$$"   # 食い違いを見せるときの置き場
 
@@ -53,8 +52,8 @@ else
   printf '%s\n' "$out" | diff -u "$expnorm" -
 fi
 
-# 整える（shark fmt）。崩して書いたものが、整えた姿になること。
-# 整えたものをもう一度整えても変わらないことも見る（整え方が落ち着いている）
+# コードフォーマッタ（shark fmt）の検証。フォーマット後の出力一致および
+# 冪等性（再フォーマットで結果が変化しないこと）を確認
 if [ -f "$root/tests/fmt/messy.shk" ]; then
   got=$("$shark" fmt "$root/tests/fmt/messy.shk" 2>&1 | norm)
   if [ "$got" = "$(norm < "$root/tests/fmt/tidy.expected")" ]; then
@@ -74,7 +73,7 @@ if [ -f "$root/tests/fmt/messy.shk" ]; then
   fi
 fi
 
-# 後始末の取りこぼしと、上限の見張り（C++ 側）
+# メモリリークおよびメモリ上限の検証（C++ 側）
 if [ -x "$root/tests/memcheck" ] || [ -x "$root/tests/memcheck.exe" ]; then
   if "$root/tests/memcheck" > /tmp/shark_memcheck.txt 2>&1; then
     pass=$((pass + 1))
@@ -84,7 +83,7 @@ if [ -x "$root/tests/memcheck" ] || [ -x "$root/tests/memcheck.exe" ]; then
   fi
 fi
 
-# 壊れたバイトコードを断るか（C++ 側）。落ちれば、この実行ファイルごと死ぬので失敗になる
+# 不正なバイトコードを安全に拒絶するかの検証（C++ 側）
 if [ -x "$root/tests/bytecheck" ] || [ -x "$root/tests/bytecheck.exe" ]; then
   if "$root/tests/bytecheck" > /tmp/shark_bytecheck.txt 2>&1; then
     pass=$((pass + 1))
@@ -94,7 +93,7 @@ if [ -x "$root/tests/bytecheck" ] || [ -x "$root/tests/bytecheck.exe" ]; then
   fi
 fi
 
-# 変換つきの文字入力（IME）。偽の出し先で入力欄を動かして見る（C++ 側）
+# IME（文字入力）処理のモック環境テスト（C++ 側）
 if [ -x "$root/tests/imecheck" ] || [ -x "$root/tests/imecheck.exe" ]; then
   if "$root/tests/imecheck" > /tmp/shark_imecheck.txt 2>&1; then
     pass=$((pass + 1))
@@ -104,7 +103,7 @@ if [ -x "$root/tests/imecheck" ] || [ -x "$root/tests/imecheck.exe" ]; then
   fi
 fi
 
-# 部品を押した・合わせたときの動き。偽の出し先で見る（C++ 側）
+# UI ウィジェットのクリック・ホバー動作のモック環境テスト（C++ 側）
 if [ -x "$root/tests/uicheck" ] || [ -x "$root/tests/uicheck.exe" ]; then
   if "$root/tests/uicheck" > /tmp/shark_uicheck.txt 2>&1; then
     pass=$((pass + 1))
@@ -114,8 +113,8 @@ if [ -x "$root/tests/uicheck" ] || [ -x "$root/tests/uicheck.exe" ]; then
   fi
 fi
 
-# 単一バイナリと、保存したバイトコード（spec/runtime/bytecode.md）。
-# tests/cases を build して、ソースから動かしたときと同じ出力になることを見る
+# 単一バイナリおよびバイトコード実行の検証（spec/runtime/bytecode.md）。
+# tests/cases を build し、インタープリタ実行と同一出力になることを確認
 sharkvm="$root/sharkvm"
 tmp="${TMPDIR:-/tmp}/shark_build_test.$$"
 if [ -x "$sharkvm" ] || [ -x "$sharkvm.exe" ]; then
@@ -140,7 +139,7 @@ if [ -x "$sharkvm" ] || [ -x "$sharkvm.exe" ]; then
       printf '%s\n' "$got" | diff -u "$expnorm" - | sed -n '3,12p'
     fi
   done
-  # バイトコードだけ保存したものを、実行装置と shark run の両方で動かす
+  # 保存したバイトコードを sharkvm と shark run の両方で実行検証
   f=01_basics.shk
   exp="${f%.shk}.expected"
   if ! "$shark" build --no-color --bytecode -o "$tmp/one.shkc" "$f" > "$tmp/build.log" 2>&1; then

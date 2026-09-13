@@ -1,15 +1,14 @@
-// paint.shk — std.ui でお絵かき（spec/library/ui.md）
+// paint.shk — std.ui によるペイントアプリケーションの実装例（spec/library/ui.md）
 //
 //   ./shark run examples/paint.shk
 //
-// マウスで描く。1〜5 で色を変える。c で消す。esc か q でおしまい。
-// macOS と Linux では窓が開き、窓を持てないところでは端末に出る。
-// 画面がまったく無いところ（SHARK_UI=off など）では、
-// 決まった絵を描いて paint.png に保存する。
+// マウスドラッグで描画。1〜5 で色変更、c で画面クリア、Esc または q で終了。
+// デスクトップ環境ではウィンドウが開き、非 GUI 環境ではターミナル出力にフォールバック。
+// ヘッドレス環境（SHARK_UI=off 等）では、所定のグラフィックを描画して paint.png に保存します。
 import std.ui;
 import std.file;
 
-// 画面が細かい（HiDPI）なら、面もそのぶん細かく取る（ui.scale()）
+// HiDPI ディスプレイの場合は ui.scale() に応じてサーフェス解像度をスケーリング
 var K: int = 1;
 var W: int = 400;
 var H: int = 260;
@@ -19,7 +18,7 @@ func palette() -> list<int> {
           ui.rgb(80, 160, 240), ui.rgb(240, 240, 240)];
 }
 
-// 下に出す案内。描いた絵の上に重ねる
+// 下部ステータスバー。描画サーフェス上にオーバーレイ表示
 func draw_bar(colors: list<int>, pick: int) -> void {
   var bar = ui.text_height() + 8 * K;
   ui.fill_rect(0, H - bar, W, bar, ui.rgb(20, 20, 28));
@@ -41,10 +40,10 @@ func main() -> int {
   W = 400 * K;
   H = 260 * K;
   ui.open("paint", W, H);
-  _ = ui.font(12 * K);   // 機種のフォントを 12pt で。読めなければ内蔵の字形のまま
+  _ = ui.font(12 * K);   // システムフォントを 12pt でロード（不可時は内蔵ビットマップフォントを使用）
   ui.clear(ui.rgb(12, 12, 18));
 
-  // 画面が無いときは、決まった絵を描いて PNG にする
+  // ヘッドレス環境ではサンプル画像を描画して PNG 保存
   if !ui.visible() {
     for var i in range(5) {
       ui.fill_circle((70 + i * 60) * K, 100 * K, 34 * K, colors[i]);

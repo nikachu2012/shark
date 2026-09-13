@@ -1,13 +1,11 @@
-// runtime.h — バイトコードだけを動かす実行装置（spec/runtime/bytecode.md）
+// runtime.h — バイトコード実行専用ランタイム（spec/runtime/bytecode.md 参照）
 //
-//   1. 覚え書きを読む         bytecode_read_header() → 入れるモジュールが分かる
-//   2. 実行装置を作る          Runtime(config)
-//   3. バイトコードを読む       load(bytes)        → つまずいたら理由が返る
-//   4. 少しずつ動かす          step(budget)       → 状態
+//   1. ヘッダ読み込み         bytecode_read_header() → 依存モジュールの特定
+//   2. ランタイム初期化       Runtime(config)
+//   3. バイトコードロード     load(bytes)            → エラー時は理由を返却
+//   4. 実行ステップ処理       step(budget)           → 実行ステータス返却
 //
-// 字句解析・構文解析・型検査・コード生成は持たない。Engine（shark.h）から
-// 実行に要るところだけを抜き出したもので、入口と出口は Engine と同じ形にしてある。
-// コアはここでもファイルを開かない。バイト列は呼ぶ側が渡す。
+// 字句解析・構文解析・型検査・コード生成器を含まず、Engine（shark.h）から VM 実行に必要な機能のみを抽出した軽量ランタイム。API は Engine と互換性を持つ。ファイル I/O は行わず、バイト列の受け渡しは呼び出し元が行う。
 #ifndef SHARK_RUNTIME_H
 #define SHARK_RUNTIME_H
 

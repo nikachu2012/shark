@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# runex.py — 宣言ファイルの「例」を、本物の shark で動かして確かめる（make docs-check）
+# runex.py — 宣言ファイルに記載されたサンプルコードを shark で実行検証する（make docs-check）
 #
-#   python3 tools/runex.py [名前の一部 ...]   確かめる
-#   python3 tools/runex.py --show <名前の一部>  例と、その出力を並べて見る
+#   python3 tools/runex.py [名前の一部 ...]   実行検証する
+#   python3 tools/runex.py --show <名前の一部>  サンプルコードと実行出力を表示する
 #
-# 例は1つで完結していること（受け手も自分で作る）。動かせないもの（外のプログラム、
-# 通信、その場を書き換えるもの）は「例（動かさない）:」と書く。
+# サンプルコードは単独で完結していること。実行不能なコード（外部プロセスの起動、
+# ネットワーク通信、破壊的変更等）は「例（動かさない）:」と表記する。
 import os
 import subprocess
 import sys
@@ -15,8 +15,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import shkdoc  # noqa: E402
 
-# Windows の端末は既定が UTF-8 ではない。Shark も、この道具の知らせも UTF-8 なので、
-# 出す側と読む側の両方をそろえておく（そろえないと日本語が化け、読むときは落ちる）
+# Windows コンソールはデフォルト文字コードが UTF-8 ではないため、文字化けや
+# 例外を防ぐために UTF-8 入出力に統一する
 if sys.platform == 'win32':
     import ctypes
     ctypes.windll.kernel32.SetConsoleOutputCP(65001)
@@ -61,7 +61,7 @@ def main():
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(head + it['example'] + '\n')
             try:
-                # std.ui の例で窓が開かないようにする（spec/library/ui.md）
+                # std.ui のサンプルコード実行時にウィンドウを表示しないようオフスクリーンに設定（spec/library/ui.md）
                 env = dict(os.environ, SHARK_UI='off')
                 p = subprocess.run([shark, 'run', path], capture_output=True, text=True,
                                    encoding='utf-8', errors='replace',

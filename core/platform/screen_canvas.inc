@@ -1,27 +1,26 @@
-// screen_canvas.inc — ブラウザの canvas に出す画面（web.cpp から読む）
+// screen_canvas.inc — ブラウザ Canvas 向け画面描画バックエンド（web.cpp からインクルード）
 //
-// 移植層に求められているのは3つだけ（platform.h）。ここでは canvas を1枚こしらえて、
-//   1. 面をそのまま流し込む     present
-//   2. DOM の出来事を渡す       poll（待たない）
-//   3. 開ける・閉じる           open / close
-// を埋める。描くのはコアの側なので、ここが持つのは画素を運ぶ道と、出来事の訳し方だけ。
+// 移植層の必須責務は以下の3点（platform.h 参照）:
+//   1. サーフェス描画・転送       present
+//   2. DOM イベントの取得         poll（ノンブロッキング）
+//   3. ウィンドウ生成・破棄       open / close
+// 描画処理自体はコア側が担うため、本ファイルはピクセルバッファの転送とブラウザイベントの変換を担当する。
 //
-//   ・ホストが場所を決めていなければ、**窓をこしらえる**。名札の帯・× ・持ち手が付いていて、
-//     引けば動かせるし、隅を引けば大きさも変えられる（机の上の窓と同じ）。
-//     出す先を決めたいときは Module.sharkMount か #shark-screen を置く（その中に面だけ出る）。
-//     開いた・閉じたは window の shark:screen-open / shark:screen-close で知らせる
-//   ・変換つきの文字入力（かな漢字）は、見えない textarea をブラウザに任せて、
-//     確定した文字と変換中の文字だけを受け取る（spec/library/ui.md）
-//   ・出来事は JavaScript 側の列にたまり、poll() が1つずつ取る。待たない
+//   ・ホスト環境でマウント先が未指定の場合、タイトルバー・閉じるボタン・リサイズハンドルを備えた
+//     フローティングウィンドウを動的生成する（ドラッグによる移動やサイズ変更に対応）。
+//     表示先を指定する場合は Module.sharkMount または #shark-screen を設定する（コンテナ内に canvas のみ配置）。
+//     ウィンドウの開閉は window の shark:screen-open / shark:screen-close カスタムイベントで通知される。
+//   ・日本語等の IME 入力は不可視の textarea に委譲し、確定文字列と未確定文字列（コンポジション）を取得する（spec/library/ui.md 参照）。
+//   ・ブラウザイベントは JavaScript 側のキューに蓄積され、poll() がノンブロッキングで1件ずつ取り出す。
 //
-// 画面の無いところ（node で動かすときや SHARK_UI=off）では open が false を返し、
-// コアは見えない面に描く。
+// ヘッドレス環境（Node.js 実行時や SHARK_UI=off 設定時）では open() が false を返し、
+// コア側はオフスクリーンバッファへ描画する。
 namespace canvas {
 
-// ------------------------------------------------------------ ブラウザとの境目
-// EM_JS で書いたものは、C からは普通の関数に見える。持ち物は Module.__shark_screen。
+// ------------------------------------------------------------ JavaScript / C++ バインディング
+// EM_JS 内の関数は C++ 側から通常関数として呼び出し可能。内部データは Module.__shark_screen で管理。
 
-// 出来事の番号とキーの番号は、C の側（platform.h）が正。開く前に一度だけ渡す
+// イベント種別およびキーコードは C++ 側（platform.h）の定義を正とする。初期化時に一度転送する
 EM_JS(void, cv_kinds, (int close, int key, int text, int mouse, int resize, int wheel), {
   Module.__shark_ev =
       ({ close: close, key: key, text: text, mouse: mouse, resize: resize, wheel: wheel });
@@ -39,9 +38,9 @@ EM_JS(int, cv_scale, (), {
   return k > 4 ? 4 : k;
 });
 
-// 丸めない細かさ。ブラウザでは 1.25 や 1.5 がふつうにある（Windows の拡大表示、
-// ブラウザ自身の拡大、携帯の画面）。整数に丸めた数で面を取ると、面の1画素が
-// 画面の1画素に乗らず、ブラウザが引き伸ばし直すので**にじむ**
+// 丸めないスケール値。ブラウザ環境では 1.25 や 1.5 などの非整数スケーリングも一般的。
+// 整数に丸めた値でバッファを割り当てると、ピクセルグリッドの不一致により
+// ブラウザ側で再スケーリングが行われ**表示が滲む**。
 EM_JS(double, cv_dpr, (), {
   if (typeof window === 'undefined') return 1;
   var d = window.devicePixelRatio || 1;
@@ -61,18 +60,18 @@ EM_JS(void, cv_clip_init, (), {
 });
 
 
-// 窓をこしらえる。見た目は Dear ImGui に寄せてある ― 角は立てたまま、細い縁、
-// 帯は濃い青（焦点が外れると黒に近くなる）、右下に三角の持ち手。
-// ここが作るのは**窓枠だけ**で、中身（面）は canvas が受け持つ
+// ウィンドウフレームの動的生成。Dear ImGui スタイルに準拠し、角丸なし、細いボーダー、
+// アクティブ時ブルーのタイトルバー、右下のリサイズグリップを配置。
+// 生成するのは外枠フレームのみで、描画領域は canvas が担当する
 EM_JS(void, cv_window_init, (), {
-  // 窓を作る手だてを覚えさせるだけ。DOM を触るのは、実際に呼ばれたとき
+  // ウィンドウ生成関数の登録のみ行い、DOM 操作は open 呼び出し時に実行する
   if (Module.__shark_make_window) return;
   Module.__shark_make_window = function (title, cw, ch) {
-    // Dear ImGui の暗い配色（imgui.cpp の StyleColorsDark から）
+    // Dear ImGui ダークテーマ配色（imgui.cpp StyleColorsDark 準拠）
     var C = ({
       bg: '#0f0f0f',                       // WindowBg
       border: 'rgba(110,110,128,0.50)',    // Border
-      title: '#0a0a0a',                    // TitleBg（焦点が無いとき）
+      title: '#0a0a0a',                    // TitleBg（非アクティブ時）
       titleOn: '#294a7a',                  // TitleBgActive
       text: '#ffffff',
       dim: 'rgba(255,255,255,0.60)',
@@ -80,7 +79,7 @@ EM_JS(void, cv_window_init, (), {
       gripOn: 'rgba(66,150,250,0.90)',     // ResizeGripHovered
       hot: 'rgba(66,150,250,1.00)'         // ButtonHovered
     });
-    var BAR = 22;                          // 名札の帯の高さ（CSS の点）
+    var BAR = 22;                          // タイトルバーの高さ（CSS ピクセル）
     var win = ({ el: null, box: null, onClose: null, onResize: null });
 
     var el = document.createElement('div');
@@ -264,7 +263,7 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, double dpr), {
     win = Module.__shark_make_window(name, w * zoom / dpr, h * zoom / dpr);
     mount = win.box;
   }
-  // 変換の受け皿を面の上に置くので、位置の基準になってもらう
+  // IME 入力プロキシをキャンバス上に配置するため、相対位置指定の基準要素とする
   if (window.getComputedStyle(mount).position === 'static') mount.style.position = 'relative';
   mount.textContent = "";   // 前に出した絵は捨てる
 
@@ -300,15 +299,14 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, double dpr), {
   S.resizable = true;
   S.textOn = false;
   S.textMulti = false;
-  S.ta = null;       // 文字入力の受け皿（text_input で作る）
+  S.ta = null;       // IME 入力プロキシ要素（text_input で生成）
   S.comp = null;     // 変換中のようす
   S.held = ({});     // いま押されているキー（焦点が外れたら離したことにする）
   S.listeners = [];
   Module.__shark_screen = S;
 
-  // 面の大きさ（画素）÷ 画面の細かさ × 引き伸ばし = 出したい大きさ。
-  // 出す先がそれより狭ければ、縦横の比を保ったまま縮めて収める（窓と違って、板の
-  // 大きさはこちらでは決められない）
+  // キャンバス解像度（ピクセル）÷ DPR × ズーム倍率 = 目標表示サイズ。
+  // 配置先コンテナがそれより狭い場合は、アスペクト比を維持して縮小表示
   function fit() {
     var dw = S.sw * S.zoom / S.dpr;   // 出したい大きさ（CSS の点）
     var dh = S.sh * S.zoom / S.dpr;
@@ -359,7 +357,7 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, double dpr), {
 
   on(c, 'pointerdown', function (e) {
     if (c.setPointerCapture) { try { c.setPointerCapture(e.pointerId); } catch (err) {} }
-    if (!S.textOn) c.focus();   // 入力欄に入れている間は、受け皿に持たせたまま
+    if (!S.textOn) c.focus();   // テキスト入力中は IME プロキシ（textarea）のフォーカスを維持
     mouse(e, button(e), true);
     e.preventDefault();
   });
@@ -370,7 +368,7 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, double dpr), {
 
   // 車輪（ホイール）。届く単位は機種と設定でまちまちなので、行の数に直して渡す。
   // 単位は 1/100 行で、**ためない**（細かいまま渡せるので、ゆっくり動かしたぶんも落ちない）。
-  // passive を切らないと、ページの巻物を止められない
+  // passive: false に設定しないと、ページのデフォルトスクロールを抑止できない
   on(c, 'wheel', function (e) {
     var k = e.deltaMode === 1 ? 1 : (e.deltaMode === 2 ? (S.sh / 16) : (1 / 16));
     var fx = (e.deltaX * k * 100) | 0;   // 0 の方へ落とす
@@ -386,10 +384,10 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, double dpr), {
 
 
   // --- キー ---
-  // 面と受け皿はどちらも入れ物の中にあるので、まとめて入れ物で受ける
+  // キャンバスと IME プロキシ要素はいずれもコンテナ配下にあるため、親要素でイベントを集約
   var PREVENT = ({ ArrowLeft: 1, ArrowRight: 1, ArrowUp: 1, ArrowDown: 1, PageUp: 1,
                    PageDown: 1, Home: 1, End: 1, Tab: 1, Enter: 1, Backspace: 1, ' ': 1 });
-  // 複数行の入力欄で、コアが受け持つキー（受け皿の既定の動きは止める）
+  // 複数行テキスト入力でコア側が処理するキー（IME プロキシのデフォルト挙動を抑止）
   var LINEKEY = ({ ArrowUp: 1, ArrowDown: 1, Home: 1, End: 1, PageUp: 1, PageDown: 1 });
   function keyOf(e) {
     var k = KEYS[e.key];
@@ -413,7 +411,7 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, double dpr), {
       if (down) S.held[k] = 1;
       else delete S.held[k];
     }
-    // 打たれた文字。入力欄に入れている間は、受け皿（textarea）が受け取る
+    // 通常の文字入力。テキスト入力中は IME プロキシ（textarea）側で処理
     if (down && !S.textOn && !e.ctrlKey && !e.metaKey && !e.altKey) {
       var t = e.key;
       if (t && Array.from(t).length === 1) {
@@ -425,16 +423,16 @@ EM_JS(int, cv_open, (const char* title, int w, int h, int zoom, double dpr), {
         }
       }
     }
-    // 取り消し・やり直しはコアが持つ。ブラウザの受け皿にもさせると二重に効く
+    // Undo / Redo はコア側で管理。ブラウザネイティブの Undo が多重に実行されるのを抑止
     if (down && (e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z' ||
                                              e.key === 'y' || e.key === 'Y'))
       e.preventDefault();
-    // 面が受け取ったキーは、ブラウザの既定の動き（巻物・焦点の移動）に渡さない
+    // キャンバスが処理したキー入力は、ブラウザのデフォルト挙動（スクロールやフォーカス移動等）を抑止
     if (!S.textOn && !e.ctrlKey && !e.metaKey && !e.altKey && PREVENT[e.key]) e.preventDefault();
-    // 改行はコア（Shark）が入れる。受け皿にも入れさせると二重になる。
-    // 複数行の入力欄では、行にまつわるキーもコアが受け持つ（折り返す幅が違うため）。
-    // tab も同じで、入力欄から次の部品へ焦点を移すのはコアの側。
-    // ブラウザにも渡すと、受け皿ごと面の外へ焦点が飛んでしまう
+    // 改行文字はコア側で挿入（プロキシ側にも挿入させると二重入力となる）。
+    // 複数行テキスト入力では、行関連キーもコア側で処理（折り返し幅の計算基準が異なるため）。
+    // Tab キーも同様にコア側でフォーカス移動を制御する。
+    // ブラウザ側に伝播させると、IME プロキシからキャンバス外へフォーカスが抜けてしまうのを防止
     if (S.textOn && !e.ctrlKey && !e.metaKey && !e.altKey &&
         (e.key === 'Enter' || e.key === 'Tab' ||
          (S.textMulti && LINEKEY[e.key])))
@@ -622,8 +620,8 @@ EM_JS(void, cv_text_input, (int on, const char* initial, int x, int y, int h, in
     ta.setAttribute('autocapitalize', 'off');
     ta.setAttribute('autocorrect', 'off');
     ta.setAttribute('aria-label', 'ui.field');
-    // 見えない受け皿。透かすのは見た目だけで、キーも変換も今までどおり受け取れる。
-    // 変換中の候補は、ここに置いた場所のあたりにブラウザが出す
+    // 非表示の IME 入力プロキシ。透明化は視覚表現のみで、キー入力や IME 変換イベントは通常どおり捕捉する。
+    // IME 変換候補ウィンドウは、本要素の配置位置付近にブラウザが表示する
     ta.style.cssText = 'position:absolute;z-index:2;padding:0;margin:0;border:0;outline:none;' +
         'resize:none;overflow:hidden;white-space:nowrap;background:transparent;' +
         'color:transparent;caret-color:transparent';
@@ -794,9 +792,9 @@ double pixel_ratio() {
   return d > 4.0 ? 4.0 : d;
 }
 
-// **本当に小さい面だけ**、整数倍に広げる（ゲーム機のようなドット絵のため）。
-// 引き伸ばしは画素をそのまま並べるだけなので、字も丸も粗くなる。
-// 320×240 はそのままの大きさで出し、広げるのは切手のように小さいものだけ
+// **極小解像度のみ**、整数倍に拡大（レトロゲーム等のピクセルアート向け）。
+// ニアレストネイバー拡大のため、テキストや円弧等もピクセル単位で拡大される。
+// 320×240 以上は等倍とし、拡大対象は極小解像度のみに限定。
 int pick_zoom(int w, int h) {
   int s = 1;
   while (s < 6 && w * (s + 1) <= 320 && h * (s + 1) <= 240) s++;
@@ -954,19 +952,18 @@ void set_cursor(int kind) {
 
 }  // namespace canvas
 
-// canvas は「離した」も出せる。変換つきの文字入力は、見えない textarea に任せる。
-// 窓の縁を引いている間の描き直し（set_redraw）は要らない ― ブラウザは止まらない
+// Canvas 画面バックエンド定義
+// キーリリースイベントおよび IME 入力（不可視 textarea 連携）に対応
 const PlatformScreen kCanvasScreen = {
     canvas::screen_scale,   canvas::open,           canvas::close,
     canvas::present,        canvas::poll,           true,
     canvas::text_input,     canvas::text_state,     canvas::text_selection,
     canvas::text_select,    canvas::text_replace,   canvas::clipboard_get,
     canvas::clipboard_set,
-    0,                      // 窓の縁を引いている間の描き直しは要らない（ブラウザは止まらない）
+    0,                      // リサイズ中の再描画フックは不要（ブラウザのイベントループはブロックされない）
     canvas::set_cursor,     canvas::set_resizable,
-    true,                   // 刻みは requestAnimationFrame が握っている（app.js）
-    // 機種のファイル選びは持たない。ブラウザの <input type="file"> は選び終わるまで
-    // 返らない形では呼べず、ui.pick_file() は**その場で道を返す**約束のため
-    // （spec/library/ui.md）。ブラウザでは、いつも値なしが返る
+    true,                   // フレーム駆動は requestAnimationFrame が制御（app.js）
+    // ネイティブファイルダイアログは非対応。<input type="file"> による非同期選択を
+    // 同期 API である ui.pick_file()（戻り値としてパスを即時返却）に適合させることが困難なため、常に null を返却
     0,
     canvas::pixel_ratio};

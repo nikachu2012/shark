@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""mdpage.py — Markdown の文書を HTML の中身にする（docs/gen.py から使う）
+"""mdpage.py — Markdown 文書を HTML コンテンツに変換（docs/gen.py から利用）
 
-書いてある Markdown の書き方だけを扱う小さなもの。**外の道具には頼らない**
-（この処理系そのものと同じ考え方で、入れるものを増やさない）。
+リポジトリ内のドキュメントで使用されている構文のみを対象とする軽量パーサー。
+外部ライブラリへの依存なし（Shark 処理系本体と同様のゼロ依存方針）。
 
-扱うもの:
-    見出し（# 〜 ######。目次のために id を付ける）
+対応構文:
+    見出し（# 〜 ######、目次リンク用 id 属性を自動付与）
     段落・空行
-    囲みコード（``` … ```）
-    表（| … | の並び）
-    箇条書き（- ・番号つき 1.）
-    行の中の `コード` **太字** [文字](道)
+    フェンスドコードブロック（``` … ```）
+    テーブル（| … |）
+    リスト（箇条書き - / *、番号付き 1.）
+    インライン装飾: `コード`, **太字**, [テキスト](リンク先)
 
-扱わないもの（書いてある文書に出てこないため）:
-    引用（>）・画像・入れ子の箇条書き・生の HTML
+非対応構文（本リポジトリの文書で未使用のため）:
+    引用（>）、画像構文、ネストされたリスト、raw HTML
 """
 import html
 import re
@@ -28,14 +28,14 @@ def esc(s):
 
 
 def slug(text):
-    """見出しから id を作る。日本語はそのまま残す（URL には %xx で載る）"""
+    """見出し文字列からアンカー用 id を生成。日本語はそのまま保持（URL エンコード対応）"""
     s = re.sub(r'`|\*\*|\[|\]\([^)]*\)', '', text).strip()
     s = re.sub(r'[\s/]+', '-', s)
     return re.sub(r'[^\w\-（）()・。、！？:：.]', '', s, flags=re.UNICODE)
 
 
 def inline(text, link=None):
-    """行の中の書き方を直す。link は道の書き換え（None ならそのまま）"""
+    """インラインマークダウンを展開。link は URL 変換関数（None の場合はそのまま出力）"""
     out = []
     i = 0
     while i < len(text):
@@ -60,7 +60,7 @@ def inline(text, link=None):
             if m:
                 label, href = m.group(1), m.group(2)
                 href = link(href) if link else href
-                if href is None:      # 行き先が無いものは、ただの文字にする
+                if href is None:      # リンク先が無効な場合はプレーンテキストとして出力
                     out.append(inline(label, link))
                 else:
                     out.append('<a href="%s">%s</a>' % (esc(href), inline(label, link)))
@@ -76,7 +76,7 @@ def _table(rows, link):
     for cell in rows[0]:
         out.append('<th>%s</th>' % inline(cell, link))
     out.append('</tr></thead><tbody>')
-    for r in rows[2:]:                      # 1 行目は見出し、2 行目は区切り
+    for r in rows[2:]:                      # 1 行目はヘッダー、2 行目は区切り線
         out.append('<tr>')
         for cell in r:
             out.append('<td>%s</td>' % inline(cell, link))
@@ -95,7 +95,7 @@ def _cells(line):
 
 
 def headings(text):
-    """[(深さ, 文字, id), …]。目次を作るのに使う"""
+    """[(見出しレベル, テキスト, id), …]。目次（TOC）生成用"""
     out = []
     fence = False
     for line in text.split('\n'):
@@ -111,17 +111,17 @@ def headings(text):
 
 
 def render(text, link=None):
-    """Markdown → HTML の中身（<body> に入れるところだけ）"""
+    """Markdown → HTML コンテンツ変換（<body> 直下の要素を出力）"""
     lines = text.split('\n')
     out = []
     para = []
-    items = None       # 箇条書きをためるところ
+    items = None       # リスト項目バッファ
     table = None
     i = 0
 
     def flush_para():
         if para:
-            # 段落の中の改行はつなぐ。日本語どうしのあいだに空白を入れない（shkdoc.flow）
+            # 段落内の改行を連結。日本語間の不要なスペースは除去（shkdoc.flow）
             out.append('<p>%s</p>' % inline(shkdoc.flow('\n'.join(para)), link))
             del para[:]
 
@@ -148,7 +148,7 @@ def render(text, link=None):
     while i < len(lines):
         line = lines[i]
 
-        # 囲みコード
+        # コードブロック
         if line.startswith('```'):
             flush_all()
             i += 1
@@ -199,7 +199,7 @@ def render(text, link=None):
             i += 1
             continue
 
-        # 空行と、ふつうの行
+        # 空行と通常テキスト行
         if not line.strip():
             flush_all()
         else:

@@ -1,18 +1,17 @@
-// font_canvas.inc — ブラウザに字を描いてもらう（web.cpp から読む）
+// font_canvas.inc — ブラウザ Canvas API を用いたフォントレンダリングバックエンド（web.cpp からインクルード）
 //
-// ブラウザの中からは、フォントのファイルを読めない。かわりに
-// **canvas に1文字ずつ描いてもらい、その濃さ（alpha）を写し取る**。
-// 返す形は FreeType と同じ（platform.h の PlatformGlyph）なので、
-// コアから見れば「機種のフォントが読めた」のと変わらない（spec/library/ui.md）。
+// ブラウザ環境ではローカルフォントファイルへ直接アクセスできないため、
+// 不可視 Canvas に文字を描画してアルファチャンネル（濃淡情報）を抽出する。
+// FreeType と互換性のある PlatformGlyph 形式（platform.h）で返却することで、
+// コア側からはネイティブフォントラスタライザと同様に透過的に扱うことができる（spec/library/ui.md 参照）。
 //
-//   ・使う字は下の kFamilies。Windows・macOS・Linux のどれでも日本語が出るものを、
-//     上から順に並べてある。canvas は**字ごとに**、持っているものへ落ちていく
-//   ・一度描いた字形は覚えておく（JavaScript 側。cp と大きさが鍵）
-//   ・描くのは1文字ずつだが、覚え書きが効くので、動かしている間に描き直すのは初回だけ
+//   ・標準フォントリストは下の kFamilies を参照。OS 標準の日本語ゴシックフォントを優先度順に探索
+//   ・ラスタライズ済みグリフは JavaScript 側のキャッシュで保持（コードポイントとサイズをキーとする）
+//   ・初回のグリフ描画時のみラスタライズが実行され、以降はキャッシュから高速取得される
 namespace webfont {
 
-// 機種にありそうなフォント。上から順に見て、最初に見つかったものを名前として答える。
-// どれも「その機種にはじめから入っている、日本語の出るゴシック」
+// プラットフォーム標準フォントのフォールバックリスト（優先度順）。
+// 各 OS に標準搭載されている日本語対応ゴシック体
 static const char* const kFamilies[] = {
     "Hiragino Sans",              // macOS / iOS（ヒラギノ角ゴシック）
     "Hiragino Kaku Gothic ProN",
@@ -178,13 +177,13 @@ EM_JS(int, cf_glyph, (int cp, int px, int* meta, unsigned char* bits, int cap), 
   return 1;
 });
 
-// ------------------------------------------------------------ 移植層の口
+// ------------------------------------------------------------ PlatformFont 実装
 
-// 字形の置き場。移植層の持ちもので、次に glyph を呼ぶまで有効（platform.h）
+// グリフビットマップバッファ。次回 glyph 呼び出しまで有効（platform.h 参照）
 static unsigned char g_bits[256 * 256];
 static Str g_name;
 static bool g_on = false;
-static int g_asc = 0, g_desc = 0, g_metrics_px = 0;   // 高さは覚えておく（毎回測らない）
+static int g_asc = 0, g_desc = 0, g_metrics_px = 0;   // メトリクスキャッシュ
 
 static bool measure(int px) {
   if (px == g_metrics_px) return true;

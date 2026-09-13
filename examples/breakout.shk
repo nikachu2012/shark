@@ -8,7 +8,7 @@
 //
 // 見本にしているところ:
 //   ・ブロックの絵は ui.canvas() で**1つずつ先に描いておき**、あとは貼るだけ
-//     （毎こま描き直さない。ゲーム機のスプライトと同じ考え）
+//     （毎フレーム再描画せず、スプライトのようにブリット転送）
 //   ・玉の尾と、当たったときの光は ui.rgba() の**半透明**で重ねる
 //   ・絵は代入するとコピーになるので、色ちがいは「作って塗り替える」で足りる
 import std.ui;
@@ -45,11 +45,11 @@ var score: int = 0;
 var lives: int = 3;
 var over: bool = false;
 var cleared: bool = false;
-var flashes: list<int> = [];   // 光っているところ（x, y, 残りこま数）の3つ組
+var flashes: list<int> = [];   // ヒットエフェクト（x, y, 残りフレーム数）のタプルリスト
 
-// --- こま数（fps）----------------------------------------------------------
-// 何こま描けたかを数えて、0.5 秒ごとに出す数を入れ替える。
-// 毎こま出し直すと数が跳ねて読めないので、少しならしてから出す
+// --- フレームレート計測（fps）----------------------------------------------
+// レンダリングされたフレーム数をカウントし、0.5 秒ごとに FPS 値を更新する。
+// 毎フレーム更新すると数値が激しく変動して読みづらいため、0.5 秒単位で平均化する
 var fps: int = 0;
 var fps_frames: int = 0;
 var fps_since: float = 0.0;
@@ -57,7 +57,7 @@ var fps_since: float = 0.0;
 func count_frame() -> void {
   fps_frames += 1;
   var now = time.monotonic().seconds();
-  if fps_since == 0.0 { fps_since = now; return; }   // 1こま目は数え始めるだけ
+  if fps_since == 0.0 { fps_since = now; return; }   // 初回フレームは計測開始のみ
   var span = now - fps_since;
   if span >= 0.5 {
     fps = int(float(fps_frames) / span + 0.5);
@@ -224,7 +224,7 @@ func draw_all() -> void {
   ui.fill_rect(0, 0, W, 10 * K, ui.rgb(24, 24, 36));
   ui.text(4 * K, 2 * K, f"score {score}", ui.rgb(220, 220, 230));
   ui.text(W - 60 * K, 2 * K, f"lives {lives}", ui.rgb(220, 220, 230));
-  // こま数は帯の真ん中に。まだ数え終わっていないうちは出さない
+  // FPS 表示（ヘッダー中央）。計測完了前は非表示
   if fps > 0 {
     var t = f"{fps} fps";
     ui.text(W / 2 - ui.text_width(t) / 2, 2 * K, t, ui.rgb(150, 155, 170));
@@ -313,7 +313,7 @@ func main() -> int {
     count_frame();
     draw_all();
     ui.present();
-    ui.frame();       // 次のこまの刻みまで待つ（sleep で待つと足が出る）
+    ui.frame();       // 次のフレームタイミングまで待機（フレームレートを維持）
   }
   return 0;
 }

@@ -1,20 +1,20 @@
 #!/bin/sh
-# package.sh — 作ったものを、配れる形に包む（dist/ に出る）
+# package.sh — ビルド成果物を配布用パッケージとしてアーカイブする（dist/ に出力）
 #
-#   sh tools/package.sh            # 機種の名前は自分で決める（uname から）
+#   sh tools/package.sh            # プラットフォーム名は自動判定（uname から）
 #   sh tools/package.sh macos-arm64
-#   make dist                      # 作ってから包む（Makefile から）
+#   make dist                      # ビルド後にパッケージ化（Makefile から実行）
 #
-# 中身は、それだけで動く1つの実行ファイル（shark と sharkvm）と、
-# 同梱のフォント・見本・説明（docs/）・README。**入れてもらうものは何も無い。**
-# 押すたびの検査（.github/workflows）も、配るときも、ここを呼ぶ
-# （包み方を1か所にしておく。README の「押すたびの検査と、配りかた」）。
+# 中身は、スタンドアロンで動作する実行ファイル（shark と sharkvm）、
+# 同梱フォント、サンプルコード、ドキュメント（docs/）、README。（追加の外部依存は不要）
+# push時のCI（.github/workflows）およびリリース配布時に共通で実行される
+# （パッケージ化の処理を一箇所に集約。README の「プッシュ時の自動テストと配布」を参照）。
 set -e
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
-# 機種の名前。渡されなければ uname から作る
+# プラットフォーム名。未指定時は uname から自動判定
 name=${1:-}
 if [ -z "$name" ]; then
   os=$(uname -s 2>/dev/null || echo unknown)
@@ -35,7 +35,7 @@ fi
 exe=""
 [ -f "$root/shark.exe" ] && exe=".exe"
 if [ ! -f "$root/shark$exe" ]; then
-  echo "shark$exe がありません。先に作ります（make、または tools\\build_win.bat）" >&2
+  echo "shark$exe が見つかりません。先にビルドしてください（make、または tools\\build_win.bat）" >&2
   exit 1
 fi
 
@@ -47,17 +47,17 @@ cp "$root/shark$exe" "$dir/"
 [ -f "$root/sharkvm$exe" ] && cp "$root/sharkvm$exe" "$dir/"
 cp "$root/README.md" "$dir/"
 
-# 日本語の字形。フロントエンドは実行ファイルの隣（か assets/fonts）を探す
+# 日本語フォント。フロントエンドは実行ファイルと同一ディレクトリ（または assets/fonts）を探索
 mkdir -p "$dir/assets/fonts"
 cp "$root/assets/fonts/NotoSansJP-Regular.otf" "$dir/assets/fonts/"
 cp "$root/assets/fonts/LICENSE-NotoSansJP.txt" "$dir/assets/fonts/"
 
-# 見本。広げてすぐ動かせるように、まるごと入れる
+# サンプルコード。すぐに実行確認できるよう全体を同梱
 cp -r "$root/examples" "$dir/examples"
 rm -rf "$dir/examples/embed"
 
-# 説明（関数の一覧と、言語の使い方）。ブラウザ版に入れるのと同じもの。
-# 無ければここで作る（作れなければ、説明なしで包む）
+# ドキュメント（APIリファレンスと言語ガイド）。ブラウザ版に同梱するものと同一。
+# 未生成の場合はここで生成する（生成できない場合はドキュメントなしでアーカイブ）
 if [ ! -f "$root/docs/reference/index.html" ]; then
   python3 "$root/docs/gen.py" > /dev/null 2>&1 || true
 fi
@@ -68,23 +68,23 @@ fi
 cat > "$dir/はじめに.txt" <<'TXT'
 Shark🦈 — ゲーム機で動く学習用プログラミング言語
 
-  ./shark run examples/hello.shk      動かす
-  ./shark run examples/widgets.shk    画面の部品をぜんぶ出す
-  ./shark fmt examples/hello.shk      見た目を整える
+  ./shark run examples/hello.shk      実行する
+  ./shark run examples/widgets.shk    GUIウィジェットのデモを実行
+  ./shark fmt examples/hello.shk      コードを自動整形
 
-入れてもらうものはありません。日本語の字形も中に入っています。
+外部依存はなく、単体で動作します。日本語フォントも同梱されています。
 
-  docs/index.html                     関数の一覧（ブラウザで開く）
-  docs/guide.html                     言語の使い方
-  README.md                           作り方・組み込み方
+  docs/index.html                     APIリファレンス（ブラウザで閲覧）
+  docs/guide.html                     言語ガイド
+  README.md                           ビルド・組み込み手順
 
-macOS で「開発元を確認できないため開けません」と言われたら、
-一度だけ次を打てば開けます。
+macOS で「開発元を確認できないため開けません」と警告された場合は、
+ターミナルで以下のコマンドを実行してください。
 
   xattr -d com.apple.quarantine ./shark ./sharkvm
 TXT
 
-# 包む。Windows は zip、それ以外は tar.gz（相手が広げやすい形）
+# アーカイブ作成。Windows は zip、その他は tar.gz
 cd "$root/dist"
 if [ -n "$exe" ]; then
   out="shark-$name.zip"
@@ -103,4 +103,4 @@ else
   tar -czf "$out" "shark-$name"
 fi
 
-echo "できました: dist/$out"
+echo "生成完了: dist/$out"

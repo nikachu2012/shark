@@ -1,15 +1,13 @@
-// screen_win.inc — Windows の窓（desktop.cpp から読む）
+// screen_win.inc — Windows 向け Win32 ウィンドウバックエンド（desktop.cpp からインクルード）
 //
-// 窓の道具（GUI ツールキット）には頼らない（spec/runtime/platform.md）。
-// Windows の窓は OS そのものが持っているので、**実行時に**取りに行く。
+// 外部 GUI ツールキットに依存しない設計（spec/runtime/platform.md 参照）。
+// Windows ネイティブの Win32 API を動的に呼び出す。
 //
-//   ・user32.dll と gdi32.dll を LoadLibrary で開き、要る関数だけ引く
-//     （そのため、作るときに繋ぐライブラリが1つも無い。X11 版と同じ考え）
-//   ・画素は 32 ビットの並び（0x00RRGGBB）のまま StretchDIBits で貼る。
-//     拡大は混ぜない（COLORONCOLOR ＝ そのまま引き伸ばす）
-//   ・画面の細かさ（HiDPI）は OS に尋ね、窓は**画面の画素**で作る
+//   ・user32.dll および gdi32.dll を LoadLibrary で開き、必要なシンボルのみ取得（リンク不要）
+//   ・32ビットピクセルバッファ（0x00RRGGBB）を StretchDIBits で転送（COLORONCOLOR ニアレストネイバー拡大）
+//   ・Per-Monitor V2 DPI 認識に対応し、物理ピクセル単位でウィンドウを生成
 //
-// 開けなければ false を返すだけ。そのとき desktop.cpp は次の出し先を試す。
+// 初期化失敗時は false を返却し、desktop.cpp 側でフォールバックバックエンドを試行する。
 #if !defined(_WIN32)
 
 const PlatformScreen* win_screen() { return 0; }
@@ -173,8 +171,8 @@ bool load() {
     have_imm = i_ok;
   }
 
-  // 「画面の細かさは、こちらで面倒を見る」と OS に伝えておく。
-  // 言わないと OS が勝手に引き伸ばし、細かい画面（HiDPI）でぼやける
+  // 「DPI スケーリングは独自管理する」旨を OS に通知。
+  // 設定しない場合、OS による自動スケーリングが行われ、高 DPI（HiDPI）環境で表示がぼやける
   if (SetProcessDpiAwarenessContext_) {
     // -4 は「画面ごとに細かさが違ってもよい（第2版）」の目印
     if (!SetProcessDpiAwarenessContext_((void*)(intptr_t)-4) && SetProcessDPIAware_)
@@ -216,9 +214,9 @@ double pixel_ratio() {
   return r > 4.0 ? 4.0 : r;
 }
 
-// **本当に小さい面だけ**、整数倍に広げる（ゲーム機のようなドット絵のため）。
-// 引き伸ばしは画素をそのまま並べるだけなので、字も丸も粗くなる。
-// 320×240 はそのままの大きさで出し、広げるのは切手のように小さいものだけ
+// **極小解像度のみ**、整数倍に拡大（レトロゲーム等のピクセルアート向け）。
+// ニアレストネイバー拡大のため、テキストや円弧等もピクセル単位で拡大される。
+// 320×240 以上は等倍とし、拡大対象は極小解像度のみに限定。
 int pick_scale(int w, int h) {
   int s = 1;
   while (s < 6 && w * (s + 1) <= 320 && h * (s + 1) <= 240) s++;
@@ -275,9 +273,9 @@ void push_text(unsigned int cp) {
 
 // --- 変換つきの文字入力（IME）--------------------------------------------
 //
-// 変換そのものは OS（IME）に任せ、**確定した文字列と変換中の文字列だけ**を
-// 受け取る（spec/library/ui.md）。macOS は見えない NSTextView に預けられるが、
-// Windows にそういう受け皿は無いので、入力欄の中身はここで持つ。
+// 変換処理自体は OS（IME）に任せ、**確定した文字列と未確定文字列のみ**を
+// 取得する（spec/library/ui.md）。macOS では非表示の NSTextView に委譲できるが、
+// Windows には同等のプロキシビューが存在しないため、テキストバッファは本レイヤで保持する。
 //
 // 数え方は**文字（コードポイント）**。コアの text_selection / text_select と
 // 単位を合わせるため、UTF-8 のバイトではなくコードポイントのまま並べて持つ。
@@ -972,9 +970,9 @@ void clipboard_set(const char* s) {
   CloseClipboard_();
 }
 
-// --- 機種のファイル選び ---------------------------------------------------
-// comdlg32 の GetOpenFileNameW / GetSaveFileNameW を、実行時に取りに行く
-// （作るときに繋ぐ .lib を増やさないため。窓と同じやり方）
+// --- ネイティブファイルダイアログ ---------------------------------------------------
+// comdlg32.dll の GetOpenFileNameW / GetSaveFileNameW を動的ロードして呼び出す
+// （リンク時依存を避ける設計。ウィンドウ生成と同様の手法）
 bool pick_file(bool save, const char* title, const char* name, Str* out) {
   HMODULE dll = LoadLibraryW(L"comdlg32.dll");
   if (!dll) return false;
@@ -1012,9 +1010,8 @@ bool pick_file(bool save, const char* title, const char* name, Str* out) {
 
 }  // namespace win
 
-// Windows は「離した」も出せる。
-// 変換つきの文字入力（IME）も持つ。変換は OS に任せ、確定した字と変換中の字を
-// 受け取って、描くのはコアの入力欄（spec/library/ui.md）
+// Windows Win32 画面バックエンド定義
+// キーリリースイベントおよび IME 入力（imm32.dll による確定文字列・コンポジション文字列の取得）に対応（spec/library/ui.md 参照）
 const PlatformScreen kWinScreen = {win::screen_scale,  win::open,  win::close,
                                    win::present,       win::poll,  true,
                                    win::text_input,    win::text_state,
@@ -1022,7 +1019,7 @@ const PlatformScreen kWinScreen = {win::screen_scale,  win::open,  win::close,
                                    win::clipboard_get, win::clipboard_set,
                                    win::set_redraw,
                                    win::set_cursor,    win::set_resizable,
-                                   false,    // 刻みはこちらで作る（眠って起きる）
+                                   false,    // フレームレート制御は Shark 側で実行（スリープによるウェイト）
                                    win::pick_file,
                                    win::pixel_ratio};
 

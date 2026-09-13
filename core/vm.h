@@ -31,7 +31,7 @@ struct TaskState {
   Vec<Value*> places;
   TaskStatus status;
   int64_t wake_at;      // sleep 中の起床時刻（単調時計）。0 は未設定
-  int64_t wait_state;   // 待つ関数が使う覚え書き
+  int64_t wait_state;   // 非同期・待機関数用内部状態（タイムスタンプ等）
   bool cancel_req;
   Value result;
   Str panic_msg;

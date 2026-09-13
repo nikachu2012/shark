@@ -1,35 +1,35 @@
-// widgets.shk — 宣言的な層の部品を、ぜんぶ1つの画面に出す見本
+// widgets.shk — 宣言的 UI ウィジェットの総合デモ
 //
 //   ./shark run examples/widgets.shk
 //
-// 出てくる部品:
+// 登場するウィジェット:
 //   ui.label / ui.button / ui.checkbox / ui.radio / ui.slider / ui.number /
 //   ui.drag / ui.field / ui.password / ui.textarea / ui.combo / ui.listbox /
 //   ui.tabs / ui.color / ui.tree / ui.image / ui.space / ui.spacer /
 //   ui.divider / ui.col / ui.row / ui.grid / ui.center / ui.stack / ui.scroll
-// 「消す」を押すと、前に出す問いかけ（ダイアログ）が出る。ui.stack は押しを
-// いちばん上のものが取るので、幕を1枚かぶせるだけでうしろが止まる。
-// 見た目を変える鎖:
+// 「消す」ボタンをクリックするとモーダルダイアログが表示されます。ui.stack は最前面の
+// ウィジェットがイベントを優先して捕捉するため、半透明オーバーレイを重ねるだけで背面の操作を遮断できます。
+// メソッドチェーンによるスタイル指定:
 //   .color / .background / .border / .radius / .padding / .width / .height /
 //   .align / .valign / .filter / .decimals / .tooltip / .placeholder /
-//   .font / .disabled（この2つだけは**中の部品まで**効く）
+//   .font / .disabled（この2つは子ウィジェットにも継承されます）
 //
-// 一覧（ui.listbox）と選ぶ（ui.combo）とメモ（ui.textarea）は、カーソルを乗せて
-// 車輪（ホイール）を回しても送れる。一覧の右の帯は、つまんで動かせる。
+// リストボックス（ui.listbox）、コンボボックス（ui.combo）、テキストエリア（ui.textarea）は、
+// マウスホイールによるスクロールに対応しています。リストボックスのスクロールバーはドラッグ操作も可能です。
 //
-// **マウスを使わずにも操れる。**tab で次の部品へ（shift+tab で前へ）焦点が移り、
-// space か enter で押せる。つまみとタブは左右、一覧と数の欄は上下のキーで動く。
+// **キーボードによるアクセシビリティ操作にも対応しています。** Tab キーで次のウィジェットへ
+// （Shift+Tab で前へ）フォーカスを移動し、Space または Enter キーで決定/トグルできます。
+// スライダーやタブは左右キー、リストボックスや数値入力は上下キーで操作可能です。
 //
-// 状態はぜんぶ、ふつうの変数を **ref で渡す**だけ。動いたらその変数が直に
-// 書き換わるので、名札も update() も ui.value() も要らない。
-// 値を持つのは今までどおり書く人で、処理系は「どの var か」を覚えるだけ。
+// 状態管理は通常の変数を **ref で渡す** だけです。値が変更されると変数が直接更新されるため、
+// ウィジェット ID や update()、ui.value() による手動取得は不要です。
+// アプリケーション状態はユーザー側で管理し、ランタイムは対象変数のスロット参照を追跡します。
 //
-// 名札を付けて update() で振り分ける形もある（下の格子がそれ。その場に書いた
-// 関数からは外側の変数が見えないので、升ごとに作るものは名札で受ける）。
+// ID を付与して update(hit) でイベントを振り分ける旧来の形式にも対応しています（下記のグリッドなど、
+// 動的に生成する要素でクロージャが使用できない場合は ID 方式でイベントを受け取ります）。
 //
-// 日本語は ui.run() が機種のフォントを読むので、そのまま出る（ブラウザでは
-// ブラウザが描くので、かな漢字変換もそのまま使える）。窓で FreeType を入れずに
-// 作ったときだけ □ になる（README の「日本語の字を出す」）。
+// 日本語フォントは ui.run() が OS のシステムフォントを自動読み込みして描画します。
+// Web（Wasm）環境ではブラウザのネイティブテキスト描画により IME かな漢字変換もそのまま利用可能です。
 import std.ui;
 import std.file;
 
@@ -45,7 +45,7 @@ var word = "aiueo";
 var memo = "ここは複数行の入力欄です。\n改行は enter。\n上下の矢印で行を行き来し、置ける幅に入らない行はひとりでに折り返します。";
 var page = 0;
 var kuwashiku = false;   // 「くわしい設定」を使えるようにするか（.disabled）
-var toi = false;         // 前に出す問いかけ（ダイアログ）を出しているか
+var toi = false;         // モーダルダイアログの表示フラグ
 var iro = 4;
 var sakana = 0;
 var last = "なし";
@@ -69,15 +69,15 @@ func swatch() -> Canvas {
   return e;
 }
 
-// 升ごとの関数から作る格子（ui.grid(行, 列, cell)）。
-// その場に書いた関数からは外側の変数が見えないので、ここは名札で受ける
+// セル生成関数から作るグリッド（ui.grid(行, 列, cell)）。
+// クロージャでの変数キャプチャを行わないため、ここは ID 方式でイベントを受け取る
 func cell(r: int, c: int) -> Widget {
   var i = r * 3 + c;
   return ui.button(iro_na[i], f"c{i}").background(iro_ne[i]).width(1.0)
       .tooltip(f"{iro_na[i]} にします");
 }
 
-// 巻物に入れる中身。数が多くて入りきらないので、送って見ることになる
+// スクロールコンテナに配置する子要素。要素数が多く表示領域を超えるためスクロールして表示する
 func scroll_kids() -> list<Widget> {
   var kids: list<Widget> = [];
   for var i in range(sakana_na.len()) {
@@ -124,7 +124,7 @@ func body() -> Widget {
       ui.label(f"{erabu.len()} ひき えらんだ"),
       ui.tree("しらべる", ref open_ki, [
         ui.label("木の中には、どんな部品でも入れられる"),
-        // 巻物。高さを決めると、はみ出したぶんは送って見る
+        // スクロールコンテナ。高さを指定し、超過分をスクロールして表示する
         ui.scroll(scroll_kids()).height(60).border(ui.rgb(70, 80, 100)).radius(4),
       ]),
     ]);
@@ -148,7 +148,7 @@ func screen() -> Widget {
   return ui.col([
     // 見出し。ui.center は「置ける幅の真ん中に置く」。
     // .font は字だけでなく、余白も間も釣り合ったまま大きくする
-    ui.center([ui.label("ぜんぶの部品").font(20).color(ui.rgb(120, 200, 255))]),
+    ui.center([ui.label("ウィジェットカタログ").font(20).color(ui.rgb(120, 200, 255))]),
     ui.divider(),
 
     ui.row([
@@ -252,16 +252,16 @@ func screen() -> Widget {
   ]);
 }
 
-// 前に出す問いかけ（ダイアログ）。
+// モーダルダイアログの表示。
 //
-// 重ね置き（ui.stack）は、押しを**いちばん上のものが取る**。だから面ぜんぶを
-// 覆う幕を1枚かぶせるだけで、うしろの画面がまとめて止まる。
-// 前に出すための別の仕組みは要らない。
+// 重ね合わせ（ui.stack）では、クリック等のヒットテストは最前面の要素が捕捉する。
+// 画面全体を覆う半透明のオーバーレイを 1 枚挟むことで、背面ウィジェットへの入力をブロックできる。
+// 特別なモーダルシステムを必要とせず、スタック配置のみで実現可能。
 func view() -> Widget {
   if !toi { return screen(); }
   return ui.stack([
     screen(),
-    // うすい幕。ここで押しが止まるので、うしろは触れない
+    // 半透明オーバーレイ。ここでクリックイベントを遮断し、背面への操作を防止
     ui.label("").width(float.infinity()).height(float.infinity())
         .background(ui.rgba(0, 0, 0, 150)),
     ui.col([
@@ -277,7 +277,7 @@ func view() -> Widget {
   ]);
 }
 
-// 名札の付いた部品が動いたとき。ここに来るのは、上の格子（升ごとに作るもの）だけ
+// ID が付与されたウィジェットが操作されたとき。ここに来るのは、上のグリッドセル（動的に生成するもの）のみ
 func update(hit: string) -> void {
   if hit != "" { last = hit; }
   for var i in range(iro_ne.len()) {
@@ -288,7 +288,7 @@ func update(hit: string) -> void {
 func main() -> int {
   ui.theme(ui.rgb(18, 18, 26), ui.rgb(232, 232, 236), ui.rgb(76, 155, 232));
 
-  ui.run("ぜんぶの部品", 700, 540, view, update);
+  ui.run("ウィジェットカタログ", 700, 540, view, update);
 
   // 画面が無いときは、ui.run が1回だけ描いて返り、面はそのまま残る
   if ui.width() > 0 {

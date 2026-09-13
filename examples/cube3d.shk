@@ -116,7 +116,7 @@ func make_octa(r: float) -> Mesh {
 // --- 場面の持ちもの ---------------------------------------------------------
 var cube: Mesh = Mesh();
 var octa: Mesh = Mesh();
-var sky: Canvas = ui.canvas(1, 1);   // 背景。先に描いておいて、毎こま貼るだけ
+var sky: Canvas = ui.canvas(1, 1);   // 背景。事前描画しておき、毎フレーム転送する
 
 var ax: float = 0.35;    // 縦に回した角（ラジアン）
 var ay: float = 0.6;     // 横に回した角
@@ -211,9 +211,9 @@ func draw_mesh(m: Mesh, extra_ay: float) -> void {
   }
 }
 
-// --- こま数（fps）----------------------------------------------------------
-// 何こま描けたかを数えて、0.5 秒ごとに出す数を入れ替える。
-// 毎こま出し直すと数が跳ねて読めないので、少しならしてから出す
+// --- フレームレート計測（fps）----------------------------------------------
+// レンダリングされたフレーム数をカウントし、0.5 秒ごとに FPS 値を更新する。
+// 毎フレーム更新すると数値が激しく変動して読みづらいため、0.5 秒単位で平均化する
 var fps: int = 0;
 var fps_frames: int = 0;
 var fps_since: float = 0.0;
@@ -221,7 +221,7 @@ var fps_since: float = 0.0;
 func count_frame() -> void {
   fps_frames += 1;
   var now = time.monotonic().seconds();
-  if fps_since == 0.0 { fps_since = now; return; }   // 1こま目は数え始めるだけ
+  if fps_since == 0.0 { fps_since = now; return; }   // 初回フレームは計測開始のみ
   var span = now - fps_since;
   if span >= 0.5 {
     fps = int(float(fps_frames) / span + 0.5);
@@ -260,7 +260,7 @@ func draw_axis(dir: Vec3, label: string, color: int) -> void {
          int(x1 - nx), int(y1 - ny), z1,
          int(x1 + nx), int(y1 + ny), z1, color);
 
-  // 名札。向こうを向いている軸は、立方体に隠れているので薄く出す
+  // 軸ラベル。奥側を向いている軸は立方体に遮蔽されるため半透明で描画する
   var c = color;
   if t.z > o.z { c = ui.rgba(ui.red(color), ui.green(color), ui.blue(color), 105); }
   ui.text(int(x1) + 3 * K, int(y1) - ui.text_height() / 2, label, c);
@@ -291,7 +291,7 @@ func reset_view() -> void {
 func draw_all() -> void {
   ui.draw(sky, 0, 0);
 
-  // 奥行きの面は、ひとこまごとに「いちばん遠い」に戻す
+  // 深度バッファ（Z バッファ）を毎フレームクリアして初期化
   ui.clear_depth();
 
   draw_mesh(cube, 0.0);
@@ -321,7 +321,7 @@ func draw_all() -> void {
             ui.rgb(235, 195, 125));
   }
 
-  // こま数は右下の隅に。まだ数え終わっていないうちは出さない
+  // FPS 表示（右下）。計測完了前は非表示
   if fps > 0 {
     var s = f"{fps} fps";
     ui.text(W - ui.text_width(s) - 4 * K, H - ui.text_height() - 3 * K, s,
@@ -403,7 +403,7 @@ func main() -> int {
     count_frame();
     draw_all();
     ui.present();
-    ui.frame();       // 次のこまの刻みまで待つ（sleep で待つと足が出る）
+    ui.frame();       // 次のフレームタイミングまで待機（フレームレートを維持）
   }
   return 0;
 }

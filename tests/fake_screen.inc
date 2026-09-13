@@ -1,21 +1,22 @@
-// fake_screen.inc — 検査のための、偽の出し先（画面と文字入力）
+// fake_screen.inc — テスト用のモック画面・入力バックエンド実装
 //
-// 本物の窓は開かず、面の中身をこちらに控えるだけ。押した・合わせた・打った は
-// 台本で流し込む。変換つきの文字入力（IME）は、**macOS の受け皿と同じ数え方**に
-// してある（tests/imecheck.cpp が見張っているところ）。
+// 実際のウィンドウは開かず、描画バッファの内容をメモリ上に保持する。マウス操作やキー入力は
+// テストシナリオからシミュレートイベントとして注入する。IME（テキスト入力）は macOS の
+// NSTextInputClient / Web の CompositionEvent と同等のオフセット管理方式を採用している
+// （tests/imecheck.cpp で検証）。
 //
-// 使うのは tests/imecheck.cpp と tests/uicheck.cpp。
-// 差し替えた移植層は**プログラムが終わるまで生かす**こと。自動変数にすると、
-// main を抜けたあとの後始末（Vec の解放など）が消えた移植層を触ってしまう。
-// --- 偽の出し先 -----------------------------------------------------------
+// tests/imecheck.cpp および tests/uicheck.cpp で使用。
+// 差し替えた PlatformScreen インスタンスはプログラム終了まで生存させること（ローカル変数にすると
+// main 終了後のクリーンアップ時にダングリング参照となるため）。
+// --- モック画面実装 --------------------------------------------------------
 namespace fake {
 
-static const uint32_t kAccent = 0x4c9be8;   // ui.theme の差し色（既定）
+static const uint32_t kAccent = 0x4c9be8;   // ui.theme のアクセントカラー（既定）
 
 struct Ime {
-  Vec<int> full;          // 受け皿が持っている字（変換中の字も含む）
-  int mark_at, mark_len;  // 変換中のところ（full の数え方）
-  int sel_loc, sel_len;   // 選んでいるところ（full の数え方）
+  Vec<int> full;          // 入力バッファ全体のコードポイント（未確定テキストを含む）
+  int mark_at, mark_len;  // 未確定テキスト（コンポジション）の範囲（full のインデックス）
+  int sel_loc, sel_len;   // 選択範囲・カーソル位置（full のインデックス）
   bool on, multi;
   Ime() : mark_at(0), mark_len(0), sel_loc(0), sel_len(0), on(false), multi(false) {}
 };
@@ -28,7 +29,7 @@ Vec<uint32_t> px;
 int pw = 0, ph = 0;
 int frame = 0;
 
-// UTF-8 と「字の並び」の行き来
+// UTF-8 文字列とコードポイント配列の相互変換
 void to_cps(const char* s, Vec<int>* out) {
   for (int i = 0; s && s[i];) {
     unsigned char c = (unsigned char)s[i];
@@ -59,20 +60,20 @@ Str to_utf8(const Vec<int>& v, int from, int upto) {
   return r;
 }
 
-// 画面の細かさ。既定は等倍。半端な細かさ（Windows の 150%、ブラウザの拡大）を
-// 試したいときは、台本から ratio を差し替える
+// デバイスピクセル比（DPI スケール）。既定は等倍（1.0）。分数スケール（Windows の 150%、
+// ブラウザのズーム等）をテストする場合はテスト側から ratio を変更する。
 double ratio = 1.0;
 double pixel_ratio() { return ratio; }
 int scale() { return (int)(ratio + 0.5); }
 bool open(const char* t, int w, int h) { (void)t; (void)w; (void)h; g_open = true; return true; }
 void close() { g_open = false; }
 
-// 1こま描き終わるたびに呼ばれる。台本を進めるのはここ。
-// e.step() は「命令をいくつ動かすか」なので、1回で何こまも進むことがある。
-// こま数を数えたいときは、必ずこちらを使う
+// 毎フレームの描画完了時に呼ばれるコールバック。テストシナリオの進行に使用する。
+// e.step() は VM 命令ステップ数単位のため 1 呼び出しで複数フレーム進むことがある。
+// 正確にフレーム数を計測する場合はこのコールバックを使用する。
 void (*on_frame)() = 0;
 
-bool same = false;   // 前のこまと同じ絵か（動きが止まったかを見るのに使う）
+bool same = false;   // 前フレームと同じ描画内容か（アニメーションの静止判定に使用）
 
 void present(const uint32_t* p, int w, int h) {
   same = (pw == w && ph == h && px.size() == w * h);
@@ -86,7 +87,7 @@ void present(const uint32_t* p, int w, int h) {
   frame++;
   if (on_frame) on_frame();
 }
-// 絵が動いていないか（巻物が目当てに着いたか）
+// 画面描画が静止しているか（イージングスクロールが目標位置に到達したか等の判定）
 bool still() { return same; }
 
 bool poll(ScreenEvent* out) {
@@ -117,7 +118,7 @@ void closed() {
   q.push(e);
 }
 
-// --- 受け皿（macOS / ブラウザと同じ数え方）-------------------------------
+// --- IME モック（macOS / ブラウザ準拠のインデックス管理）-------------------
 void text_input(bool on, const char* initial, int x, int y, int h, bool multi) {
   (void)x; (void)y; (void)h;
   if (!on) {
@@ -136,7 +137,7 @@ void text_input(bool on, const char* initial, int x, int y, int h, bool multi) {
     im.sel_len = 0;
   }
 }
-// 確定した中身は、変換中の字を**抜いた**もの
+// 確定テキスト（未確定テキストを除外した文字列）を取得
 bool text_state(Str* confirmed, Str* marked) {
   if (!im.on) return false;
   *confirmed = to_utf8(im.full, 0, im.mark_at);
@@ -144,7 +145,7 @@ bool text_state(Str* confirmed, Str* marked) {
   *marked = to_utf8(im.full, im.mark_at, im.mark_at + im.mark_len);
   return true;
 }
-// 選んでいるところは、変換中の字も**数に入れた**もの（ここが食い違いのもと）
+// 選択範囲（未確定テキストも含めたインデックス管理）を取得
 bool text_selection(int* start, int* len) {
   if (!im.on) return false;
   *start = im.sel_loc;
@@ -157,7 +158,7 @@ void text_select(int start, int len) {
   im.sel_len = len;
 }
 void text_replace(const char* s) {
-  if (!im.on || im.mark_len > 0) return;   // 変換中は触らない（macOS と同じ）
+  if (!im.on || im.mark_len > 0) return;   // コンポジション中（未確定状態）は置換不可（macOS 準拠）
   Vec<int> ins;
   to_cps(s, &ins);
   for (int i = 0; i < im.sel_len; i++) im.full.remove(im.sel_loc);
@@ -166,7 +167,7 @@ void text_replace(const char* s) {
   im.sel_len = 0;
 }
 
-// 変換中の字を入れ替える（打つたびに伸びる）
+// 未確定テキスト（コンポジション文字列）を更新
 void compose(const char* s) {
   if (im.mark_len == 0) {
     for (int i = 0; i < im.sel_len; i++) im.full.remove(im.sel_loc);
@@ -178,10 +179,10 @@ void compose(const char* s) {
   to_cps(s, &cps);
   for (int i = 0; i < cps.size(); i++) im.full.insert(im.mark_at + i, cps[i]);
   im.mark_len = cps.size();
-  im.sel_loc = im.mark_at + im.mark_len;   // 変換中はうしろにカーソルが来る
+  im.sel_loc = im.mark_at + im.mark_len;   // 変換中は末尾にカーソルが移動
   im.sel_len = 0;
 }
-// 確定した字を、カーソルのところに入れる（変換を通さずに打ったとき）
+// 確定テキストをカーソル位置に直接挿入（IME を経由しない直接入力）
 void input(const char* t) {
   Vec<int> cps;
   to_cps(t, &cps);
@@ -190,14 +191,14 @@ void input(const char* t) {
   for (int i = 0; i < cps.size(); i++) im.full.insert(im.sel_loc + i, cps[i]);
   im.sel_loc += cps.size();
 }
-// カーソルを左右に動かす（受け皿が持っている機種では、これは OS の仕事）
+// カーソル位置を左右に移動
 void move(int by) {
   im.sel_loc += by;
   if (im.sel_loc < 0) im.sel_loc = 0;
   if (im.sel_loc > im.full.size()) im.sel_loc = im.full.size();
   im.sel_len = 0;
 }
-// 確定する。変換中だった字はそのまま中身になる
+// 未確定テキストを確定（コンポジション文字列を確定バッファに結合）
 void commit() {
   im.sel_loc = im.mark_at + im.mark_len;
   im.sel_len = 0;
@@ -219,22 +220,22 @@ void reset() {
 const PlatformScreen kScreen = {
     scale, open, close, present, poll, true,
     text_input, text_state, text_selection, text_select, text_replace,
-    0, 0,   // 切り貼りの置き場は持たない
-    0,      // 縁を引いている間の描き直し
-    0,      // マウスの形
-    0,      // 大きさを変えられない窓
-    false,  // 刻みはこちらで作れる
-    0,      // 機種のファイル選びは持たない
+    0, 0,   // クリップボード機能はモック未実装
+    0,      // リサイズ中の再描画コールバック
+    0,      // マウスカーソル形状設定
+    0,      // ウィンドウサイズ変更
+    false,  // タイマーイベントは手動シミュレート可能
+    0,      // ネイティブファイルダイアログはモック未実装
     pixel_ratio,
 };
 
 
-// 面から1点読む
+// 画面バッファの指定座標のピクセル値を取得
 uint32_t at(int x, int y) {
   if (x < 0 || y < 0 || x >= pw || y >= ph) return 0;
   return px[y * pw + x];
 }
-// 車輪（ホイール）を回す。渡す単位は 1/100 行（platform.h）
+// マウスホイールを回転（単位: 1/100 行、platform.h 準拠）
 void wheel_fine(int dy) {
   ScreenEvent e;
   e.kind = SEV_Wheel;
@@ -242,9 +243,9 @@ void wheel_fine(int dy) {
   e.y = dy;
   q.push(e);
 }
-// 行ぶんで回す（1段ぶんの車輪を1回、のつもり）
+// 行単位でホイールを回転（標準的な 1 ノッチ相当）
 void wheel(int lines) { wheel_fine(lines * 100); }
-// カーソルを動かす（押さずに合わせるだけ）
+// マウスカーソルを移動（ボタンは押さずにホバーのみ）
 void hover(int x, int y) {
   ScreenEvent e;
   e.kind = SEV_Mouse;
@@ -254,7 +255,7 @@ void hover(int x, int y) {
   e.y = y;
   q.push(e);
 }
-// 字が打たれた（入力欄に入れていないときの道。SEV_Text）
+// テキスト文字の直接入力イベント（SEV_Text）
 void type(const char* t) {
   ScreenEvent e;
   e.kind = SEV_Text;
@@ -263,7 +264,7 @@ void type(const char* t) {
   e.text[i] = 0;
   q.push(e);
 }
-// 押して離す（1回のまわしで両方流す）
+// マウスクリック（マウスダウンとマウスアップを連続送信）
 void click(int x, int y) {
   mouse(x, y, 0, true);
   mouse(x, y, 0, false);

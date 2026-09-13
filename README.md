@@ -1,149 +1,132 @@
 # Shark🦈
 
-**ゲーム機で動く、プログラミング学習用ゲームの中で使う言語。**
-外部依存が少なく、移植しやすいことを第一にしています。
+**ゲーム機等の組み込み環境でも動作する、プログラミング学習用ゲーム向けのプログラミング言語。**
+外部依存が少なく、移植しやすい設計を第一としています。
 
 ```shark
 print("Hello, Shark!");
 ```
 
-- 初学者にわかりやすく、それでいて高度なことも書ける。覚える順番があり、上級機能は書くまで邪魔をしない
-- すべての代入はコピー。共有したいときだけ `ref` と書く
-- `null` も例外も `async` も持たない。値なし・失敗・同時実行は別の道具で表す
-- 型に厳しいが、エラーは必ず直し方まで示す
-- 速くする仕組みが無い環境でも動く。標準ライブラリだけで一通り書ける
-- 実装は**実行系（コア）だけ**。ゲーム本体に組み込んで使い、無限ループを書かれても固まらない
-  ように少しずつ実行できる。`shark` コマンドはその外側に別で作る
-- コアは C++ の**雛形**。そのまま使えるところまで作り込んで git で配り、
-  手を入れるのは移植層とホスト関数の2か所だけ
+- 初学者にとって理解しやすく、かつ高度な処理も記述可能。段階的な学習ステップを意識した設計で、高度な機能は必要になるまで意識させません
+- 代入はすべて値コピー。状態を共有したい場合のみ明示的に `ref` を指定します
+- `null`、例外、`async/await` を排除。値の不在（Optional）、エラー（Result）、並行実行（Task）をそれぞれ専用の機構で表現します
+- 厳格な静的型付けを採用しつつ、コンパイルエラーには具体的な修正方法を必ず提示します
+- JITコンパイラ等の高度な最適化機構がない環境でも軽快に動作。充実した標準ライブラリ（Battery-included）のみで一通りの処理が完結します
+- コアは実行系（ランタイム）のみに特化。ゲーム等のホストアプリケーションへの組み込みを前提とし、無限ループが記述されてもホスト側がフリーズしないタイムスライス（ステップ）実行に対応。`shark` CLI はコアの外部に独立して実装されています
+- コアは C++17 によるリファレンス実装。そのまま動作する完成度で配布されており、改修が必要なのはプラットフォーム移植層とホスト関数の登録の2箇所のみです
 
-## 動かす
+## クイックスタート
 
 ```
-make                              # コアと shark コマンド、実行装置を作る（外部依存なし）
-                                  #   日本語の字を出すときだけ FreeType が要る（下）
+make                              # コア、shark CLI、専用ランタイム（sharkvm）をビルド（外部依存なし）
+                                  #   日本語フォント描画時のみ FreeType が必要（後述）
 ./shark run examples/hello.shk    # Hello, Shark!
-make test                         # tests/ を走らせる
-make embed && ./examples/embed/game   # ゲームに組み込む例
-./examples/embed/play_stage           # バイトコードを焼き込んだ例（前側を持たない）
+make test                         # テストスイート（tests/）を実行
+make embed && ./examples/embed/game   # ホストへの組み込みサンプルを実行
+./examples/embed/play_stage           # 事前生成したバイトコードを埋め込んだ実行例（コンパイラ不要）
 ```
 
 ```
-./shark run <file.shk>     実行する（.shkc を渡すと、保存したバイトコードを動かす）
-./shark check <file.shk>   型検査だけ
-./shark build <file.shk>   処理系ごと1つにまとめる（下の「1つのファイルにして配る」）
-./shark test [file.shk]    test_ で始まる関数を走らせる（省くと *_test.shk 全部）
-./shark fmt <file.shk>…    見た目を整える（-w で書き換え、--check で確かめるだけ）
-./shark explain E0102      エラーの詳しい説明
-./shark modules            この処理系が持つモジュールの一覧
+./shark run <file.shk>     スクリプトを実行（.shkc を指定した場合はコンパイル済みバイトコードを実行）
+./shark check <file.shk>   型検査のみ実行
+./shark build <file.shk>   ランタイムとバイトコードを統合した単一バイナリを生成（後述）
+./shark test [file.shk]    test_ で始まるテスト関数を実行（ファイル省略時は *_test.shk をすべて実行）
+./shark fmt <file.shk>…    ソースコードを自動整形（-w で上書き保存、--check で検証のみ）
+./shark explain E0102      エラーコードの詳細説明を表示
+./shark modules            有効化されているモジュール一覧を表示
 
-  --memory <MB>            使ってよいメモリの量。超えたら実行時エラー（既定 256）
-  --lang ja|en / --strict  診断の言語 / 警告をエラーとして扱う
+  --memory <MB>            メモリ使用量上限（MB）。超過時は実行時エラー（デフォルト: 256）
+  --lang ja|en / --strict  診断メッセージの言語切り替え / 警告をエラーとして扱う
 ```
 
-## Windows で作る
+## Windows でのビルド
 
-Windows には `make` が無いので、代わりに `tools\build_win.bat` を使う。
-**要るのは Visual Studio の C++ だけ**で、外のライブラリは1つも要らない
-（窓は `user32.dll` を実行時に取りに行く）。
+Windows 環境では `make` の代わりに `tools\build_win.bat` を使用します。
+**Visual Studio の C++ 開発環境のみでビルド可能**であり、外部ライブラリへの依存はありません
+（GUI ウィンドウ生成に必要な Win32 API は実行時に動的ロードされます）。
 
 ```
-tools\build_win.bat            shark.exe と sharkvm.exe を作る
-tools\build_win.bat freetype   日本語の字を出す FreeType を足す（一度だけ。下）
-tools\build_win.bat test       作ってから tests\ を走らせる（sh が要る）
-tools\build_win.bat clean      作ったものを消す
+tools\build_win.bat            shark.exe および sharkvm.exe をビルド
+tools\build_win.bat freetype   日本語フォント描画用 FreeType を取得・静的ビルド（初回のみ。後述）
+tools\build_win.bat test       ビルド後にテスト（tests\）を実行（sh が必要）
+tools\build_win.bat clean      ビルド生成物を削除
 
 .\shark.exe run examples\hello.shk
 ```
 
-| | |
+| 項目 | 詳細 |
 |---|---|
-| コンパイラ | [Visual Studio](https://visualstudio.microsoft.com/) 2019 以降の「**C++ によるデスクトップ開発**」（Build Tools だけでもよい）。置き場所は `vswhere` が自動で探す |
-| `test` に要るもの | `sh`（[Git for Windows](https://gitforwindows.org/) に付いてくる）。無いときは作るところまでは動く |
-| MSYS2 / MinGW を使うなら | `make` がそのまま動く（`.exe` の付け外しは Makefile が面倒を見る） |
+| コンパイラ | [Visual Studio](https://visualstudio.microsoft.com/) 2019 以降の「**C++ によるデスクトップ開発**」（Build Tools でも可）。`vswhere` によりパスを自動検出 |
+| `test` の実行要件 | `sh`（[Git for Windows](https://gitforwindows.org/) 等に同梱）。`sh` がない場合でもビルド自体は可能 |
+| MSYS2 / MinGW を利用する場合 | `make` がそのまま動作可能（`.exe` の拡張子処理は Makefile 内で自動制御） |
 
-- **日本語はそのまま通る。**診断も `print` も UTF-8 で出て、`shark run 日本語.shk` のような
-  ファイル名も渡せる（端末の符号と命令行を、起動のときに UTF-8 にそろえている）
-- `shark build` が作るのは `.exe`。名前に付いていなければ自動で足す
-- 窓（`std.ui`）は Win32 の窓が開く。キー・文字・マウス・大きさの変更・× で閉じるが届き、
-  切り貼りの置き場（クリップボード）とマウスの形も使える。
-  画面の細かさ（HiDPI）は OS に尋ねて `ui.scale()` が返す
-- **日本語の変換（IME）もそのまま使える。**変換中の字は入力欄に下線つきで出て、
-  候補の一覧は Windows のものが入力欄のすぐ下に出る。確定するとその字が入る。
-  入力欄では ctrl+A / ctrl+C / ctrl+V / ctrl+X も効く
-- 日本語の**字形**は同梱の Noto Sans JP で出る。そのためには FreeType を足しておく
-  （`tools\build_win.bat freetype`。下の「日本語の字を出す」）。
-  足さないと窓の中の日本語は □ になる
+- **日本語を完全サポート。** 診断メッセージも `print` 出力も UTF-8 で統一され、`shark run 日本語.shk` のような日本語ファイル名も扱えます（起動時にコンソールのコードページとコマンドライン引数を UTF-8 に統一）。
+- `shark build` は Windows 環境では `.exe` を生成します。出力ファイル名に拡張子がない場合は自動補完されます。
+- GUI（`std.ui`）はネイティブな Win32 ウィンドウを開きます。キー入力、文字入力、マウス操作、リサイズ、閉じる操作に対応し、クリップボード連携やマウスポインタ形状の変更も可能です。ディスプレイの拡大率（HiDPI）は OS から取得し、`ui.scale()` で参照できます。
+- **日本語入力（IME）にネイティブ対応。** 変換中の未確定文字列は入力欄内に下線付きでインライン表示され、変換候補ウィンドウは入力欄直下に配置されます。確定文字列がそのまま反映され、入力欄での Ctrl+A / Ctrl+C / Ctrl+V / Ctrl+X 等のショートカットも動作します。
+- 日本語フォントは同梱の Noto Sans JP により描画されます。日本語を描画するには FreeType のリンクが必要です（`tools\build_win.bat freetype`。後述の「日本語フォント描画」参照）。リンクしない場合、ウィンドウ内の日本語文字は豆腐（□）として表示されます。
 
-## ブラウザで動かす
+## WebAssembly / ブラウザでの動作
 
-同じコアを WebAssembly にしたものが [web/](web/README.md) にある。
-書いて動かすところまで、タブの中だけで完結する（何も外に送らない）。
+同一のコアを WebAssembly にコンパイルした Web 版が [web/](web/README.md) に用意されています。
+コードの編集から実行まで、ブラウザのタブ内（クライアントサイド）のみで完結します（サーバーへのコード送信等は一切行いません）。
 
 ```
-make web            # web/dist/ に作る（Emscripten が要る）
-make web-serve      # 作ってから http://localhost:8000/ に配る
-make web-test       # 作ったものを node で確かめる
+make web            # web/dist/ にビルド（Emscripten が必要）
+make web-serve      # ビルドして http://localhost:8000/ でローカル配信
+make web-test       # ビルド成果物を Node.js で検証
 ```
 
-- 移植層（`core/platform/web.cpp`）を1つ足しただけ。言語も標準ライブラリもそのまま動く
-- `std.ui` はブラウザの中に**窓を出す**（帯を引けば動き、隅で大きさが変わり、× で閉じる）。
-  日本語もそのまま出る（字はブラウザに描いてもらう → [web/README.md](web/README.md)）
-- **ゲームもそのまま動く。**お手本から 2D（ブロック崩し）と 3D（回る立方体）が選べる。
-  キーもマウスも面に届き、`ui.frame()` が刻みを合わせるので、`shark` コマンドと同じ速さで動く
-- 実行は刻んでホストに返るので、**止まらない繰り返しを書いてもブラウザは固まらない**。
-  ゲームに組み込むときと同じ仕組み
-- 書くところは Monaco Editor。入力候補・説明・引数の案内が出て、
-  誤りの波線は**本物の型検査**から引いている
-- 出し入れは**端末とおなじ**。出力も打った文字も1本の流れに並び、`input()` は打たれるまで待つ。
-  出る形（診断・panic・テストの結果）も `shark` コマンドと同じ
-- **説明も一緒に入る。**上の帯の「説明」（`Ctrl`（`⌘`）+ `I`）で**小窓**が開き、
-  関数の一覧と言語の使い方を**書きながら**読める。頭をつかんで動かし、右下の角で大きさを変える
-  （`web/dist/docs/`。`make docs` が作るのと同じもの）。配るものの中で閉じているので、
-  繋がっていなくても読める
-- `shark.wasm` は 940 KB（gzip 290 KB）。置き場に置くだけで動き、サーバ側の処理は要らない
+- 移植層（`core/platform/web.cpp`）を追加したのみで、言語処理系および標準ライブラリがそのまま動作します
+- `std.ui` はブラウザ内にフローティングウィンドウを描画します（タイトルバーのドラッグ移動、右下でのリサイズ、閉じるボタンに対応）。ブラウザの Canvas API を介して日本語フォントもそのまま描画されます（詳細は [web/README.md](web/README.md) 参照）
+- **ゲームもそのまま動作。** サンプルから 2D（ブロック崩し）や 3D（回転する立方体）を選択可能です。キー・マウスイベントがキャンバスに伝達され、`ui.frame()` によりブラウザの描画フレーム（`requestAnimationFrame`）と同期して動作します
+- 実行は一定ステップごとにブラウザのイベントループへ制御を戻すため、**無限ループを記述してもブラウザがフリーズすることはありません**。ゲーム組み込み時と同様のタイムスライス機構を採用しています
+- エディタには Monaco Editor を採用。コード補完、ホバー説明、引数ヒントが表示され、エラー波線はコンパイラ本体の型検査エンジンと連動しています
+- 入出力はターミナルと同様に動作します。標準出力と入力プロンプトが単一のストリームとして表示され、`input()` は入力完了まで非同期に待機します。診断メッセージ、パニック、テスト結果の表示形式も CLI 版と同一です
+- **ドキュメントも一体化。** ヘッダーメニューの「説明」（または `Ctrl/⌘ + I`）でモーダルウィンドウが開き、コードを編集しながら API リファレンスや言語ガイドを参照できます。ウィンドウはドラッグで移動・リサイズが可能です。すべて静的ファイル（`web/dist/docs/`）として同梱されているため、完全オフライン環境でも閲覧できます
+- `shark.wasm` のバイナリサイズは 940 KB（gzip 時 290 KB）。静的ホスティングに配置するだけで動作し、サーバーサイドの処理は一切不要です
 
-## 画面に描く
+## GUI・グラフィック描画（std.ui）
 
-`std.ui` には層が2つある。どちらも描くのはこの処理系の中で、
-外の描画ライブラリにもフォントにも、**窓の道具にも頼らない**。
+`std.ui` は2つのレイヤーで構成されています。どちらも処理系内部で直接描画を行い、
+外部のGUIツールキットやフォントエンジンに依存しません。
 
 ```
-./shark run examples/paint.shk       # 下の層。マウスで描く
-./shark run examples/node_editor.shk # 下の層。ノードをつなぐと Shark のコードになる
-./shark run examples/counter.shk     # 上の層。部品を組んで返す
-./shark run examples/widgets.shk     # 上の層。部品をぜんぶ1つの画面に出す
-./shark run examples/breakout.shk    # ブロック崩し。絵（Canvas）と透明を使う
-./shark run examples/cube3d.shk      # 回る立方体。三角形と奥行き（z バッファ）を使う
-./shark run examples/hexedit.shk     # Hex エディタ。下の層で表を描き、キーとマウスで書き換える
+./shark run examples/paint.shk       # 低レベル層: マウス描画ツール
+./shark run examples/node_editor.shk # 低レベル層: ノードエディタ（ノードを接続して Shark コードを生成）
+./shark run examples/counter.shk     # 高レベル層: 最小の宣言的 UI カウンタ
+./shark run examples/widgets.shk     # 高レベル層: 全 UI ウィジェットの総合デモ
+./shark run examples/breakout.shk    # ブロック崩し（Canvas とアルファブレンディングを使用）
+./shark run examples/cube3d.shk      # 3D回転立方体（三角形ラスタライズと Z バッファを使用）
+./shark run examples/hexedit.shk     # Hex エディタ（低レベル層でテーブル描画、キー・マウス操作対応）
 ```
 
-**下の層**は、画素の並び1枚（面）と、押された・動いたという出来事だけ。
+**低レベル描画 API（Immediate-style）** は、ピクセルバッファ（サーフェス）とマウス・キーボードイベントを直接扱います。
 
 ```shark
 import std.ui;
 
-ui.open("さかな", 160, 120);   // 面は画素の並び。細かい画面なら ui.scale() を掛ける
+ui.open("さかな", 160, 120);   // ピクセルバッファを生成。HiDPI 環境では ui.scale() を乗算
 while ui.poll() {
   if ui.pressed("esc") { ui.quit(); }
   ui.clear(ui.rgb(0, 20, 40));
   ui.fill_circle(ui.mouse_x(), ui.mouse_y(), 12, ui.rgb(255, 140, 60));
   ui.present();
-  ui.frame();                  // 次のこまの刻みまで待つ（sleep で待つと足が出る）
+  ui.frame();                  // 次のフレーム更新まで待機（フレームレートを自動同期）
 }
 ```
 
-**上の層**は、「いまどうあるべきか」を **`Widget` 1つに組んで返す**だけ。
-くり返しも描き直しも `ui.run()` が引き受けるので、**書くのは「いまの姿」1つ**で済む。
+**高レベル宣言的 UI（Declarative UI）** は、現在の状態に応じた UI 構造を **`Widget` ツリーとして構築して返す** だけのシンプルな設計です。
+イベントループや再描画処理は `ui.run()` が一括管理するため、**開発者は「現在の UI の状態」のみを記述** します。
 
 ```shark
-var count = 0;                        // 状態はふつうの変数
+var count = 0;                        // 状態は通常の変数
 
-func view() -> Widget {               // いまどうあるべきか
-  return ui.col([                     // 縦に並べる。横は ui.row、格子は ui.grid
+func view() -> Widget {               // 画面の構成を返す
+  return ui.col([                     // 縦方向に配置（横方向は ui.row、グリッドは ui.grid）
     ui.label(f"{count} 回"),
     ui.row([
-      ui.button("ふやす", func() -> void { count += 1; }),   // 押されたときの動き
+      ui.button("ふやす", func() -> void { count += 1; }),   // クリック時のコールバック
       ui.button("へらす", func() -> void { count -= 1; }),
     ]),
   ]);
@@ -152,303 +135,264 @@ func view() -> Widget {               // いまどうあるべきか
 ui.run("かうんた", 420, 300, view);
 ```
 
-- 呼び出しにブロックを続ける記法は言語に無いので、入れ子は `ui.col` / `ui.row` / `ui.grid` に**配列**で渡して表す
-- **押されたときの動きは部品に持たせる。**名前を付けた関数を渡してもよいし、
-  まとめて振り分けたいときは、名札を渡して `update(hit)` で受けてもよい
-- 部品は状態を持たない。値は呼んだ側が持って毎回渡し直すので、
-  **「いまの状態」と「画面」が食い違わない**
-- 見た目は鎖でつないで変える。`ui.label("さめ").color(c).padding(6)`
-- `ui.run()` は**処理系の中で Shark 自身で書いてある**。特別な仕掛けは無く、
-  下の層（`ui.poll` / `ui.show` / `ui.present`）を呼んでいるだけ
+- 関数の末尾にブロックを続ける記法は持たないため、子要素の入れ子は `ui.col` / `ui.row` / `ui.grid` に **配列（リスト）** として渡して表現します
+- **イベントハンドラはウィジェットに直接設定します。** 名前付き関数や無名関数を渡すことも、タグ名（文字列）を渡して `update(hit)` で一括処理することも可能です
+- ウィジェット自身は状態を保持しません。状態は呼び出し側が保持して毎フレーム渡すため、**内部状態と描画内容の不整合（状態の二重管理）が発生しません**
+- スタイリングはメソッドチェーンで行います: `ui.label("さめ").color(c).padding(6)`
+- `ui.run()` は **Shark 自身で記述された標準ライブラリコード** です。特別な内部機構ではなく、低レベル層（`ui.poll` / `ui.show` / `ui.present`）を呼び出してループを実行しています
 
-### 出し先
+### 対応プラットフォーム / バックエンド
 
-`shark` コマンドは、出せるところに出す。
+`shark` コマンドは実行環境に応じた描画バックエンドを自動選択します。
 
-| | |
+| プラットフォーム | ウィンドウシステム |
 |---|---|
-| macOS | 窓（AppKit） |
-| Windows | 窓（Win32 + GDI） |
-| Linux ほか | 窓（X11） |
-| 窓が開けないところ | 見えない面に描く。結果は `ui.get()` と `ui.to_png()` で取れる |
+| macOS | ネイティブウィンドウ（AppKit） |
+| Windows | ネイティブウィンドウ（Win32 + GDI） |
+| Linux その他 | ネイティブウィンドウ（X11） |
+| ヘッドレス環境（SSH等） | オフスクリーンバッファに描画。描画結果は `ui.get()` や `ui.to_png()` で取得可能 |
 
-面の1画素は画面の1画素にそのまま乗る。**細かい画面（HiDPI）では面も細かく取る。**
+サーフェスの1ピクセルは画面の物理ピクセルに対応します。**HiDPI（高精細ディスプレイ）環境ではサーフェス解像度をスケールに合わせて確保します。**
 
 ```shark
-var k = ui.scale();                  // ふつうは 1、Retina なら 2
-ui.open("さめ", 420 * k, 300 * k);   // 見た目の大きさは変わらず、中身が細かくなる
-_ = ui.font(12 * k);                 // 12pt くらい
+var k = ui.scale();                  // 通常は 1、Retina 等では 2
+ui.open("さめ", 420 * k, 300 * k);   // 見かけのサイズを維持したまま高精細に描画
+_ = ui.font(12 * k);                 // 12pt 相当のフォントサイズ
 ```
 
-- 窓に要る関数は**実行時に**取りに行く（`dlopen` / `LoadLibrary`）ので、
-  **作るときに要るライブラリは無い**。X11 の無い機械でもそのまま作れる
-- 画面が無くても同じように動くので、**画面の要るプログラムでもテストが書ける**
-- `SHARK_UI=off` で窓を開かず、見えない面に描かせられる
-- 移植層に求めるのは「面を出す」と「出来事を渡す」の2つだけ。
-  ゲームに組み込むときは、その面をゲーム本体が受け取る
-  （[spec/library/ui.md](spec/library/ui.md)）
+- ウィンドウ生成に必要なシステム API は **実行時に動的ロード**（`dlopen` / `LoadLibrary`）するため、**ビルド時のライブラリ依存はありません**。X11 がインストールされていない環境でもコンパイル可能です
+- ディスプレイがない環境でも同一のコードが動作するため、**GUI を含むプログラムでも自動テストを実行可能** です
+- 環境変数 `SHARK_UI=off` を設定することで、ウィンドウを表示せずオフスクリーン描画に切り替えられます
+- 移植層に要求されるのは「ピクセルバッファの転送」と「イベントの通知」の2点のみです。ゲーム等のホストに組み込む際は、そのピクセルバッファをゲーム側のテクスチャ等として受け取ります（詳細は [spec/library/ui.md](spec/library/ui.md) 参照）
 
-内蔵の字形は ASCII だけ。日本語などは □ になる。
+## 日本語フォント描画（FreeType）
 
-## 日本語の字を出す（FreeType）
+内蔵フォントは ASCII（5×7 ドット）のみをサポートしています。日本語等のアウトラインフォントを描画するには **FreeType** が必要です。
+FreeType は本処理系における **唯一の外部ライブラリ** ですが、**リンクは任意** です。FreeType なしでもビルド・実行は正常に行えます
+（日本語が □ と表示されるのみ）。日本語グリフをバイナリ内に静的保持するとバイナリサイズが肥大化するため、フォントラスタライズのみ外部ライブラリを利用可能としています（[spec/library/ui.md](spec/library/ui.md)）。
 
-内蔵の字形は ASCII だけ。日本語などを出すには **FreeType** が要る。
-これが**唯一の外部ライブラリ**で、**任意**。入れなくても処理系は作れて動く
-（日本語が □ になるだけ）。日本語の字形を自前で抱えると処理系が数百 KB 太るので、
-ここだけ外に頼ることにした（[spec/library/ui.md](spec/library/ui.md)）。
+**フォントファイルは同梱されています。** `assets/fonts/NotoSansJP-Regular.otf`
+（Noto Sans JP Regular / [SIL Open Font License 1.1](assets/fonts/LICENSE-NotoSansJP.txt)）が用意されており、
+`shark` は実行ファイルと同一ディレクトリの `assets/fonts/` にあるフォントをデフォルトで使用します。
+OS のフォントインストール状況に左右されず、全環境で同一の表示結果が得られます。
+別のフォントを使用したい場合は、環境変数 `SHARK_FONT` にフォントパスを指定するか（優先適用）、`ui.font(path, size)` で直接指定します。
 
-**フォントは同梱してある。**`assets/fonts/NotoSansJP-Regular.otf`
-（Noto Sans JP Regular / [SIL Open Font License 1.1](assets/fonts/LICENSE-NotoSansJP.txt)）で、
-`shark` は実行ファイルの隣にあるこれを既定にする。
-機種に何が入っているかを気にせず、どこでも同じ字で出る。
-別のものを使いたいときは、環境変数 `SHARK_FONT` にその場所を入れる
-（そちらが勝つ）か、`ui.font(path, size)` で直に渡す。
+### 1. FreeType のインストール
 
-### 1. FreeType を入れる
-
-| | |
+| 環境 | 手順 |
 |---|---|
-| Windows（Visual Studio） | `tools\build_win.bat freetype`（元を取ってきて静的に作る。ほかに要るものは無い） |
+| Windows（Visual Studio） | `tools\build_win.bat freetype`（ソースを取得して静的ライブラリを自動ビルド。追加ツール不要） |
 | macOS | `brew install freetype` |
 | Debian / Ubuntu | `sudo apt install libfreetype-dev pkg-config` |
 | Fedora / RHEL | `sudo dnf install freetype-devel pkgconf-pkg-config` |
-| Arch | `sudo pacman -S freetype2 pkgconf` |
+| Arch Linux | `sudo pacman -S freetype2 pkgconf` |
 | Windows（MSYS2） | `pacman -S mingw-w64-x86_64-freetype mingw-w64-x86_64-pkgconf` |
 
-### 2. 作り直す
+### 2. 再コンパイル
 
-`make` が `pkg-config` で見つけて、自動で使う。
+`make` は `pkg-config` を用いて FreeType を自動検出し、利用可能であればリンクします。
 
 ```
-make clean && make          # 見つかれば FreeType つきで作られる
+make clean && make          # FreeType が検出されれば有効化してビルド
 ```
 
-| したいこと | |
+| 設定内容 | コマンド |
 |---|---|
-| 入っていても使わない | `make FREETYPE=0` |
-| pkg-config が無い | `make FREETYPE=1 FT_CFLAGS=-I/opt/freetype/include/freetype2 FT_LIBS="-L/opt/freetype/lib -lfreetype"` |
-| Windows（Visual Studio） | `tools\build_win.bat freetype` のあと `tools\build_win.bat`。すでに手元にあるものを使うなら `tools\build_win.bat build -FtInclude <include> -FtLib <freetype.lib>` |
-| 使われているか見る | `./shark run examples/counter.shk`（日本語が出れば入っている） |
+| FreeType を意図的に無効化 | `make FREETYPE=0` |
+| pkg-config なしで手動指定 | `make FREETYPE=1 FT_CFLAGS=-I/opt/freetype/include/freetype2 FT_LIBS="-L/opt/freetype/lib -lfreetype"` |
+| Windows（Visual Studio） | `tools\build_win.bat freetype` 実行後に `tools\build_win.bat`。手元のライブラリを使う場合は `tools\build_win.bat build -FtInclude <include> -FtLib <freetype.lib>` |
+| 有効化の確認 | `./shark run examples/counter.shk`（日本語が表示されればリンク成功） |
 
-`make clean` を挟むのは、`make` が「作るときの指定が変わったこと」までは見ないため。
+※ ビルドフラグの変更時は `make clean` を実行してください（`make` はフラグ変更を検知しないため）。
 
-### 3. プログラムから読む
+### 3. スクリプトからのフォント読み込み
 
-**何もしなければ内蔵の字形のまま。**読むかどうかは書く人が決める。
+**明示的に指定しない場合は内蔵 5×7 フォントが使用されます。** アウトラインフォントを読み込むかはプログラム側で制御します。
 
 ```shark
 import std.ui;
 
-var k = ui.scale();                   // 細かい画面（Retina）なら 2
+var k = ui.scale();                   // 高解像度ディスプレイ（Retina 等）では 2
 ui.open("さめ", 420 * k, 300 * k);
-if !ui.font(12 * k) {                 // 12pt くらい。画素で渡す
+if !ui.font(12 * k) {                 // ピクセル単位でフォントサイズを指定
   print("フォントが見つかりません");
 }
 ui.text(8 * k, 8 * k, "こんにちは", ui.rgb(255, 255, 255));
 ```
 
-探す順番は、環境変数 `SHARK_FONT` → 機種によくある場所。
-`shark` コマンドは、`SHARK_FONT` が空なら**同梱の Noto Sans JP**（実行ファイルの隣の
-`assets/fonts/`）をそこに入れるので、何もしなければそれが使われる。
-同梱のものが無いときは機種によくある場所を見る
-（macOS はヒラギノ角ゴシック W4、Windows は游ゴシック、Linux は Noto Sans CJK Regular）。
-探すのは**本文の太さ**で、別の太さが要るときは自分で選ぶ。
+フォントの探索順序は、環境変数 `SHARK_FONT` → OS の標準フォントディレクトリです。
+`shark` コマンドは、`SHARK_FONT` が未設定の場合、**同梱の Noto Sans JP**（実行ファイルの隣の `assets/fonts/`）を優先して探索します。
+同梱フォントが見つからない場合は、各 OS の代表的なフォントを探索します
+（macOS: ヒラギノ角ゴシック W4、Windows: 游ゴシック、Linux: Noto Sans CJK Regular）。
 
-### 持っていない字は、控えのフォントから（フォールバック）
+### フォントフォールバック機能
 
-1本のフォントに世界中の字は入っていない。同梱の Noto Sans JP も、日本語と英数字は
-持っているが**絵文字やハングルは持っていない**。そこで、いま使っているフォントに
-無い字が来たら、**機種のフォントから順に探す**。
+1つのフォントファイルにすべての文字が含まれているわけではありません。同梱の Noto Sans JP も日本語と英数字をカバーしていますが、**絵文字やハングル文字などは含まれていません**。そこで、現在選択されているフォントにグリフが存在しない文字が指定された場合、**OS のフォントを順次探索してフォールバック表示** します。
 
 ```shark
 _ = ui.font(20);
-ui.text(10, 10, "日本語 ✓ 한국어 🦈", ui.rgb(0, 0, 0));   // ぜんぶ出る
+ui.text(10, 10, "日本語 ✓ 한국어 🦈", ui.rgb(0, 0, 0));   // すべて正常に描画
 ```
 
-- 控えは**要るときに1本ずつ**読む。足りているうちは1本も読まない
-- 探すのは `SHARK_FONT_FALLBACK`（`;` 区切り。使う人が決めたものが勝つ）→
-  機種のフォント（記号 → 絵文字 → ハングル → 日本語 の順）
-- どの控えも持っていなければ □ になる。無いことが見て分かるように、そのまま出す
-- 行の高さと基準線は**本命のフォント**で決まるので、控えが混じっても行が揺れない
-- 読んだフォントはそのまま抱えるので、**そのぶんメモリが要る**（4本まで）。
-  Windows で測ると、日本語だけなら 17 MB、絵文字を出すと 39 MB。
-  絵文字のフォントが 12 MB あるためで、使わなければ増えない
-- **色は付かない。**絵文字は形（白黒）で出る。字の色は `ui.text()` に渡した色になる
+- フォールバックフォントは**必要になった時点で遅延ロード**されます。不要な文字が使われない限りロードされません
+- 探索順序は `SHARK_FONT_FALLBACK`（`;` 区切りのパスリスト。ユーザー指定が最優先）→ OS の標準フォント（記号 → 絵文字 → ハングル → 日本語の順）
+- いずれのフォントにもグリフが存在しない文字のみ □ として描画されます
+- 行の高さ（行送り）やベースラインは**プライマリフォント**のメトリクスを維持するため、フォールバック文字が混在しても行のレイアウトが崩れません
+- ロードされたフォントはメモリ上にキャッシュされます（最大4フォントまで）。フォント使用時のみメモリを消費します
+- **カラー絵文字には非対応です。** 絵文字はモノクロのアウトラインとして描画され、文字色は `ui.text()` 等で指定した色が適用されます
 
 ```shark
 _ = ui.font("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 15);
-_ = ui.font(data, 15);     // 自分で読んだ中身（bytes）から
-ui.font_builtin();          // 内蔵の 5×7 に戻す
-print(ui.font_name());      // いま使っているもの。内蔵なら空
+_ = ui.font(data, 15);     // メモリ上のフォントデータ（bytes）から読み込み
+ui.font_builtin();          // 内蔵の 5×7 フォントに戻す
+print(ui.font_name());      // 現在ロードされているフォント名（内蔵フォント時は空文字）
 ```
 
-### 気をつけること
+### 注意事項
 
-- **字の幅と高さは、その機種のフォント次第**になる。`ui.text_width()` の答えも変わる。
-  内蔵の字形のままなら、どの機種でも同じ形・同じ大きさで出る。
-  だから**既定は内蔵**で、`ui.font()` を呼んだときだけ切り替わる
-- 部品（ボタンなど）の寸法は字の大きさから決まるので、`ui.font()` を変えるだけで
-  全体の釣り合いが付いてくる
-- `shark build` で作った単一バイナリは、FreeType つきで作ったなら
-  配る先にも FreeType が要る（`make FREETYPE=0` で作れば要らない）。
-  Windows の `tools\build_win.bat freetype` は**静的に**繋ぐので、これは要らない
-- 同梱のフォントを一緒に配るときは、`assets/fonts/` を実行ファイルの隣に置く。
-  置かないときは機種のフォントに落ちる（見つからなければ日本語は □）
-- **絵文字は同梱のフォントには入っていない。**機種の絵文字フォントを控えから読むので
-  形は出るが、**色は付かない**（上の「控えのフォントから」）
-- ブラウザ版（`make web`）とゲーム機向けの雛形には FreeType を入れない。
-  ブラウザは**ブラウザ自身に字を描いてもらう**ので、`ui.font()` はそのまま使えて日本語も出る
-  （移植層の `PlatformFont`。ゲーム機向けの雛形は内蔵の字形だけ）
+- **文字の幅と高さはロードされたフォントに依存** します（`ui.text_width()` の戻り値も変化します）。内蔵フォント使用時は全環境で同一のピクセルサイズとなります。そのため**デフォルトでは内蔵フォント**が選択されており、`ui.font()` を呼び出した場合のみアウトラインフォントに切り替わります
+- ウィジェット（ボタンや入力欄等）の各種寸法はフォントサイズに対する比率で算出されるため、`ui.font()` でサイズを変更すると UI 全体のバランスが連動してスケーリングされます
+- `shark build` で生成した単一バイナリは、FreeType 有効でビルドされた場合、配布先環境にも FreeType 動的ライブラリが必要です（`make FREETYPE=0` でビルドした場合は不要）。Windows の `tools\build_win.bat freetype` では **静的リンク** されるため、配布先へのライブラリ同梱は不要です
+- 同梱フォントを使用する場合は、`assets/fonts/` ディレクトリを実行ファイルと同一ディレクトリに配置して配布してください。配置されていない場合は OS のシステムフォントへフォールバックします
+- ブラウザ版（`make web`）およびゲーム機向けテンプレートでは FreeType をリンクしません。ブラウザ環境ではブラウザ自身の Canvas API を用いてグリフを描画するため、`ui.font()` はそのまま利用可能で日本語も正常に描画されます（移植層の `PlatformFont`。ゲーム機向けテンプレートは内蔵フォントのみサポート）
 
-## 押すたびの検査と、配りかた（CI/CD）
+## CI/CD と配布パッケージ（GitHub Actions）
 
-`.github/workflows/` に3つ置いてある。
+`.github/workflows/` に 3 つのワークフローが設定されています。
 
-| 台本 | いつ | すること |
+| ワークフロー | トリガー | 処理内容 |
 |---|---|---|
-| `ci.yml` | main への push と pull request | macOS・Linux・Windows で作って `make test`、`make docs`、`make docs-check` |
-| `pages.yml` | main への push | ブラウザ版（WebAssembly）を作って **Cloudflare Pages** に載せる |
-| `release.yml` | `v` で始まるタグを押したとき | 4つの機種の実行ファイルを作って、Release に付ける |
+| `ci.yml` | `main` への push / Pull Request | macOS・Linux・Windows でビルド、`make test`、`make docs`、`make docs-check` を実行 |
+| `pages.yml` | `main` への push | WebAssembly 版をビルドし **Cloudflare Pages** に自動デプロイ |
+| `release.yml` | `v` から始まるタグの push | 主要4プラットフォーム向けのバイナリをビルドし、GitHub Release にアタッチ |
 
-どれも FreeType を**元から静的に作って**繋ぐ（`tools/freetype_static.sh`、
-Windows は `tools\build_win.bat freetype`）。配るものは、それだけで動く1つの
-実行ファイルになり、相手の機械には何も入れてもらわなくてよい。
+すべてのワークフローで FreeType を **ソースから静的ビルド** してリンクします（`tools/freetype_static.sh`、Windows は `tools\build_win.bat freetype`）。配布バイナリは外部依存のない単一実行ファイルとなり、配布先環境での追加インストールは不要です。
 
 ```
-sh tools/freetype_static.sh                    # 元から静的に作る（一度だけ）
-make $(sh tools/freetype_static.sh --flags)    # それを繋いで作る
+sh tools/freetype_static.sh                    # FreeType を静的ライブラリとしてビルド（初回のみ）
+make $(sh tools/freetype_static.sh --flags)    # 静的ライブラリをリンクしてビルド
 ```
 
-### できたものを取る
+### ビルド成果物（Artifacts）の取得
 
-押すたびの検査（`ci.yml`）は、4つの機種ぶんを包んで置いていく。
-GitHub の **Actions → その実行 → Artifacts** から落とせる（14 日で消える）。
-ブラウザ版も同じで、`pages.yml` の実行に `shark-web`（`web/dist` そのもの）が付く。
+CI ワークフロー（`ci.yml`）では、ビルドされた各プラットフォーム向けパッケージをアーカイブして保存します。
+GitHub の **Actions → 該当の実行履歴 → Artifacts** からダウンロード可能です（保存期間 14 日間）。
+Web 版も同様に、`pages.yml` の実行結果から `shark-web`（`web/dist` の静的成果物一式）を取得できます。
 
-| 名前 | 中身 |
+| パッケージ名 | 内容 |
 |---|---|
-| `shark-macos-arm64` / `shark-macos-x86_64` | macOS の実行ファイル一式 |
-| `shark-linux-x86_64` | Linux の実行ファイル一式 |
-| `shark-windows-x86_64` | Windows の実行ファイル一式 |
-| `shark-web` | ブラウザ版（そのまま静的に配れる） |
+| `shark-macos-arm64` / `shark-macos-x86_64` | macOS 向け実行ファイル一式 |
+| `shark-linux-x86_64` | Linux 向け実行ファイル一式 |
+| `shark-windows-x86_64` | Windows 向け実行ファイル一式 |
+| `shark-web` | Web ブラウザ版（静的ファイル一式） |
 
-同じ包みは手元でも作れる。中身は実行ファイル（`shark` / `sharkvm`）と、
-同梱のフォント・見本・説明（`docs/`。ブラウザ版に入れるのと同じもの）・README で、
-**入れてもらうものは何も無い**。
+配布パッケージはローカル環境でも作成可能です。実行ファイル（`shark` / `sharkvm`）、同梱フォント、サンプルコード、HTML ドキュメント（`docs/`）、README が同梱され、**追加依存なしで即座に動作** します。
 
 ```
-make dist                    # → dist/shark-<機種>.tar.gz（Windows は .zip）
-make dist NAME=macos-arm64   # 機種の名前を自分で決める
+make dist                    # → dist/shark-<ターゲット>.tar.gz（Windows は .zip）
+make dist NAME=macos-arm64   # ターゲット名を明示指定
 ```
 
-名札（タグ）を押したときは、同じものが Release にも付く。
+リリースタグ（`v*`）を push すると、GitHub Release にも同一のアーカイブが自動添付されます。
 
-Cloudflare Pages に載せるには、リポジトリの Settings → Secrets and variables →
-Actions に2つ入れておく。無ければ、作るところまでで止まる（載せない）。
+Cloudflare Pages への自動デプロイを有効にするには、リポジトリの Settings → Secrets and variables → Actions に以下の 2 つのシークレットを登録します。登録がない場合、ビルドのみ実行されてデプロイはスキップされます。
 
-| 秘密 | 中身 |
+| シークレット名 | 内容 |
 |---|---|
-| `CLOUDFLARE_API_TOKEN` | Pages を編集できる合鍵（Cloudflare の My Profile → API Tokens） |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare の口座の番号（ダッシュボードの右下） |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare Pages デプロイ権限を持つ API トークン |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare アカウント ID（ダッシュボード右下に表示） |
 
-Pages のプロジェクト名は `pages.yml` の `CF_PAGES_PROJECT`（既定は `shark`）。
-Cloudflare 側に同じ名前で先に作っておく。
+Pages のプロジェクト名は `pages.yml` の `CF_PAGES_PROJECT`（デフォルト: `shark`）です。あらかじめ Cloudflare 側で同名のプロジェクトを作成してください。
 
-## 1つのファイルにして配る
+## 単一実行ファイルへのビルド（shark build）
 
-`shark build` は、書いたプログラムを**それだけで動く1つの実行ファイル**にする。
-渡す相手に処理系を入れてもらう必要はなく、`.shk` も要らない
-（[spec/runtime/bytecode.md](spec/runtime/bytecode.md)）。
+`shark build` は、作成した Shark スクリプトを **単体で動作する単一バイナリ** にコンパイル・パッケージングします。
+配布先環境に Shark 処理系をインストールする必要はなく、`.shk` ソースコードの配布も不要です
+（詳細は [spec/runtime/bytecode.md](spec/runtime/bytecode.md) 参照）。
 
 ```
-./shark build examples/hello.shk   # → ./hello（446 KB）
+./shark build examples/hello.shk   # → ./hello（約 446 KB）
 ./hello                            # Hello, Shark!
 ```
 
-- 中身は**バイトコード実行装置＋バイトコード**。
-  字句解析・構文解析・型検査・コード生成は入らないので、`shark` 自身（929 KB）より小さい
-  （実行装置 444 KB ＋ hello のバイトコード 2 KB。gzip で 152 KB）
-- 型検査は作るときに済んでいる。動かすときはバイトコードを読んで走らせるだけ
-- `import` したモジュールも中に入る。作ったファイルはどの場所からでも動く
-- メモリの上限（`--memory`）と診断の言語（`--lang`）は、**作るときに**決まる
-- 引数と標準入力はそのままプログラムに届く（`os.args()` と `input()`）
+- 内部構成は **専用ランタイム（VM）＋ コンパイル済みバイトコード** です。
+  字句解析・構文解析・型検査・コード生成モジュールは含まれないため、`shark` CLI バイナリ（約 929 KB）よりも大幅に軽量です
+  （ランタイム約 444 KB ＋ hello バイトコード約 2 KB。gzip 圧縮時約 152 KB）
+- 型検査およびコード生成はビルド時に完了しているため、実行時はバイトコードをロードして実行するのみです
+- `import` されたモジュールもバイナリ内に静的統合されるため、生成されたバイナリは単独で任意のパスから実行可能です
+- メモリ使用量上限（`--memory`）や診断言語（`--lang`）のオプションは **ビルド時に固定** されます
+- コマンドライン引数および標準入力はそのままプログラムへ伝達されます（`os.args()`、`input()`）
 
 ```
-./shark build --bytecode main.shk   # バイトコードだけ保存する（main.shkc）
-./sharkvm main.shkc                 # 実行装置で動かす
-./shark run main.shkc               # shark からも動かせる
+./shark build --bytecode main.shk   # バイトコードのみ保存（main.shkc）
+./sharkvm main.shkc                 # 専用ランタイムで直接実行
+./shark run main.shkc               # shark CLI からもバイトコードを直接実行可能
 ```
 
-`sharkvm` は仮想マシンだけを持つ実行装置で、`make` で一緒に作られる。
-`shark build` はこれを土台にして単一バイナリを組み立てる。
+`sharkvm` は仮想マシンランタイムのみで構成された軽量実行バイナリであり、`make` 時に同時に生成されます。
+`shark build` はこの `sharkvm` をベースとして単一バイナリを構築します。
 
-- 起動の速さは `shark run` とほぼ変わらない（型検査はもともと 1 ミリ秒ほど）。
-  縮むのは**配るものの大きさと、要るもの**
-- 保存したバイトコードは、同じ版の処理系で作り直せる前提。
-  版や関数の表が食い違うファイルは、動かす前に気づいて止まる
-- macOS では、足したぶんが実行ファイルの形の外に出るので、`codesign -v` は
-  「うしろに余りがある」として通らない（そのままでは動く。人に配って
-  Gatekeeper や公証を通すには、`.app` に包むなど別の手当てが要る）
+- 起動速度は `shark run` と同等です（型検査自体が通常 1 ミリ秒程度で完了するため）。単一バイナリ化のメリットは **配布フットプリントの最小化と外部依存の排除** です
+- 生成されたバイトコードは同一バージョンのランタイムとの互換性を前提としています。バージョンやホスト関数のシグネチャが不一致のバイトコードは、実行前に検証され安全に拒否されます
+- macOS ではバイナリ末尾にペイロードを追加する構造上、`codesign -v` で「追加データが存在する」として署名検証エラーとなります（ローカル実行は可能ですが、Gatekeeper や公証を通す場合は `.app` バンドル化等の対応が必要です）
 
-## 速さ
+## パフォーマンス（ベンチマーク）
 
-同じ内容を C・Python・Shark で書いて測ったもの。**Python と同じくらい**で、
-最適化した C とは 5〜60 倍の差がある。
+同一のアルゴリズムを C、Python、Shark で実装して計測した実行速度の比較です。**Python と同等以上の実行速度** を達成しており、高度に最適化された C と比較して約 5〜60 倍程度の実行時間となります。
 
-| 内容 | C (-O2) | Python 3.14 | Shark | Shark ÷ C | Shark ÷ Python |
+| テスト内容 | C (-O2) | Python 3.14 | Shark | Shark ÷ C | Shark ÷ Python |
 |---|---|---|---|---|---|
-| 整数のループ 1000万回（`sum += i % 7`） | 5 ms | 425 ms | **289 ms** | 59 倍 | 0.68 倍 |
-| 再帰呼び出し `fib(32)`（436万回の呼び出し） | 5 ms | 149 ms | **309 ms** | 61 倍 | 2.07 倍 |
-| 可変長配列に 100万件足して合計（5回くり返す） | 6 ms | 346 ms | **206 ms** | 33 倍 | 0.60 倍 |
-| key-value に 50万件入れて、50万回引く | 6 ms | 73 ms | **45 ms** | 7 倍 | 0.62 倍 |
-| 書式付きの文字列を 100万個作る | 32 ms | 121 ms | **169 ms** | 5 倍 | 1.39 倍 |
-| （下敷き）起動して 0 を出すだけ | 3 ms | 10 ms | 2 ms | — | — |
+| 整数ループ 1,000万回（`sum += i % 7`） | 5 ms | 425 ms | **289 ms** | 59 倍 | 0.68 倍 |
+| 再帰呼び出し `fib(32)`（436万回呼び出し） | 5 ms | 149 ms | **309 ms** | 61 倍 | 2.07 倍 |
+| 可変長配列に 100万件追加して合計（5回反復） | 6 ms | 346 ms | **206 ms** | 33 倍 | 0.60 倍 |
+| 連想配列（map）に 50万件挿入、50万回参照 | 6 ms | 73 ms | **45 ms** | 7 倍 | 0.62 倍 |
+| 書式付き文字列生成 100万回 | 32 ms | 121 ms | **169 ms** | 5 倍 | 1.39 倍 |
+| （ベースライン）プロセス起動と終了のみ | 3 ms | 10 ms | 2 ms | — | — |
 
-- ループ・配列・key-value は Python より速く、**関数呼び出しと文字列づくりは Python より遅い**
-- Shark は仮想マシンだけで動かした結果。実行時コンパイル（JIT）は仕様でも任意機能で、まだ入れていない
-- 測り方: 3つの言語に同じアルゴリズムを書き、**出力が一致することを確かめてから**、
-  各3回走らせていちばん速かった回を採る。プロセスの起動時間も含む（最下行がその下敷き）
-- 環境: macOS 26 (arm64) / Apple clang 21 `-O2` / CPython 3.14.3 / Shark 0.1.0
+- ループ、配列操作、マップ操作は Python より高速であり、**関数呼び出しおよび文字列生成のオーバーヘッドは Python より大きい** 結果となっています
+- Shark の計測値はバイトコード仮想マシン（インタープリタ）によるものです。JIT コンパイラは仕様上任意機能と定義されており、現時点では未実装です
+- 計測方法: 3言語で同一アルゴリズムを記述し、**出力結果の一致を検証した上で**、各3回計測した最速値を採用。プロセスの起動時間を含みます（最下行のベースライン参照）
+- 計測環境: macOS 26 (arm64) / Apple clang 21 `-O2` / CPython 3.14.3 / Shark 0.1.0
 
 ```
-python3 bench/run.py            # 全部測り直す
-python3 bench/run.py loop fib   # 選んで測る
+python3 bench/run.py            # 全ベンチマークを実行
+python3 bench/run.py loop fib   # 特定のベンチマークのみ実行
 ```
 
-## 読むところ
+## ドキュメント一覧
 
-| | |
+| ドキュメント | 内容 |
 |---|---|
-| [docs/reference.md](docs/reference.md) | 言語の使い方（利用者向け・全17章） |
-| docs/reference/（`make docs`） | 標準ライブラリのリファレンス。ライブラリごとに1枚、全関数に動く例つき |
-| [stdlib/README.md](stdlib/README.md) | その元になる宣言ファイルの書き方 |
-| [docs/implementation.md](docs/implementation.md) | 実装メモ（作った範囲・組み込み方・移植の手順） |
-| [web/README.md](web/README.md) | ブラウザで動かす（作り方・ホストの入口・できないこと） |
-| [spec/README.md](spec/README.md) | 思想と仕様書の索引 |
-| [spec/open-questions.md](spec/open-questions.md) | まだ決めていないこと |
+| [docs/tutorial.md](docs/tutorial.md) | やさしい入門・実践解説書（全13章・ゲームを作りながら楽しく学ぶ） |
+| [docs/reference.md](docs/reference.md) | 言語機能ガイド・文法リファレンス（全17章） |
+| docs/reference/（`make docs`） | 標準ライブラリ API リファレンス（モジュール別 HTML、全関数の動作サンプル付き） |
+| [stdlib/README.md](stdlib/README.md) | 標準ライブラリ宣言ファイル（`.shk`）の仕様・記述ルール |
+| [docs/implementation.md](docs/implementation.md) | 実装仕様書（実装範囲・組み込み手順・プラットフォーム移植手順） |
+| [web/README.md](web/README.md) | WebAssembly 版ガイド（ビルド手順・ホスト連携・仕様差分） |
+| [spec/README.md](spec/README.md) | 言語設計思想および言語仕様書インデックス |
+| [spec/open-questions.md](spec/open-questions.md) | 未決定事項・検討中の仕様一覧 |
 
-## 構成
+## ディレクトリ構成
 
 ```
-core/     実行系（コア）。C++。ファイルも端末も触らない
-  platform/   移植層          ← 機種に合わせて差し替える場所
-  lib/        標準ライブラリ
-  bytecode    バイトコードの保存と読み戻し
-  runtime     バイトコードだけを動かす実行装置（前側を持たない Engine）
-frontend/ shark コマンドと sharkvm（実行装置）。どちらもコアとは別実装
-web/      ブラウザで動かす一式（WebAssembly。これもコアとは別実装）
-examples/ サンプル。embed/ はゲームに組み込む例（その場で読む形と、焼き込む形）
-tests/    テスト（make test）
-bench/    C・Python・Shark の速さ比べ（python3 bench/run.py）
-stdlib/   標準ライブラリの宣言（名前・型・説明・例）。リファレンスと補完のもと
-tools/    宣言を読む道具（リファレンス生成・例の実行・prelude の埋め込み）と、
-          Windows で作る入口（build_win.bat / build_win.ps1）
-assets/   同梱するもの。fonts/ に Noto Sans JP（日本語の字形）
-docs/     利用者向けのリファレンスと実装メモ。gen.py が stdlib/ から HTML を作る
-spec/     仕様
-  types/      型システム
-  runtime/    実行系（コア）の内部と、ホストとの境界
-  library/    標準ライブラリ
-  skeleton.md コアの雛形。何を入れ、どこを書き換えるか
-  frontend.md コマンドライン実装（コアとは別に作る）
+core/     実行系コア（C++17）。ファイル I/O やコンソール入出力を行わない組み込み可能設計
+  platform/   移植層（desktop / console / web）← ターゲット環境に応じて差し替えるモジュール
+  lib/        標準ライブラリの C++ 実装
+  bytecode    バイトコードのシリアライズおよびデシリアライズ
+  runtime     バイトコード実行専用ランタイム（コンパイラを含まない Engine）
+frontend/ shark CLI コマンドおよび sharkvm ランタイムの実装（コアとは独立）
+web/      WebAssembly 版関連ファイル一式（移植層: core/platform/web.cpp）
+examples/ サンプルコード。embed/ には C++ アプリケーションへの組み込みサンプルを収録
+tests/    回帰テストスイート（make test）
+bench/    C・Python・Shark のパフォーマンステスト（python3 bench/run.py）
+stdlib/   標準ライブラリの型・関数宣言ファイル（*.shk）。API リファレンスおよび入力補完のマスター
+tools/    開発支援ツール群（リファレンス生成・サンプル検証・prelude 埋め込み・Windows ビルドスクリプト）
+assets/   同梱アセット。fonts/ に Noto Sans JP（日本語フォント）を収録
+docs/     言語ガイド・実装ドキュメント。gen.py により stdlib/ から HTML リファレンスを生成
+spec/     詳細言語仕様書
+  types/      型システム仕様
+  runtime/    ランタイム内部構造およびホスト境界仕様
+  library/    標準ライブラリ仕様
+  skeleton.md コアの雛形設計。モジュール構成と拡張ポイント
+  frontend.md CLI フロントエンドの実装仕様
 ```

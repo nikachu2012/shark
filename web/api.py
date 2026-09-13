@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# api.py — 入力補完（IntelliSense）が使う API の表（api.js）を作る。web/build.sh から呼ばれる。
+# api.py — 入力補完（IntelliSense）用の API 定義テーブル（api.js）を生成。web/build.sh から呼び出される。
 #
-#   使い方: api.py <リポジトリの場所> <出力先 api.js>
+#   使用方法: api.py <リポジトリパス> <出力先 api.js>
 #
-# 中身は stdlib/*.shk（宣言ファイル）が正で、読むのは tools/shkdoc.py。
-# HTML のリファレンス（docs/gen.py）と同じ出どころなので、説明も例も一致する。
-# 手で書いた一覧は持たない。実装と食い違っていれば、作るときに知らせる。
+# stdlib/*.shk（宣言ファイル）を tools/shkdoc.py で解析して生成。
+# HTML リファレンス（docs/gen.py）と同一のデータソースを使用するため、ドキュメントやコード例の整合性が保たれる。
+# 手作業による定義リストは持たず、宣言と実装の乖離があればビルド時に警告を出力する。
 import json
 import os
 import sys
@@ -16,7 +16,7 @@ import shkdoc  # noqa: E402
 
 
 def entry(item, name, sig, prefix=''):
-    """補完が使う形。lang.js が読む"""
+    """エディタの入力補完用エントリを生成。lang.js から参照される"""
     e = {'name': name, 'sig': sig, 'params': item['params'], 'ret': item['ret'],
          'doc': item['doc'], 'kind': 'const' if item['kind'] == 'const' else 'function'}
     if item['overloads']:
@@ -56,14 +56,14 @@ def build(root):
 api, pages = build(root)
 
 with open(out_path, 'w', encoding='utf-8') as f:
-    f.write('// api.js — web/api.py が stdlib/*.shk から作る。直に書き換えない\n')
+    f.write('// api.js — web/api.py により stdlib/*.shk から自動生成。直接編集しないでください\n')
     f.write('window.SHARK_API = ')
     json.dump(api, f, ensure_ascii=False, indent=1)
     f.write(';\n')
 
 total = len(api['builtins']) + sum(len(m['members']) for m in api['modules'].values()) + \
     sum(len(v) for v in api['methods'].values())
-print('API %d 件（モジュール %d / 型 %d）' % (total, len(api['modules']), len(api['methods'])))
+print('API 定義生成完了: %d 件（モジュール %d / 型 %d）' % (total, len(api['modules']), len(api['methods'])))
 missing, extra = shkdoc.crosscheck(pages, shkdoc.core_names(root))
 if missing or extra:
-    print('  宣言と実装が食い違っています: %s' % ' '.join(missing + extra))
+    print('  警告: 宣言と実装に乖離があります: %s' % ' '.join(missing + extra))

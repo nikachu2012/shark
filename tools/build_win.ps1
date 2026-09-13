@@ -1,19 +1,19 @@
-﻿# build_win.ps1 — Windows で shark と sharkvm を作る（Visual Studio の C++）
+# build_win.ps1 — Windows 環境で shark と sharkvm をビルドする（Visual Studio MSVC）
 #
-#   tools\build_win.bat          作る
-#   tools\build_win.bat test     作ってから tests\ を走らせる（sh が要る）
-#   tools\build_win.bat clean    作ったものを消す
+#   tools\build_win.bat          ビルドする
+#   tools\build_win.bat test     ビルド後に tests\ を実行する（sh が必要）
+#   tools\build_win.bat clean    ビルド成果物を削除する
 #
-# PowerShell から直に呼ぶときは:
+# PowerShell から直接実行する場合:
 #   powershell -ExecutionPolicy Bypass -File tools\build_win.ps1
 #
-# 作る中身は Makefile と同じ。ソースの一覧は Makefile の RT_SRC / FE_SRC が正で、
-# ここはその写し（増やしたら両方を直す。make print-core-src が一覧を出す）。
+# ビルド内容は Makefile と同一。ソース一覧は Makefile の RT_SRC / FE_SRC をマスターとし、
+# 本スクリプトはその複製です（追加・削除時は両方を更新。make print-core-src で一覧を出力可能）。
 #
-# 要るもの: Visual Studio 2019 以降の「C++ によるデスクトップ開発」。
-# 外のライブラリは1つも要らない（窓は user32.dll を実行時に取りに行く）。
-# 日本語の字を出す FreeType は任意（README の「日本語の字を出す」）。
-# 入れたときだけ、置き場所を渡す:
+# 必要環境: Visual Studio 2019 以降の「C++ によるデスクトップ開発」。
+# 外部ライブラリは不要（ウィンドウ表示に必要な user32.dll は実行時に動的ロード）。
+# 日本語フォント描画用の FreeType は任意（README の「日本語フォントの表示」を参照）。
+# 組み込む場合のみ、パスを指定する:
 #   tools\build_win.bat build -FtInclude C:\freetype\include -FtLib C:\freetype\lib\freetype.lib
 param([string]$Task = "build", [string]$FtInclude = "", [string]$FtLib = "")
 
@@ -31,29 +31,29 @@ if ($Task -eq "clean") {
     $p = Join-Path $root $f
     if (Test-Path $p) { Remove-Item -Force $p }
   }
-  Write-Host "消しました"
+  Write-Host "ビルド成果物を削除しました"
   exit 0
 }
 
-# --- Visual Studio の道具を使える状態にする --------------------------------
-# vcvars64.bat は環境変数をたくさん置いていく。cmd で呼んでから、
-# 置いていった環境変数をこちらに写す（PowerShell から .bat は呼べないため）
+# --- Visual Studio のビルド環境（MSVC）を初期化する ---
+# vcvars64.bat により設定された環境変数を取得し、
+# 現在の PowerShell プロセスへ反映する（PowerShell から直接バッチファイル環境変数は継承されないため）
 function Enter-MsvcEnv {
   if (Get-Command cl.exe -ErrorAction SilentlyContinue) { return }
 
   $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
   if (-not (Test-Path $vswhere)) {
     Write-Host "Visual Studio が見つかりません。"
-    Write-Host "  入れ方: https://visualstudio.microsoft.com/ から"
-    Write-Host "          「C++ によるデスクトップ開発」を選んで入れます"
+    Write-Host "  インストール方法: https://visualstudio.microsoft.com/ から"
+    Write-Host "                    「C++ によるデスクトップ開発」をインストールしてください"
     exit 1
   }
   $vs = & $vswhere -latest -products * `
     -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
     -property installationPath
   if (-not $vs) {
-    Write-Host "Visual Studio に C++ の道具が入っていません。"
-    Write-Host "  直し方: Visual Studio Installer で「C++ によるデスクトップ開発」を足します"
+    Write-Host "Visual Studio に C++ ビルドツールがインストールされていません。"
+    Write-Host "  対処法: Visual Studio Installer で「C++ によるデスクトップ開発」を追加してください"
     exit 1
   }
   $vcvars = Join-Path $vs "VC\Auxiliary\Build\vcvars64.bat"
@@ -65,26 +65,26 @@ function Enter-MsvcEnv {
     if ($_ -match '^([^=]+)=(.*)$') { Set-Item -Path "env:$($matches[1])" -Value $matches[2] }
   }
   if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
-    Write-Host "コンパイラ（cl.exe）を使える状態にできませんでした"
+    Write-Host "コンパイラ（cl.exe）の環境設定に失敗しました"
     exit 1
   }
 }
 
-# --- FreeType（日本語などの字形。任意）-------------------------------------
+# --- FreeType（日本語フォント描画用。任意）---
 #
-# 唯一の外部ライブラリで、入れなくても処理系は作れて動く（日本語が □ になるだけ）。
-# Windows には pkg-config が無いので、ここで元を取ってきて**静的に**作り、
-# shark.exe の中に入れてしまう（配るときに DLL が付いて回らない）。
+# 唯一の外部ライブラリであり、未導入でもビルドおよび動作は可能です（日本語が □ 表示になるのみ）。
+# Windows には pkg-config がないため、ソースコードを取得して静的ライブラリとしてビルドし、
+# shark.exe に静的リンクします（単一バイナリ配布を可能にするため）。
 #
-#   tools\build_win.bat freetype   一度だけ作る
-#   tools\build_win.bat            作ってあれば、自動で使う
+#   tools\build_win.bat freetype   初回のみ実行してビルド
+#   tools\build_win.bat            ビルド済みであれば自動検出してリンク
 $ftVer = "VER-2-13-3"
 $ftSrc = Join-Path $root "build\freetype-src"
 $ftInc = Join-Path $ftSrc "include"
 $ftLib = Join-Path $root "build\freetype\freetype.lib"
 
-# docs/INSTALL.ANY が挙げているもの。include/freetype/config/ftmodule.h が
-# 名指しする組み立て部品は、ぜんぶ揃えておく（欠けると繋ぐときに足りなくなる）
+# docs/INSTALL.ANY に記載されたファイル一覧。include/freetype/config/ftmodule.h で
+# 指定されるコンポーネントを網羅（不足時はリンクエラーとなります）
 $ftFiles = @(
   "base\ftsystem.c", "base\ftinit.c", "base\ftdebug.c", "base\ftbase.c",
   "base\ftbbox.c", "base\ftglyph.c", "base\ftbdf.c", "base\ftbitmap.c",
@@ -103,26 +103,25 @@ function Build-Freetype {
   New-Item -ItemType Directory -Force -Path (Join-Path $root "build") | Out-Null
   if (-not (Test-Path (Join-Path $ftInc "ft2build.h"))) {
     $tgz = Join-Path $root "build\freetype.tar.gz"
-    Write-Host "FreeType $ftVer を取ってきています..."
+    Write-Host "FreeType $ftVer をダウンロードしています..."
     $url = "https://codeload.github.com/freetype/freetype/tar.gz/refs/tags/$ftVer"
     try {
       Invoke-WebRequest -Uri $url -OutFile $tgz -UseBasicParsing
     } catch {
-      Write-Host "取ってこられませんでした: $url"
-      Write-Host "  直し方: 自分で FreeType の元を $ftSrc に置いてから、もう一度呼びます"
+      Write-Host "ダウンロードに失敗しました: $url"
+      Write-Host "  対処法: FreeType のソースコードを手動で $ftSrc に配置してから再実行してください"
       exit 1
     }
-    # Windows のものを名指しで呼ぶ。PATH に MSYS の tar があると、
-    # C:\... の : を「別の機械」と読んでしまう
+    # Windows 標準の tar を呼び出す（PATH に MSYS の tar がある場合のパス解釈不一致を回避）
     $tar = Join-Path $env:SystemRoot "System32\tar.exe"
     if (-not (Test-Path $tar)) { $tar = "tar" }
     Push-Location (Join-Path $root "build")
     & $tar -xzf "freetype.tar.gz"
     $code = $LASTEXITCODE
     Pop-Location
-    if ($code -ne 0) { Write-Host "広げられませんでした: $tgz"; exit 1 }
+    if ($code -ne 0) { Write-Host "アーカイブの展開に失敗しました: $tgz"; exit 1 }
     $un = Join-Path $root "build\freetype-$ftVer"
-    if (-not (Test-Path $un)) { Write-Host "広げられませんでした: $tgz"; exit 1 }
+    if (-not (Test-Path $un)) { Write-Host "アーカイブの展開に失敗しました: $tgz"; exit 1 }
     if (Test-Path $ftSrc) { Remove-Item -Recurse -Force $ftSrc }
     Move-Item $un $ftSrc
     Remove-Item -Force $tgz
@@ -131,20 +130,20 @@ function Build-Freetype {
   $ftObj = Join-Path $root "build\freetype\obj"
   New-Item -ItemType Directory -Force -Path $ftObj | Out-Null
   $srcs = $ftFiles | ForEach-Object { Join-Path $ftSrc "src\$_" }
-  Write-Host "FreeType を作っています..."
-  # /DFT2_BUILD_LIBRARY は「ライブラリ本体を作っている側」の目印
+  Write-Host "FreeType をビルドしています..."
+  # /DFT2_BUILD_LIBRARY はライブラリ本体のビルド指定フラグ
   & cl /nologo /O2 /W0 /MP /DFT2_BUILD_LIBRARY "/I$ftInc" /c @srcs "/Fo:$ftObj\"
   if ($LASTEXITCODE -ne 0) { exit 1 }
   $objs = Get-ChildItem -Path $ftObj -Filter *.obj | ForEach-Object { $_.FullName }
   & lib /nologo "/OUT:$ftLib" @objs
   if ($LASTEXITCODE -ne 0) { exit 1 }
-  Write-Host "できました: build\freetype\freetype.lib"
+  Write-Host "ビルド完了: build\freetype\freetype.lib"
 }
 
 if ($Task -eq "freetype") {
   Build-Freetype
   Write-Host ""
-  Write-Host "このあと tools\build_win.bat で作り直すと、日本語の字が出るようになります"
+  Write-Host "この後 tools\build_win.bat で再ビルドすると、日本語フォントが描画可能になります"
   exit 0
 }
 
@@ -152,30 +151,30 @@ Enter-MsvcEnv
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 Push-Location $root
 
-# --- 作るときの決めごと -----------------------------------------------------
-#   /utf-8                     ソースも文字列も UTF-8（無いと日本語が化ける）
-#   /EHs-c- /GR-               例外と RTTI を使わない（spec/skeleton.md）
-#   /D_CRT_SECURE_NO_WARNINGS  fopen などの「危ないかも」の知らせを止める
-#   /MP                        使える分だけ同時に作る
+# --- コンパイルオプション ---
+#   /utf-8                     ソースコードおよび実行文字セットを UTF-8 に設定
+#   /EHs-c- /GR-               例外と RTTI を無効化（spec/skeleton.md）
+#   /D_CRT_SECURE_NO_WARNINGS  fopen などの非推奨セキュリティ警告（C4996）を抑止
+#   /MP                        並列コンパイルを有効化
 $cflags = @("/nologo", "/std:c++17", "/utf-8", "/O2", "/W3", "/EHs-c-", "/GR-",
             "/D_CRT_SECURE_NO_WARNINGS", "/MP")
 $ldlibs = @()
-# 場所を渡されていなければ、build_win.bat freetype で作ったものを探す
+# パスが未指定の場合、build_win.bat freetype で生成されたライブラリを探索
 if ($FtInclude -eq "" -and (Test-Path $ftLib) -and (Test-Path (Join-Path $ftInc "ft2build.h"))) {
   $FtInclude = $ftInc
   $FtLib = $ftLib
 }
 if ($FtInclude -ne "") {
-  # FreeType を使う（無ければ内蔵の 5×7 の字形だけになり、日本語は □ になる）
-  if ($FtLib -eq "") { Write-Host "-FtInclude を渡すときは -FtLib も要ります"; exit 1 }
+  # FreeType をリンク（未指定時は内蔵 5×7 フォントのみとなり、日本語は □ 表示）
+  if ($FtLib -eq "") { Write-Host "-FtInclude を指定する場合は -FtLib の指定も必要です"; exit 1 }
   $cflags += @("/DSHARK_FREETYPE", "/I$FtInclude")
   $ldlibs += $FtLib
   Write-Host "FreeType: $FtLib"
 } else {
-  Write-Host "FreeType なし（日本語の字は □ になります。tools\build_win.bat freetype で足せます）"
+  Write-Host "FreeType なし（日本語は □ 表示となります。tools\build_win.bat freetype で追加可能）"
 }
 
-# RT_SRC — バイトコードを動かすのに要るもの（＝実行装置。sharkvm はこれだけ）
+# RT_SRC — ランタイム用ソース（sharkvm に必要な最小限のセット）
 $rtSrc = @(
   "core\support.cpp", "core\value.cpp", "core\program.cpp", "core\types.cpp", "core\diag.cpp",
   "core\vm.cpp", "core\registry.cpp", "core\bytecode.cpp", "core\runtime.cpp",
@@ -185,30 +184,30 @@ $rtSrc = @(
   "core\lib\os.cpp", "core\lib\text.cpp", "core\lib\json.cpp", "core\lib\test.cpp",
   "core\lib\crypto.cpp", "core\lib\ui.cpp")
 
-# FE_SRC — ソースからバイトコードを作るところ
+# FE_SRC — フロントエンド用ソース（字句解析・構文解析・型検査・コード生成）
 $feSrc = @("core\lexer.cpp", "core\parser.cpp", "core\check.cpp", "core\codegen.cpp",
            "core\fmt_src.cpp", "core\shark.cpp")
 
-# tests\ の C++ 側の検査。Makefile の test が要るものと同じ4つを作る
-#   memcheck  … 後始末とメモリの上限
-#   bytecheck … 壊れたバイトコードを断るか
-#   imecheck  … 変換つきの文字入力（IME）
-#   uicheck   … 部品を押した・合わせたときの動き
+# tests\ の C++ ユニットテスト。Makefile の test 対象と同一の4バイナリをビルド
+#   memcheck  … メモリ解放と上限チェック
+#   bytecheck … 不正なバイトコードの拒否検証
+#   imecheck  … IME による文字入力テスト
+#   uicheck   … UIウィジェットのクリック・ホバー動作テスト
 $testSrc = @("tests\memcheck.cpp", "tests\bytecheck.cpp",
              "tests\imecheck.cpp", "tests\uicheck.cpp")
 
 $allSrc = $rtSrc + $feSrc + @("frontend\main.cpp", "frontend\vm_main.cpp") + $testSrc
 
-Write-Host "コアを作っています..."
+Write-Host "コアをコンパイルしています..."
 & cl @cflags /c @allSrc "/Fo:$out\"
 if ($LASTEXITCODE -ne 0) { Pop-Location; exit 1 }
 
-# .cpp の名前から .obj の名前を作る（cl は /Fo にまとめると平らに並べる）
+# .cpp 名から .obj 名を解決
 function ObjOf($files) { $files | ForEach-Object { Join-Path $out ([IO.Path]::GetFileNameWithoutExtension($_) + ".obj") } }
 $rtObj = ObjOf $rtSrc
 $feObj = ObjOf $feSrc
 
-Write-Host "繋いでいます..."
+Write-Host "リンクしています..."
 & cl @cflags "/Fe:$root\shark.exe" @rtObj @feObj (Join-Path $out "main.obj") @ldlibs
 if ($LASTEXITCODE -ne 0) { Pop-Location; exit 1 }
 & cl @cflags "/Fe:$root\sharkvm.exe" @rtObj (Join-Path $out "vm_main.obj") @ldlibs
@@ -218,13 +217,13 @@ foreach ($t in @("memcheck", "bytecheck", "imecheck", "uicheck")) {
   if ($LASTEXITCODE -ne 0) { Pop-Location; exit 1 }
 }
 
-Write-Host "できました: shark.exe / sharkvm.exe"
+Write-Host "ビルド完了: shark.exe / sharkvm.exe"
 Pop-Location
 
 if ($Task -eq "test") {
   if (-not (Get-Command sh.exe -ErrorAction SilentlyContinue)) {
     Write-Host ""
-    Write-Host "tests\run.sh を走らせるには sh が要ります（Git for Windows に付いてきます）"
+    Write-Host "tests\run.sh の実行には sh が必要です（Git for Windows に同梱されています）"
     exit 1
   }
   Write-Host ""

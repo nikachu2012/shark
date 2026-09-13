@@ -1,7 +1,7 @@
-// std.ui の上の層 — 飾り・重ね置き・巻物と、あとから足した部品（spec/library/ui.md）
+// std.ui 高レベルウィジェット — デコレーション、スタック、スクロールコンテナ等（spec/library/ui.md）
 import std.ui;
 
-// ref で受ける部品に渡す変数（一番外側の var でなければならない）
+// ref 引数に渡す状態変数（モジュール最上位スコープの var である必要がある）
 var vol = 0.25;
 var gain = 12;
 var hex = "1F";
@@ -10,7 +10,7 @@ var picked: list<int> = [0, 2];
 var hiraku = true;
 var iro = ui.rgb(80, 160, 220);
 
-// 塗られている点の数。描けているかを数で見るのに使う
+// 描画ピクセル数（非ゼロのピクセル数）。描画アサーションに使用
 func hits(x0: int, y0: int, x1: int, y1: int) -> int {
   var n = 0;
   for var y in range(y0, y1) {
@@ -21,7 +21,7 @@ func hits(x0: int, y0: int, x1: int, y1: int) -> int {
   return n;
 }
 
-// 字の色で塗られた点の数。下地の上に出た字だけを数える
+// テキスト前景色で描画されたピクセル数を集計
 func fgs(x0: int, y0: int, x1: int, y1: int) -> int {
   var n = 0;
   var fg = ui.rgb(230, 230, 230);
@@ -77,25 +77,25 @@ func main() -> int {
                         ui.label("").width(8).height(8).background(red).valign("middle")]), 0, 0);
   print(ui.get(0, 12));
 
-  // --- 巻物（ui.scroll）---
+  // --- スクロールコンテナ（ui.scroll）---
   var rows: list<Widget> = [];
   for var i in range(20) { rows.push(ui.label(f"{i}").background(blue).width(20).height(10)); }
   ui.open(80, 60);
   ui.clear(0);
   _ = ui.show(ui.scroll(rows).height(30), 0, 0);
-  print(f"{ui.get(0, 0)} {hits(0, 31, 80, 60)}");   // 中は出るが、下へははみ出さない
-  // 高さを決めなければ、中身のぶんだけ伸びる（巻かれない）
+  print(f"{ui.get(0, 0)} {hits(0, 31, 80, 60)}");   // 領域内は描画されるが、境界外へはクリッピングされて描画されない
+  // 高さを指定しない場合、子要素の合計高さまで伸長（スクロールバーなし）
   ui.open(80, 400);
   ui.clear(0);
   _ = ui.show(ui.scroll(rows), 0, 0);
   print(f"{ui.get(0, 200) != 0} {hits(0, 0, 20, 400) > 0}");
-  // 名札を渡せる形も同じに置ける
+  // ID を渡す形式も同様に配置可能
   ui.open(80, 60);
   ui.clear(0);
   _ = ui.show(ui.scroll("s", rows).height(30), 0, 0);
   print(ui.get(0, 0));
 
-  // --- 小数のつまみと、引いて変える欄 ---
+  // --- 浮動小数点スライダーおよびドラッグ入力欄 ---
   ui.open(160, 60);
   ui.clear(0);
   _ = ui.show(ui.slider(ref vol, 0.0, 1.0), 0, 0);
@@ -104,55 +104,55 @@ func main() -> int {
   _ = ui.show(ui.col([ui.drag(ref gain, -20, 20),
                       ui.drag(ref vol, 0.0, 1.0).decimals(3)]), 0, 0);
   print(f"{gain} {vol}");
-  // 名札の形は、動いていなければ空の名札が返る
+  // ID 指定形式は、未操作時は空文字列が返る
   ui.clear(0);
   var hit = ui.show(ui.drag("g", gain, -20, 20), 0, 0);
   print(f"[{hit}]");
 
-  // --- 入れてよい字（.filter）---
-  // 打っていないので中身は変わらないが、通らない字は落ちる形で持っている
+  // --- 入力文字フィルター（.filter）---
+  // 入力イベントは発生させていないため値は保持されるが、不適合な文字種を弾くフィルター設定のテスト
   ui.open(160, 40);
   ui.clear(0);
   _ = ui.show(ui.field(ref hex).filter("hex"), 0, 0);
   print(hex);
 
-  // --- あいことばを、見せる・伏せる ---
+  // --- パスワード表示 / マスク切り替え ---
   ui.clear(0);
   _ = ui.show(ui.password(ref word), 0, 0);
   var masked = fgs(0, 0, 160, 20);
   ui.clear(0);
   _ = ui.show(ui.password(ref word, true), 0, 0);
   var shown_pix = fgs(0, 0, 160, 20);
-  print(f"{word} {masked != shown_pix}");   // 中身はそのまま、見た目だけ変わる
+  print(f"{word} {masked != shown_pix}");   // 内部値は保持されたまま、描画表現のみ切り替わる
 
-  // --- 中身に部品を入れたボタン ---
+  // --- カスタムウィジェット内包ボタン ---
   ui.open(160, 60);
   ui.clear(0);
   _ = ui.show(ui.button(ui.label("なかみ"), "b"), 0, 0);
   print(f"{ui.get(2, 2) != 0} {hits(0, 0, 160, 30) > 0}");
 
-  // --- いくつも選べる一覧 ---
+  // --- 複数選択リストボックス ---
   ui.open(160, 100);
   ui.clear(0);
   _ = ui.show(ui.listbox(ref picked, ["さめ", "まぐろ", "いわし"]), 0, 0);
   print(f"{picked} {ui.chosen()}");
 
-  // --- 絵を出す部品（ui.image）---
+  // --- 画像ウィジェット（ui.image）---
   ui.open(120, 80);
   ui.clear(0);
   var e = ui.canvas(20, 10, red);
   _ = ui.show(ui.image(e), 0, 0);
   print(f"{ui.get(0, 0)} {ui.get(19, 9)} {ui.get(20, 10)}");
-  // 大きさを書けば、そのぶんに伸ばす
+  // サイズを指定した場合は拡大・縮小して描画
   ui.clear(0);
   _ = ui.show(ui.image(e).width(40).height(20), 0, 0);
   print(f"{ui.get(39, 19)} {ui.get(40, 20)}");
-  // カーソルの乗っていないところでは、絵の中の位置は無い
+  // カーソルが画像領域外にある場合、画像内相対座標は nil
   ui.clear(0);
   _ = ui.show(ui.image(e), 40, 40);
   print(f"{ui.point_x()} {ui.point_y()}");
 
-  // --- 折りたためる木（ui.tree）---
+  // --- 折りたたみ可能なツリービュー（ui.tree）---
   ui.open(160, 100);
   ui.clear(0);
   _ = ui.show(ui.tree("え", ref hiraku, [ui.label("なか").background(blue)]), 0, 0);
@@ -160,15 +160,15 @@ func main() -> int {
   hiraku = false;
   ui.clear(0);
   _ = ui.show(ui.tree("え", ref hiraku, [ui.label("なか").background(blue)]), 0, 0);
-  print(f"{opened > hits(0, 0, 160, 100)}");   // 閉じると、中身のぶんが減る
+  print(f"{opened > hits(0, 0, 160, 100)}");   // 折りたたむと子要素が非表示になり描画ピクセル数が減少
 
-  // --- 色の入力（ui.color）---
+  // --- カラーピッカー（ui.color）---
   ui.clear(0);
   _ = ui.show(ui.color(ref iro), 0, 0);
-  print(f"{iro == ui.rgb(80, 160, 220)} {ui.get(2, 6) == iro}");   // 見本がその色で出る
+  print(f"{iro == ui.rgb(80, 160, 220)} {ui.get(2, 6) == iro}");   // カラースウォッチ（見本）が指定色で描画される
 
-  // --- 機種のファイル選び ---
-  // 画面が無いところでは出せないので、いつも「値なし」
+  // --- プラットフォームネイティブのファイルダイアログ ---
+  // ヘッドレス環境では表示できないため、常に nil が返る
   var got = ui.pick_file() ?? "";
   var where = ui.pick_save("memo.txt") ?? "";
   print(f"[{got}] [{where}]");

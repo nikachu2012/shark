@@ -1,11 +1,11 @@
-// screen_x11.inc — X11 の窓（desktop.cpp から読む）
+// screen_x11.inc — X11 向け Xlib ウィンドウバックエンド（desktop.cpp からインクルード）
 //
-// Linux などで使う。X11 の開発ファイルが無い機械でも作れるように、
-// **ヘッダも共有ライブラリも作るときには要らない**形にしてある。
+// Linux 等で使用。X11 開発環境（libx11-dev）が未インストールのマシンでもビルドできるよう、
+// ヘッダおよび共有ライブラリのビルド時静的依存を持たない設計としている。
 //
-//   ・libX11 は dlopen で開き、要る関数だけ dlsym で引く
-//   ・Xlib の構造体は、ここで必要なぶんだけ書き写す（並びは昔から変わっていない）
-//   ・開けなければ false。そのとき std.ui は見えない面に描く
+//   ・libX11 は dlopen で動的ロードし、必要なシンボルのみ dlsym で取得
+//   ・Xlib の構造体定義は必要なメンバのみ内部定義（ABI 互換性を維持）
+//   ・ディスプレイ接続失敗時は false を返却し、オフスクリーンバッファ描画に移行
 #if defined(_WIN32) || defined(__EMSCRIPTEN__)
 
 const PlatformScreen* x11_screen() { return 0; }
@@ -214,9 +214,9 @@ bool load() {
 // X11 は画面の細かさを1つに決めていない。等倍として扱う
 int screen_scale() { return 1; }
 
-// **本当に小さい面だけ**、整数倍に広げる（ゲーム機のようなドット絵のため）。
-// 引き伸ばしは画素をそのまま並べるだけなので、字も丸も粗くなる。
-// 320×240 はそのままの大きさで出し、広げるのは切手のように小さいものだけ
+// **極小解像度のみ**、整数倍に拡大（レトロゲーム等のピクセルアート向け）。
+// ニアレストネイバー拡大のため、テキストや円弧等もピクセル単位で拡大される。
+// 320×240 以上は等倍とし、拡大対象は極小解像度のみに限定。
 int pick_scale(int w, int h) {
   int s = 1;
   while (s < 6 && w * (s + 1) <= 320 && h * (s + 1) <= 240) s++;
@@ -240,7 +240,7 @@ bool open(const char* title, int w, int h) {
 
   const char* t = (title && title[0]) ? title : "Shark";
   StoreName(g.dpy, g.win, t);
-  // 名札は UTF-8 でも渡しておく（XStoreName は Latin-1 しか通らない）
+  // ウィンドウタイトルを UTF-8 でも設定（XStoreName は Latin-1 のみ対応のため _NET_WM_NAME を設定）
   XID net_name = InternAtom(g.dpy, "_NET_WM_NAME", 0);
   XID utf8s = InternAtom(g.dpy, "UTF8_STRING", 0);
   if (net_name && utf8s)
@@ -531,10 +531,10 @@ bool poll(ScreenEvent* out) {
   return true;
 }
 
-// --- 機種のファイル選び ---------------------------------------------------
-// X11 そのものは選び窓を持たない。GUI の道具（GTK・Qt）に繋ぐと作るときの
-// 手間が増えるので、**机まわりが持っている選び窓**（zenity / kdialog）に任せる。
-// どちらも無ければ false（ui.pick_file は「値なし」を返す）
+// --- ネイティブファイルダイアログ ---------------------------------------------------
+// X11 自体は標準ファイルダイアログを持たないため、デスクトップ環境の外部コマンド
+// （zenity / kdialog）を呼び出す（GTK や Qt への直接リンクを避ける設計）。
+// いずれも存在しない場合は false を返却（ui.pick_file() は null を返却）
 Str chomp(const Str& s) {
   int n = s.size();
   while (n > 0 && (s[n - 1] == '\n' || s[n - 1] == '\r')) n--;
@@ -568,16 +568,16 @@ bool pick_file(bool save, const char* title, const char* name, Str* out) {
 
 }  // namespace x11
 
-// X11 は「離した」も出せる
-// 変換つきの文字入力（XIM）はまだ持たない。打たれた文字がそのまま入る
+// X11 画面バックエンド定義
+// キーリリースイベントに対応（XIM による日本語入力およびクリップボード連携は未対応）
 const PlatformScreen kX11Screen = {x11::screen_scale, x11::open, x11::close,
                                   x11::present,      x11::poll, true,
-                                  0, 0, 0, 0, 0, 0, 0,   // 文字入力と切り貼りはまだ持たない
-                                  0,                     // set_redraw（X11 は止まらないので要らない）
+                                  0, 0, 0, 0, 0, 0, 0,   // IME 入力およびクリップボード連携は未実装
+                                  0,                     // set_redraw（X11 ではリサイズ中もイベントループがブロックされないため不要）
                                   x11::set_cursor,   x11::set_resizable,
-                                  false,    // 刻みはこちらで作る（眠って起きる）
+                                  false,    // フレームレート制御は Shark 側で実行（スリープによるウェイト）
                                   x11::pick_file,
-                                  0};       // 丸めない細かさは持たない（screen_scale が 1）
+                                  0};       // 論理ピクセル比は未設定（整数スケール 1.0 固定）
 
 const PlatformScreen* x11_screen() { return x11::load() ? &kX11Screen : 0; }
 

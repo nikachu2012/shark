@@ -1,399 +1,321 @@
-# ブラウザで動かす
+# WebAssembly / ブラウザ実行環境
 
-コアをそのまま WebAssembly にして、ブラウザの中で Shark を書いて動かせるようにしたもの。
-処理系は**そのタブの中だけ**で動く。書いたものはどこにも送られない。
+Shark コアを WebAssembly にコンパイルし、Web ブラウザ上で Shark スクリプトの記述および実行を完結できるようにした環境です。
+処理系は**ブラウザのタブ内（クライアントサイド）のみ**で動作し、入力したコードが外部サーバーへ送信されることはありません。
 
-書くところは **Monaco Editor**（VS Code と同じもの）で、Shark 用の色分けと
-入力補完を付けてある。誤りの指摘は**本物の型検査**から出している。
-出したり打ったりするところは**端末とおなじ**で、`input()` は打たれるまで待つ（下の「ターミナル」）。
+エディタには **Monaco Editor**（VS Code のコアエディタ）を採用し、Shark 向けのシンタックスハイライトおよび
+インテリセンス（入力補完・ホバー情報・シグネチャヘルプ）を実装しています。構文エラーや型エラーの波線表示は、
+**コンパイラ本体の型検査エンジン**と直接連動しています。
+入出力インターフェースはネイティブなターミナルと同様に設計されており、`input()` による非同期標準入力にも対応しています。
 
 ```
-make web                    # web/dist/ に作る（Emscripten が要る）
-make web-serve              # 作ってから http://localhost:8000/ に配る
-make web-serve PORT=8080    # 港（ポート）を変える
-make web-test               # 作ったものを node で確かめる（画面は出さない）
+make web                    # web/dist/ に静的アセットをビルド（Emscripten が必要）
+make web-serve              # ビルド後に http://localhost:8000/ でローカル HTTP 配信
+make web-serve PORT=8080    # ポート番号を指定してローカル配信
+make web-test               # ビルド成果物を Node.js でヘッドレス検証
 ```
 
-作るのと配るのは別の手（`web/build.sh` と `web/serve.sh`）。
-配る側は中で作る側を毎回呼ぶので、直したものがそのまま出る。
-`file://` では `.wasm` を読めないので、見るときは配って開く。
+ビルドと配信は独立したスクリプト（`web/build.sh` と `web/serve.sh`）で提供されています。
+配信スクリプトは内部でビルドスクリプトを実行するため、ソースコードの変更が即座に反映されます。
+なお、ブラウザのセキュリティ制限により `file://` プロトコルでは `.wasm` を読み込めないため、ローカル確認時は HTTP 配信をご利用ください。
 
-初回だけ、Monaco Editor を npm から取り寄せて `web/vendor/` にためる（git には入れない）。
-2回目からは取り寄せない。配るときに要るのは `web/dist/` だけで、
-**動かすときに外の置き場は見に行かない**。
+初回ビルド時のみ、Monaco Editor を npm からダウンロードして `web/vendor/` にキャッシュします（Git 管理対象外）。
+2回目以降はローカルキャッシュを使用します。本番配布に必要なアセットは `web/dist/` 内にすべて完結しており、
+**実行時に外部 CDN や外部サーバーへのアクセスは一切発生しません**。
 
-Emscripten が入っていないときは、`make web` が入れ方を出して止まる。
+Emscripten が未セットアップの場合は、`make web` 実行時にセットアップ案内が表示されて中断します。
 
 ```
 git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
 ~/emsdk/emsdk install latest && ~/emsdk/emsdk activate latest
 ```
 
-## 中身
+## 構成ファイル
 
-| ファイル | 何をするか |
+| ファイル | 役割 |
 |---|---|
-| [`../core/platform/web.cpp`](../core/platform/web.cpp) | 移植層。ブラウザ向けに、メモリ・時間・入出力・ファイルを埋めたもの |
-| [`../core/platform/screen_canvas.inc`](../core/platform/screen_canvas.inc) | 移植層の画面。窓をこしらえ、`std.ui` の面を canvas に出し、DOM の出来事を渡す（下） |
-| [`../core/platform/font_canvas.inc`](../core/platform/font_canvas.inc) | 移植層の字。ブラウザに1文字ずつ描いてもらう（下） |
-| [`shark_web.cpp`](shark_web.cpp) | ホスト。`Engine` を呼び、出力と診断を JavaScript に渡す |
-| [`app.js`](app.js) | 画面。書くところの用意、実行の刻み、ターミナル（下）と診断の表示 |
-| [`lang.js`](lang.js) | Monaco に Shark を教える。色分けと入力補完（下） |
-| [`api.py`](api.py) | 補完に使う `api.js` を、[`../stdlib/`](../stdlib/README.md) の宣言ファイルから作る |
-| [`index.html`](index.html) / [`style.css`](style.css) | 画面の骨と見た目 |
-| [`build.sh`](build.sh) | 作る。emcc の呼び出しと Monaco の取り寄せ。`web/dist/` にまとめる |
-| [`serve.sh`](serve.sh) | 配る。先に `build.sh` を呼んでから、`web/dist/` をその場で配る |
-| [`test.js`](test.js) | できたものを node で確かめる |
-| [`examples.py`](examples.py) / [`examples/`](examples) | お手本を `examples.js` にまとめる（下） |
-| [`../docs/gen.py`](../docs/gen.py) | 説明（`dist/docs/`）を作る。中身は宣言ファイルと `docs/reference.md` が正（下） |
+| [`../core/platform/web.cpp`](../core/platform/web.cpp) | Web 移植層。メモリ管理・時刻取得・入出力・仮想ファイルシステムの実装 |
+| [`../core/platform/screen_canvas.inc`](../core/platform/screen_canvas.inc) | Web 画面移植層。ウィンドウ描画、`std.ui` バッファの Canvas 転送、DOM イベント伝達 |
+| [`../core/platform/font_canvas.inc`](../core/platform/font_canvas.inc) | Web フォント移植層。ブラウザの Canvas API によるフォントラスタライズ |
+| [`shark_web.cpp`](shark_web.cpp) | ホストブリッジ。`Engine` を初期化・実行し、出力や診断情報を JS へ伝達 |
+| [`app.js`](app.js) | UI コントローラ。Monaco Editor の初期化、タイムスライス実行制御、ターミナルエミュレーション |
+| [`lang.js`](lang.js) | Monaco 向け言語定義。シンタックスハイライトおよび入力補完プロバイダ |
+| [`api.py`](api.py) | 補完定義（`api.js`）を [`../stdlib/`](../stdlib/README.md) の宣言ファイルから生成するツール |
+| [`index.html`](index.html) / [`style.css`](style.css) | プレイグラウンドの HTML 構造およびスタイルシート |
+| [`build.sh`](build.sh) | ビルドスクリプト。emcc の実行、Monaco の取得、`web/dist/` への成果物集約 |
+| [`serve.sh`](serve.sh) | ローカル配信スクリプト。`build.sh` を実行後にローカルサーバーを起動 |
+| [`test.js`](test.js) | ビルド成果物を Node.js 環境でテストする検証スクリプト |
+| [`examples.py`](examples.py) / [`examples/`](examples) | サンプルコード一覧を `examples.js` に集約するスクリプト |
+| [`../docs/gen.py`](../docs/gen.py) | ドキュメント生成。宣言ファイルと `docs/reference.md` から HTML を生成 |
 
-### 説明も一緒に配る
+### ドキュメントの一体化
 
-`make web` は、プレイグラウンドと一緒に**説明も `web/dist/docs/` に入れる**
-（`docs/gen.py`。`make docs` が `docs/reference/` に作るのと同じもの）。
-上の帯の「説明」（`Ctrl`（`⌘`）+ `I`）で**小窓**が開き、関数の一覧（宣言ファイルが正）と、
-言語の使い方（[`../docs/reference.md`](../docs/reference.md) を HTML にしたもの）を
-**書きながら**読める。別のタブに飛ばすと書いているものが見えなくなるので、
-同じ画面に置ける形にしてある。頭をつかんで動かし、右下の角で大きさを変える。
-置き場所・大きさ・開いていたかどうかは覚えておく。
+`make web` は、プレイグラウンドのビルドと同時に **HTML ドキュメントを `web/dist/docs/` に統合** します
+（`make docs` で `docs/reference/` に生成されるものと同一）。
+ヘッダーの「説明」ボタン（または `Ctrl/⌘ + I`）でモーダルウィンドウが開き、標準ライブラリの API リファレンスおよび
+言語ガイド（[`../docs/reference.md`](../docs/reference.md)）を、**コードを書きながら同一画面上で参照** できます。
+別タブへ遷移することなくコーディングを継続できます。ウィンドウはドラッグ移動やサイズ変更に対応し、
+表示位置・サイズ・表示状態はブラウザのローカルストレージに保持されます。
 
-配るものの中で閉じているので、**繋がっていなくても読める**。
-外（リポジトリの中）へのリンクは作らない。作ったときに宣言と実装が食い違っていれば、
-お手本の突き合わせと同じように `make web` が止まる。
+すべて静的アセットとして同梱されているため、**完全オフライン環境でもドキュメントを閲覧可能** です。
 
-### お手本
+### サンプルコードの管理
 
-選ぶところに出すお手本は、[`examples.py`](examples.py) の `ITEMS` が正。
-並べる順と、選ぶところに出す名前を決めたいので手で並べている。
+プレイグラウンドのセレクトボックスに表示されるサンプルコードは、[`examples.py`](examples.py) の `ITEMS` が正（マスター）です。
+サンプルの表示順および日本語タイトルを一元管理しています。
 
-そのぶん [`../examples/`](../examples) に足したものが `ITEMS` に入っていないと、
-ブラウザからは見えないまま古くなる。なので作るときに**両方向で突き合わせて、
-食い違っていれば止める**（`make web` が失敗する）。
+[`../examples/`](../examples) に追加されたサンプルコードが `ITEMS` に登録されていない場合、
+ビルド時に**双方向の整合性検証が行われ、未登録のファイルが存在する場合はビルドが停止** します（`make web` が失敗）。
 
-- `../examples/*.shk` と `web/examples/*.shk` は、ぜんぶ `ITEMS` に入っていること
-- `ITEMS` に書いたファイルは、あること
+- `../examples/*.shk` および `web/examples/*.shk` のすべてが `ITEMS` に登録されている必要があります
+- `ITEMS` に記述されたファイルが実際に存在することを検証します
 
-`web/examples/` にあるのは、ブラウザでしか意味のないもの（入力を読む、
-止まらない繰り返し、ブラウザの字と変換を使う `ui.shk`）だけ。
-それ以外は `../examples/` のものをそのまま載せる。
+`web/examples/` に配置されているのは、ブラウザ環境特有のサンプル（対話型標準入力、無限ループデモ、Canvas フォントを使用する `ui.shk`）のみです。
+それ以外の汎用サンプルは `../examples/` のファイルをそのまま参照します。
 
-載ったものが**ブラウザの道でも読める**かは [`test.js`](test.js) が見ている。
+WebAssembly 経由で正常に動作するかは [`test.js`](test.js) により自動検証されます。
 
 ```
-        Shark のプログラム（プレイグラウンドに書くもの）
+        Shark プログラム（エディタで記述）
  ────────────────────────────────
-   仮想マシン・型検査・標準ライブラリ        core/           ← どこでも同じ
+   仮想マシン・型検査・標準ライブラリ        core/           ← 全プラットフォーム共通
  ────────────────────────────────
-   移植層                                 platform/web.cpp  ← ブラウザ向けはこれ
+   プラットフォーム移植層                 platform/web.cpp  ← WebAssembly 専用
  ────────────────────────────────
-   ホスト                                 web/shark_web.cpp
-   画面・書くところ                        web/app.js, web/lang.js
+   ホストブリッジ                         web/shark_web.cpp
+   UI・エディタ制御                       web/app.js, web/lang.js
 ```
 
-`core/` には手を入れていない。移植層を1つ足しただけで、
-言語も標準ライブラリも `shark` コマンドと同じように動く
-（[../spec/runtime/platform.md](../spec/runtime/platform.md)）。
+`core/` には一切の特殊な変更を加えていません。Web 向けの移植層を追加したのみで、
+言語機能および標準ライブラリが CLI 版と同一に動作します（詳細は [../spec/runtime/platform.md](../spec/runtime/platform.md) 参照）。
 
-## 固まらない仕組み
+## UI がフリーズしないタイムスライス実行
 
-ブラウザは1本の流れで動くので、重い処理をそのまま走らせると画面ごと止まる。
-Shark は**実行を刻んでホストに返す**ので、その心配がない
-（[../spec/runtime/embedding.md](../spec/runtime/embedding.md)）。
+ブラウザの JavaScript はシングルスレッドで動作するため、時間のかかるループ処理を同期実行すると UI 全体が応答不能（フリーズ）になります。
+Shark は **実行を細かく分割（タイムスライス）してブラウザのイベントループに制御を戻す** アーキテクチャを採用しているため、UI をブロックしません（詳細は [../spec/runtime/embedding.md](../spec/runtime/embedding.md) 参照）。
 
 ```js
 function tick() {
-  const status = shk_pump(budget);   // budget 命令だけ進めて、必ず戻ってくる
-  drainOutput();                     // その間に出た print を画面に出す
-  if (status === 0) requestAnimationFrame(tick);   // 続きは次の描画で
+  const status = shk_pump(budget);   // 指定された budget 命令数だけ VM を進めて制御を戻す
+  drainOutput();                     // その間に出力された print テキストをターミナルへ反映
+  if (status === 0) requestAnimationFrame(tick);   // 継続実行の場合は次フレームへスケジュール
 }
 ```
 
-`budget` は**命令の数**で、時間ではない。多くしても少なくしても結果は変わらず、
-1回の描画で止まる時間だけが変わる。`app.js` は 6〜14 ミリ秒に収まるように増減させている。
+`budget` は消費可能な **仮想マシン命令数** であり、ミリ秒等の時間ではありません。値を増減させても実行結果には影響せず、
+1フレームあたりの専有時間のみが変化します。`app.js` では 1 フレームあたりの実行時間が 6〜14 ms に収まるよう動的に調整しています。
 
-止まらない繰り返しを書いても `status` は 0 のままなので、画面は動き続け、
-「止める」（`shk_abort`）で終われる。
+無限ループを記述した場合でも `status` は 0 のまま戻ってくるため、ブラウザは応答性を維持し、
+いつでも「停止」ボタン（`shk_abort`）で安全に中断できます。
 
-### ゲームの速さ
+### フレームレート制御と同期
 
-`requestAnimationFrame` なので、**プログラムが進むのは画面を描く合図ごとに1度だけ**
-（ふつう 1 秒に 60 回）。ここで、くり返しの終わりに `sleep(0.016)` と書くと
-**描くのにかかった分だけ足が出て**、1こま 16.7ms の合図に間に合わない。
-1つ飛ばして**半分の速さ（30 fps）**になる。
+`requestAnimationFrame` を利用しているため、プログラムの実行は描画更新タイミング（通常 60 fps / 約 16.7 ms ごと）に同期して進みます。
+ここでループ末尾に `sleep(0.016)` のような固定スリープを記述してしまうと、**描画処理時間分が累積してフレーム境界を踏み外し**、
+フレームドロップにより実行速度が 30 fps に低下する問題が発生します。
 
-待つのは `sleep()` ではなく **`ui.frame()`**。眠る長さではなく次のこまの
-**刻限**を決めて待つので、足が出ない（[../spec/library/ui.md](../spec/library/ui.md)
-「こまの速さ」）。
+そのため、フレーム待機には `sleep()` ではなく **`ui.frame()`** を使用します。
+`ui.frame()` は指定時間スリープするのではなく、**次フレームの目標更新時刻（デッドライン）** を算出して待機するため、処理遅延によるフレーム落ちを回避できます（詳細は [../spec/library/ui.md](../spec/library/ui.md) 参照）。
 
-この移植層は `PlatformScreen::host_paced` を `true` にして「刻みはこちらが握っている」と
-名乗る（[../core/platform/screen_canvas.inc](../core/platform/screen_canvas.inc)）。
-`ui.frame()` はそれを見て**刻限の半こま手前で起きる**ので、合図に間に合う。
-ここを Shark の側で当て推量させないための口で、120Hz の画面でも同じように効く。
+Web 移植層では `PlatformScreen::host_paced` を `true` に設定し、ホスト（ブラウザ）側がフレームペーシングを主導することを通知します（[`../core/platform/screen_canvas.inc`](../core/platform/screen_canvas.inc)）。
+`ui.frame()` はこれを検知して目標フレームタイミングに合わせて復帰するため、60Hz や 120Hz ディスプレイのいずれでも正確なフレームレートを維持できます。
 
-## ターミナル
+## ターミナルエミュレータ
 
-右がわは**端末とおなじ**にしてある。出力も、打った文字も1本の流れに並び、
-出るものは `shark` コマンド（[../frontend/main.cpp](../frontend/main.cpp)）と同じ形。
+画面右側にはネイティブターミナルと同等のターミナルエミュレータを配置しています。
+標準出力およびユーザーの入力テキストが単一のストリームとして表示され、CLI 版（[../frontend/main.cpp](../frontend/main.cpp)）と同一のフォーマットで出力されます。
 
 ```
 $ shark run playground.shk
 名前を教えてください
-さめ                        ← ここで打つ。打った行はそのまま流れに残る
+さめ                        ← ここに入力。入力内容は履歴に残る
 こんにちは、さめ さん！
 $ 
 ```
 
-| すること | どうする |
+| 操作 | ショートカット / キー |
 |---|---|
-| プログラムに答える | そのまま打って <kbd>Enter</kbd>。`input()` は**打たれるまで待つ** |
-| 入力の終わり | <kbd>Ctrl</kbd> + <kbd>D</kbd>。その `input()` は `none` になる |
-| 止める | <kbd>Ctrl</kbd> + <kbd>C</kbd>（「止める」ボタンと同じ） |
-| 流れを消す | <kbd>Ctrl</kbd> + <kbd>L</kbd> / <kbd>Ctrl</kbd> + <kbd>U</kbd> は打ちかけの行を消す |
-| 打った覚え | <kbd>↑</kbd> <kbd>↓</kbd> |
+| 入力の確定 | テキスト入力後に <kbd>Enter</kbd>。`input()` は入力完了まで非同期待機 |
+| EOF の送信 | <kbd>Ctrl</kbd> + <kbd>D</kbd>（当該 `input()` の戻り値は `none` となる） |
+| 実行の中断 | <kbd>Ctrl</kbd> + <kbd>C</kbd>（「停止」ボタンと同等） |
+| 画面のクリア | <kbd>Ctrl</kbd> + <kbd>L</kbd> / <kbd>Ctrl</kbd> + <kbd>U</kbd> で入力中テキストを消去 |
+| コマンド履歴参照 | <kbd>↑</kbd> <kbd>↓</kbd> |
 
-ボタンを押さずに、`run` `check` `test` `explain E0102` `modules` `version`
-`clear` `help` と打っても動く（`shark run playground.shk` のように書いてもよい）。
-`--lang` `--memory` `--strict` `--no-color` も端末と同じに効く。
-開けるファイルは `playground.shk`（左に書いているもの）だけ。
+UI 上のボタン操作だけでなく、ターミナル上で直接 `run` `check` `test` `explain E0102` `modules` `version` `clear` `help` などのコマンドを実行可能です（`shark run playground.shk` のようなフル形式も可）。
+`--lang` `--memory` `--strict` `--no-color` 等の CLI オプションも同様に利用できます。
+読み込み対象ファイルは左側エディタで編集中の `playground.shk` です。
 
-打つ文字を受けるのは、印（カーソル）の場所に置いた見えない `textarea`。
-かな漢字変換の窓がそこに出るようにするためで、`input()` に日本語を渡せる。
+文字入力はカーソル位置に配置された不可視の `textarea` で受け取るため、ブラウザの IME（かな漢字変換）が自然に動作し、`input()` 経由で日本語文字列を正しく入力できます。
 
-### 待てないところで待つ
+### 非同期入力待機（ノンブロッキング I/O）
 
-ブラウザは止まって待てないので、`input()` は**待ちに入って刻みをホストに返す**
-（[../spec/runtime/embedding.md](../spec/runtime/embedding.md)）。
-`HostIO::input_ready` が「まだ来ていない」と答える間、`shk_waiting_input()` が 1 になり、
-画面はそれを見て入力を促す。行が来れば、そのまま続きから動く。
-`sleep` や `task` は待っている間も動く。
+ブラウザのメインスレッドではスレッドを完全に停止して入力を待つことができないため、`input()` は**待機状態へ遷移してホストへ制御を戻します**（詳細は [../spec/runtime/embedding.md](../spec/runtime/embedding.md) 参照）。
+`HostIO::input_ready` が未完了を返す間は `shk_waiting_input()` が 1 を返し、UI 側は入力待ちプロンプトを表示します。
+ユーザーが入力を確定すると、中断箇所から実行が再開されます。
+`sleep` や別タスク（`task`）も、入力待機中に並行して進行します。
 
 ## 入力補完（IntelliSense）
 
-| できること | 中身 |
+| 機能 | 詳細 |
 |---|---|
-| 色分け | 予約語・f 文字列の `{ }`・入れ子コメントまで |
-| 入力候補 | `math.` でモジュールの関数、`xs.` で型のメソッド、ふつうの位置では予約語・雛形・書いた関数や変数 |
-| 受け継いだメンバ | 子の実体でも、親の `public` なメンバとメソッドが `.` の候補に出る |
-| 親の関数を上書き | クラスの中では、継承元の `virtual` が `override` の雛形として出る（下） |
-| 説明（hover） | 署名と、仕様書に書いてある日本語の説明 |
-| 引数の案内 | `(` を打つと引数が出る。オーバーロードも並ぶ |
-| 定義へ飛ぶ | 同じ画面に書いた関数・クラスへ（F12） |
-| 関数を探す | Ctrl（⌘）+ Shift + O |
-| 誤りの指摘 | 打つ手が止まると**本物の型検査**が走り、波線と番号が付く |
-| import の書き足し | `text` を選ぶと `import std.text;` を一緒に書き足す |
+| シンタックスハイライト | 予約語、f 文字列の `{ }`、ネストしたブロックコメントまで正確にハイライト |
+| コード補完 | `math.` でモジュール関数、`xs.` で型メソッド、通常位置では予約語・テンプレート・定義済み関数・変数 |
+| 継承メンバの補完 | サブクラスのインスタンスに対しても、スーパークラスの `public` メンバおよびメソッドを候補に表示 |
+| メソッドオーバーライド生成 | クラス定義内で、親クラスの `virtual` メソッドに対する `override` 雛形コードを自動提示 |
+| ホバー情報 | 関数のシグネチャおよび仕様書に準拠した日本語ドキュメント |
+| シグネチャヘルプ | `(` 入力時に関数引数情報を表示（オーバーロード一覧の切り替えに対応） |
+| 定義ジャンプ | エディタ内で定義された関数・クラスへジャンプ（F12） |
+| シンボル検索 | Ctrl/⌘ + Shift + O でファイル内シンボル一覧を表示・検索 |
+| リアルタイム型検査 | 入力停止時に**本物のコンパイラ型検査**がバックグラウンド実行され、エラー箇所に波線とエラーコードを表示 |
+| 自動 import 補完 | 補完候補でモジュールを選択した際、未インポートであれば先頭に `import std.xxx;` を自動挿入 |
 
-補完に出す標準ライブラリの表（`api.js`）は、[`api.py`](api.py) が
-[`../stdlib/*.shk`](../stdlib/README.md)（宣言ファイル）から作る。手で書いた一覧は持たない。
-HTML のリファレンス（`make docs`）と**同じ出どころ**なので、説明も例も食い違わない。
+入力補完で使用する標準ライブラリ定義テーブル（`api.js`）は、[`api.py`](api.py) が [`../stdlib/*.shk`](../stdlib/README.md)（宣言ファイル）から自動生成します。手作業によるテーブル定義は持ちません。
+HTML リファレンス（`make docs`）と**同一のマスターソースから生成**されるため、ドキュメントやサンプルコードに食い違いが生じません。
 
-| 宣言ファイルに書いたもの | 補完でどう出るか |
-|---|---|
-| 署名（`func sqrt(x: float) -> float;`） | 候補の型と、引数の案内 |
-| `///` の説明 | hover と候補の説明 |
-| `引数:` の節 | 引数の案内で、いま打っている引数の説明 |
-| `例:` の節 | hover と引数の案内に出る、動く例 |
+`api.py` はビルド時に C++ 実装（`core/lib/*.cpp`）と突合検証を行い、宣言と実装に不整合があればビルドを中断します。
+仕様書に定義されていても現在の実装に含まれないモジュール（`std.net` 等）は宣言が存在しないため補完にも現れません。
+`make web-test` により、`api.js` の一覧と実際のランタイム登録モジュールの一致が検証されます。
 
-`api.py` は作るときに実装（`core/lib/*.cpp`）と突き合わせ、
-宣言と実装が食い違っていれば知らせる。仕様書にあっても実装に入っていないもの
-（`std.net` など）は宣言が無いので補完にも出ない。
-`make web-test` が、`api.js` の一覧と処理系が持つモジュールの一致を確かめている。
+### メソッドオーバーライドの補完
 
-### 親の関数を上書きする
-
-`class Shark : Fish {` の中で候補を出すと、`Fish` から受け継いだ関数が並ぶ。
-選ぶと、`override` の付いた雛形がそのまま入る。
+`class Shark : Fish {` のクラス本体内で補完をトリガーすると、親クラス `Fish` から継承した仮想メソッド一覧が提示されます。
+候補を選択すると、適切な `override` 雛形が自動展開されます。
 
 ```shark
 class Shark : Fish {
-  // ここで describe を選ぶと ↓ が入る
+  // ここで describe を選択すると以下が自動挿入される
   public override func describe() -> string {
-    ⏐
+    |
     return super.describe();
   }
 }
 ```
 
-| 見ているところ | 雛形への出かた |
+- オーバーライド可能なメソッド（`virtual` または基底の `override`）のみが候補に表示されます
+- 既に実装済みのメソッドやコンストラクタ（`init`）は候補から除外されます
+- 親クラスだけでなく、先祖クラスやインタフェース（`Comparable` 等）のメソッドも再帰的に収集されます
+- 純粋仮想メソッド（未実装の `virtual`）は空の本体と戻り値型のデフォルト値（`int` なら `return 0;`）が自動挿入され、優先度高く表示されます
+- 実装を持つ仮想メソッドは `super` 呼び出しを含む雛形が生成されます
+- 親クラスのアクセス修飾子（`public`）は適切に継承されます
+
+## ホスト API（C-ABI エクスポート）
+
+`shark_web.cpp` が提供する WebAssembly エクスポート関数一覧です。独自の Web ページに Shark を組み込む場合はこれらの API を呼び出します。
+
+| 関数名 | 役割 |
 |---|---|
-| 上書きしてよい関数 | `virtual` と `override` だけ。ふつうの `func` は出ない |
-| もう書いた関数 | 出ない（`init` も出ない） |
-| 親の親 | たどって集める。インタフェース（`Comparable` など）も同じ |
-| 本体の無い `virtual`（純粋仮想） | 空の本体と、戻り値に合う値（`int` なら `return 0;`）。先に出す |
-| 本体のある `virtual` | `super` を呼ぶところまで書く |
-| 親の `public` | 引き継ぐ。落とすと、その関数は子の中からしか呼べなくなる |
-| インタフェースの `This` | 自分のクラス名に置き換える |
+| `shk_boot()` | 初期化処理。Web 移植層の登録（起動時に1度だけ実行） |
+| `shk_config(memory_mb, lang_en, strict)` | 実行環境設定（メモリ上限 MB、診断言語、警告の厳格扱い） |
+| `shk_add_module(path, source)` | `import` 可能な仮想モジュールソースを追加 |
+| `shk_load(name, source)` | スクリプトをコンパイル。構文エラー・型エラーの件数を返却 |
+| `shk_diagnostics()` | 直前のコンパイルで発生した診断メッセージ一覧（JSON 形式） |
+| `shk_start_run()` / `shk_start_test()` | スクリプト実行の開始 / テスト実行の開始 |
+| `shk_pump(budget)` | 指定ステップ（命令数）だけ VM を実行。0=継続中、1=正常終了、2=エラー停止 |
+| `shk_abort()` / `shk_idle()` | 実行の中断要求 / VM がアイドル状態（入力待ち等）か判定 |
+| `shk_out_ptr()` `shk_out_len()` `shk_out_clear()` | 標準出力バッファのポインタ・長さ取得・バッファクリア（UTF-8） |
+| `shk_push_input(text)` | `input()` 待機中の VM へ1行分の入力テキストを送信 |
+| `shk_push_eof()` | 入力の終端（EOF / Ctrl+D）を通知（次回の `input()` は `none` を返却） |
+| `shk_waiting_input()` | VM が `input()` 入力待ちでサスペンドしているか判定 |
+| `shk_error()` | 実行時エラー詳細（JSON 形式。メッセージ、発生位置、スタックトレース） |
+| `shk_exit_code()` / `shk_test_passed()` / `shk_test_total()` | プロセス終了コード / テスト成功件数 / テスト総数 |
+| `shk_memory_used()` / `shk_memory_limit()` | 現在のヒープ使用量 / メモリ上限（バイト単位） |
+| `shk_format(source)` / `shk_formatted()` | ソースコード自動整形実行 / 整形結果の取得（`shark fmt` 相当） |
+| `shk_modules()` / `shk_explain(code)` / `shk_version()` | 有効モジュール一覧 / エラー解説文 / バージョン文字列 |
 
-`override` や `public` と打った後に候補を出すと、その分は重ねずに続きだけを入れる。
-メソッドの本体の中では出さない（`{ }` を数えて、クラスの直下かどうかを見ている）。
+標準出力を「ポインタと長さ」で取得する設計は、マルチバイト文字（UTF-8）がパケット境界で分断されても文字化けを発生させないためです。
+`shk_out_*` 呼び出し直後にメモリバッファからデータをコピーして利用してください（Wasm メモリ拡張時にベースポインタが再配置される可能性があるため）。
 
-親をたどるのは `.` の後ろも同じで、子の実体からは親の `public` なメンバも候補に出る
-（`private` は出ない）。子で上書きした関数は、子の方だけが出る。
+## GUI レンダリング（std.ui）
 
-変数の型は `lang.js` が軽く見当をつける（宣言の型注釈、リテラル、
-`time.now()` のような呼び出しの戻り値、`for var x in xs` の中身）。
-細かい判定はしない。**正しいかどうかを決めるのは、いつでもコアの型検査**。
+`ui.open()` を呼び出すと、ブラウザ内に**仮想ウィンドウ**が生成されます。
+タイトルバーのドラッグ移動、右下リサイズハンドルによる拡縮、閉じるボタン（×）による終了に対応しています。
+UI デザインは **Dear ImGui** スタイルを踏襲しており、ダークテーマ基調のシャープな外観となっています。
+ウィンドウマネージャは Web 移植層（[`../core/platform/screen_canvas.inc`](../core/platform/screen_canvas.inc)）で実装されており、
+コア側は通常通りピクセルバッファに対して描画を行うため、**描画ロジックは他プラットフォームと完全に同一** です（[../spec/library/ui.md](../spec/library/ui.md) 参照）。
 
-## ホストの入口
+Web ページ内の特定の HTML 要素に直接キャンバスを埋め込みたい場合は、マウントポイントを指定することで独立ウィンドウを作らずにインライン描画が可能です。
 
-`shark_web.cpp` が出している関数。自分のページに組み込むときはこれを呼ぶ。
-
-| 関数 | 内容 |
+| 優先度 | マウントターゲット |
 |---|---|
-| `shk_boot()` | 最初に1度。移植層を差し込む |
-| `shk_config(memory_mb, lang_en, strict)` | 次の読み込みから使う設定 |
-| `shk_add_module(path, source)` | `import` で使えるようにしておくもの |
-| `shk_load(name, source)` | 読み込む。誤りの数を返す |
-| `shk_diagnostics()` | 直前の読み込みの診断（JSON） |
-| `shk_start_run()` / `shk_start_test()` | 実行を始める / `test_` を走らせ始める |
-| `shk_pump(budget)` | `budget` 命令だけ進める。0=続く 1=終わり 2=止まった |
-| `shk_abort()` / `shk_idle()` | 止める / 待ちに入っているか |
-| `shk_out_ptr()` `shk_out_len()` `shk_out_clear()` | `print` の出力（UTF-8 のまま受け取る） |
-| `shk_push_input(text)` | `input()` に返す行を渡す（打たれたそばから呼ぶ） |
-| `shk_push_eof()` | もう入力は無いと伝える（端末の Ctrl + D）。次の `input()` が `none` になる |
-| `shk_waiting_input()` | `input()` が行を待って止まっているか |
-| `shk_error()` | 止まった理由（JSON。理由・場所・呼び出しの経路） |
-| `shk_exit_code()` / `shk_test_passed()` / `shk_test_total()` | 終了コード / テストの結果 |
-| `shk_memory_used()` / `shk_memory_limit()` | 使っている量 / 上限（バイト） |
-| `shk_format(source)` / `shk_formatted()` | 見た目を整えたソース / 整えられたか（`shark fmt` と同じもの） |
-| `shk_modules()` / `shk_explain(code)` / `shk_version()` | モジュールの一覧 / 番号の説明 / 版 |
+| 1 | `Module.sharkMount`（DOM 要素または `querySelector` に渡すセレクタ文字列） |
+| 2 | `#shark-screen` 要素 |
+| 3 | いずれも未指定の場合、ブラウザ内にフローティングウィンドウを生成（プレイグラウンドの動作） |
 
-いちばん短い使い方:
-
-```html
-<script src="shark.js"></script>
-<script>
-createShark().then((M) => {
-  const call = (name, ret, args) => M.cwrap(name, ret, args);
-  call('shk_boot', null, [])();
-  call('shk_config', null, ['number', 'number', 'number'])(64, 0, 0);
-
-  const errs = call('shk_load', 'number', ['string', 'string'])('hello.shk', 'print("やあ");');
-  if (errs > 0) {
-    console.log(JSON.parse(call('shk_diagnostics', 'string', [])()));
-    return;
-  }
-  call('shk_start_run', 'number', [])();
-
-  const pump = call('shk_pump', 'number', ['number']);
-  (function tick() {
-    const st = pump(200000);
-    const len = M._shk_out_len();
-    if (len) {
-      const p = M._shk_out_ptr();
-      console.log(new TextDecoder().decode(M.HEAPU8.slice(p, p + len)));
-      M._shk_out_clear();
-    }
-    if (st === 0) requestAnimationFrame(tick);
-  })();
-});
-</script>
-```
-
-出力を「番地と長さ」で受け取るのは、UTF-8 の途中で切れても崩れないようにするため。
-`shk_out_*` を呼んだ直後にその場で写して使う（メモリが伸びると番地が変わる）。
-
-## 画面（std.ui）
-
-`ui.open()` を呼ぶと**窓が出る**。名札の帯を引けば動き、右下の隅を引けば大きさが変わり、
-× で閉じる ― 机の上の窓と同じ。見た目は **Dear ImGui** に寄せてある（角は立てたまま、
-細い縁、濃い青の帯、右下に三角の持ち手。帯の ▼ でたためて、触っていない窓の帯は黒に近くなる）。
-こしらえるのは移植層
-（[`../core/platform/screen_canvas.inc`](../core/platform/screen_canvas.inc)）で、
-コアは今までどおり面（画素の並び）に描くだけ。**描くところは何も変わらない**
-（[../spec/library/ui.md](../spec/library/ui.md)）。
-
-ページの中に埋め込みたいときは、置き場を用意しておくと窓を作らずそこに面だけ出す。
-
-| 順 | 出す先 |
-|---|---|
-| 1 | `Module.sharkMount`（要素そのものか、`querySelector` に渡す文字列） |
-| 2 | `#shark-screen` という要素 |
-| 3 | どちらも無ければ**窓をこしらえる**（プレイグラウンドはこれ） |
-
-置き場の中身は開くたびに空にするので、**そこには他のものを置かない**。
-開け閉めは `window` の出来事で知らせる。
+マウント先の要素は描画開始時に初期化されるため、他のコンテンツと共用しないでください。
+ウィンドウの開閉はカスタム DOM イベントにより通知されます。
 
 ```js
-window.addEventListener('shark:screen-open', function (e) {
-  e.detail.canvas;          // できた canvas
-  e.detail.width;           // 面の大きさ（画素）
-  e.detail.requestClose();  // 窓の × にあたる。ui.poll() が false を返す
+window.addEventListener("shark:screen-open", function (e) {
+  e.detail.canvas;          // 生成された HTMLCanvasElement
+  e.detail.width;           // サーフェス幅（ピクセル）
+  e.detail.requestClose();  // ウィンドウを閉じる要求（ui.poll() が false を返す）
 });
-window.addEventListener('shark:screen-close', function (e) { /* … */ });
+window.addEventListener("shark:screen-close", function (e) { /* クローズ処理 */ });
 ```
 
-| もの | ブラウザでは |
+| 項目 | ブラウザ環境での挙動 |
 |---|---|
-| 面の大きさ | `ui.open(横, 縦)` のまま。面の1画素は画面の1画素。小さい面（640×480 未満）だけ整数倍に引き伸ばし、置き場に入りきらないときは縦横の比を保って縮める |
-| 細かい画面（HiDPI） | `ui.pixel_ratio()` が `devicePixelRatio` そのまま（1.25 や 1.5 もある）、`ui.scale()` はそれを整数に丸めたもの。どちらも開く前に呼べる。canvas の CSS の大きさは**丸めない数**で割るので、canvas の1画素はいつも画面の1画素。拡大や別の画面への移動で細かさが変わったら、面を取り直す |
-| 大きさを変える | 隅の持ち手（埋め込みなら置き場の大きさ）が変わると `SEV_Resize`。窓の縁を引いたのと同じで、面が作り直される（`ui.open(…, false)` なら持ち手を出さない） |
-| キー | `keydown` / `keyup`。矢印・空白・Tab などはブラウザの既定の動きを止める。焦点が外れたら、押しっぱなしのキーは離したことにする |
-| マウス | `pointer*` で受けるので、指でも同じように届く。右で押すのは `ui.menu` のもの（ブラウザのメニューは出さない） |
-| 文字入力 | `ui.field` の間だけ、見えない `textarea` に任せる。**かな漢字変換はブラウザのものがそのまま使える**（変換中は `ui.marked()`） |
-| マウスの形 | `ui.cursor()` が CSS の `cursor` になる。押せるところ（ボタン・つまみ）では手、入力欄では文字の形に、宣言的な層が自分で変える |
-| 字 | **ブラウザに描いてもらう**（下）。`ui.font()` で日本語もそのまま出る |
-| 閉じる | 窓の × で `SEV_Close`。埋め込んだときはホストが `requestClose()` を呼ぶ |
+| サーフェス解像度 | `ui.open(横, 縦)` で指定した解像度で生成。サーフェスの1ピクセルが論理ピクセルに対応。低解像度サーフェス（640×480 未満）は整数比率で拡大表示し、表示領域を超過する場合はアスペクト比を維持して自動縮小 |
+| HiDPI（高精細画面） | `ui.pixel_ratio()` が `window.devicePixelRatio` を返却（1.25 や 1.5 等の小数に対応）、`ui.scale()` は整数値。ブラウザのズームや画面移動によりスケールが変更された場合はサーフェスが自動再生成される |
+| リサイズ | ウィンドウ右下ハンドルの操作またはマウント要素のリサイズにより `SEV_Resize` イベントが発生し、バッファが更新される（`ui.open(…, false)` 指定時はリサイズ無効） |
+| キー入力 | `keydown` / `keyup` を捕捉。矢印キー、Space、Tab 等のブラウザ標準動作は `preventDefault()` で抑制。フォーカス喪失時は押下状態を自動解除 |
+| マウス入力 | Pointer Events API によりタッチ操作にもシームレスに対応。右クリックは `ui.menu` 等のコンテキストメニュー処理に割り当て（ブラウザ標準メニューを抑止） |
+| テキスト入力 | `ui.field` フォーカス時のみ不可視の `textarea` を経由して文字入力を受付。**OS ネイティブの IME による日本語変換をそのまま利用可能**（未確定文字列は `ui.marked()` で取得） |
+| マウスポインタ | `ui.cursor()` の指定値が CSS の `cursor` プロパティへ反映。ボタン等の操作可能要素ではポインタ（指）、入力欄ではテキスト選択カーソルへ自動変更 |
+| フォント描画 | **ブラウザの Canvas API を用いてラスタライズ**（後述）。`ui.font()` により日本語フォントも高品位に描画 |
+| クローズ処理 | ウィンドウの閉じるボタン押下で `SEV_Close` イベントが発生。インライン埋め込み時はホスト側から `requestClose()` を呼び出す |
 
-`SHARK_UI=off` を渡しておくと画面を開かず、見えない面に描く（`ui.get()` と `ui.to_png()` で取れる）。
-node で動かしたときも同じで、`document` が無ければ `ui.visible()` は false になる。
+環境変数 `SHARK_UI=off` を設定した場合、DOM 上に画面を生成せずオフスクリーンバッファとして描画されます（`ui.get()` や `ui.to_png()` で画像を取得可能）。Node.js 等のヘッドレス環境でも同一のコードが動作します。
 
-## 字（std.ui）
+## フォントラスタライズ（std.ui）
 
-ブラウザの中からはフォントのファイルを読めないので、FreeType は使えない。
-かわりに**ブラウザに1文字ずつ描いてもらい、その濃さを写し取る**
-（[`../core/platform/font_canvas.inc`](../core/platform/font_canvas.inc)）。
-返す形は FreeType と同じなので、コアから見れば機種のフォントが読めたのと変わらない。
+WebAssembly 環境からは OS のフォントファイルに直接アクセスできないため、FreeType は使用しません。
+その代わり、**ブラウザの Canvas 2D API を用いて文字を 1 文字ずつ描画し、そのアルファチャンネル（濃淡情報）をテクスチャキャッシュに転送する** 方式を採用しています（[`../core/platform/font_canvas.inc`](../core/platform/font_canvas.inc)）。
+コア側から見ると FreeType によるラスタライズ結果と同一形式のビットマップが得られるため、レンダリングパイプラインを変更することなく動作します。
 
 ```shark
 var k = ui.scale();
-_ = ui.font(12 * k);        // ここでブラウザの字に切り替わる（ui.run は自分で呼ぶ）
+_ = ui.font(12 * k);        // ブラウザフォントエンジンへ切り替え
 ui.text(4, 4, "こんにちは", ui.rgb(255, 255, 255));
-print(ui.font_name());      // 例: Hiragino Sans
+print(ui.font_name());      // 使用中のフォント名（例: Hiragino Sans）
 ```
 
-使う字は、Windows・macOS・Linux のどれにも**はじめから入っている**ものを選んである。
-canvas は字ごとに、持っているものへ落ちていく。
+使用するフォントファミリは、主要な OS（Windows、macOS、Linux、iOS、Android）に標準搭載されている日本語フォントを優先順にフォールバック設定しています。
 
-| 機種 | 選んだもの |
+| プラットフォーム | 優先フォントリスト |
 |---|---|
-| macOS / iOS | Hiragino Sans、Hiragino Kaku Gothic ProN |
-| Windows | Yu Gothic UI、Yu Gothic、Meiryo、MS Gothic |
-| Linux / Android / ChromeOS | Noto Sans CJK JP、Noto Sans JP、IPAexGothic、IPAGothic、VL Gothic、Droid Sans Japanese |
-| 最後の受け皿 | system-ui、sans-serif |
+| macOS / iOS | Hiragino Sans, Hiragino Kaku Gothic ProN |
+| Windows | Yu Gothic UI, Yu Gothic, Meiryo, MS Gothic |
+| Linux / Android / ChromeOS | Noto Sans CJK JP, Noto Sans JP, IPAexGothic, IPAGothic, VL Gothic |
+| 汎用フォールバック | system-ui, sans-serif |
 
-- `ui.font_name()` は、**実際にその機械にあったもの**の名前を返す。
-  ブラウザは `document.fonts.check()` に何でも true と答えるので、
-  幅を比べて（`monospace` と並べて測って）確かめている
-- `ui.font(名前, 大きさ)` は、ブラウザではファイルの場所ではなく**フォントの名前**として渡る
-  （`ui.font("Meiryo", 16)`。その機械に無ければ false）
-- 一度描いた字形は覚えておく（文字と大きさが鍵）。日本語をたくさん出しても、
-  描き直すのは初回だけ
-- 絵文字は色が付かない（濃さだけを写し取るので、影のように出る）
+- `ui.font_name()` は、**クライアント環境に実際にインストールされているフォント名** を返却します（Canvas でのメトリクス比較により実在を判定）
+- `ui.font(名前, サイズ)` を呼び出す際、Web 環境ではファイルパスではなく **CSS フォントファミリ名** を指定可能です（`ui.font("Meiryo", 16)`。該当フォントが存在しない場合は false を返却）
+- ラスタライズされたグリフはグリフキャッシュに保持されるため、大量の日本語文字列を描画する場合でもレンダリング負荷は初回のみです
+- 絵文字はアルファマスクとして抽出されるため、モノクロ描画となります（文字色は `ui.text()` に指定した描画色が適用されます）
 
-## ブラウザでできないこと
+## ブラウザ環境における制約事項
 
-| できないこと | どうなるか |
+| 制約事項 | 動作仕様 |
 |---|---|
-| 外のファイルを読む | `std.file` が触るのはタブの中だけの仮の置き場（Emscripten の MEMFS）。閉じると消える |
-| 外のプログラムを呼ぶ | `os.run()` は失敗を返す（[../spec/library/os.md](../spec/library/os.md) のとおり `Result` で受け取れる） |
-| その場で待つ | 移植層の `sleep` は何もしない。`sleep()` はタスクを譲るだけで、実時間は描画の刻みで進む |
-| `std.net` `std.http` | もともとこの実装に入っていない（[../docs/implementation.md](../docs/implementation.md)） |
-| フォントのファイルを読む | ブラウザの中からは読めない。`ui.font(中身, 大きさ)` は false を返す（上の「字」のとおり、描くのはブラウザに頼む） |
-| 切り貼りの置き場を読む | ブラウザからは勝手に読めない。`ui.clipboard()` が返すのは、貼り付け（Ctrl+V）で届いたものと、自分で `ui.set_clipboard()` に入れたもの |
+| ローカルファイルアクセス | `std.file` がアクセスするのはブラウザのメモリ内仮想ファイルシステム（Emscripten MEMFS）。タブを閉じるとデータは破棄されます |
+| 外部プロセスの起動 | `os.run()` は非対応であり、失敗結果（`Result.err`）を返却します（詳細は [../spec/library/os.md](../spec/library/os.md) 参照） |
+| 同期スリープ | メインスレッドを完全にブロックする同期 `sleep` はサポートされません。`sleep()` はタスクスイッチをトリガーし、実時間は描画フレームに合わせて進行します |
+| ネットワークソケット | `std.net` および `std.http` は現バージョンのコアには未実装です |
+| 外部フォントファイルの直接読み込み | ファイルパスからのフォントファイル直接パースはサポートされません。`ui.font(bytes, size)` は false を返却します（上記の通りブラウザのフォントエンジンを使用してください） |
+| クリップボードの直接読み取り | ブラウザのセキュリティ制約により、任意のタイミングでのクリップボード直接読み取りは制限されます。`ui.clipboard()` はペーストイベント（Ctrl+V）で渡されたデータ、または直前に `ui.set_clipboard()` で格納したデータを返却します |
 
-`os.platform()` は `"wasm"` を返す。
+`os.platform()` は `"wasm"` を返却します。
 
-## 大きさ
+## バイナリサイズとフットプリント
 
-| もの | そのまま | gzip |
+| コンポーネント | 元サイズ | gzip 圧縮後 |
 |---|---|---|
-| `shark.wasm`（処理系） | 938 KB | 290 KB |
-| `shark.js`（つなぎ） | 87 KB | 25 KB |
+| `shark.wasm`（コア処理系） | 938 KB | 290 KB |
+| `shark.js`（Emscripten グルーコード） | 87 KB | 25 KB |
 | `vendor/vs`（Monaco Editor） | 4.2 MB | 1.2 MB |
-| 画面まわり（`app.js` `lang.js` `api.js` ほか） | 236 KB | 60 KB |
+| アプリケーション UI（`app.js`, `lang.js`, `api.js` 他） | 236 KB | 60 KB |
 
-Monaco は配られているもののうち、**書くところと入力候補まわりだけ**を残している
-（他言語の色分けや TypeScript の言語サービスは外す。24 MB → 4.2 MB）。
+Monaco Editor は Shark の編集に必要な **コアエディタ機能および補完機能のみに最適化** してバンドルしています（他言語サポートや TypeScript 言語サービスを除去し、24 MB から 4.2 MB に削減）。
 
-`web/dist/` はそのまま静的な置き場に置けば動く（サーバ側の処理は要らない）。
-`file://` では `.wasm` を読めないので、配って開く。
+`web/dist/` ディレクトリは完全な静的サイトとして構成されており、GitHub Pages、Cloudflare Pages、S3 等の静的ホスティングへデプロイするだけでそのまま動作します（サーバーサイド処理は一切不要）。

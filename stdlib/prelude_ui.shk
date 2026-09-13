@@ -1,44 +1,44 @@
-// prelude_ui.shk — 宣言的に書くときの入り口。Shark 自身で書いてある。
+// prelude_ui.shk — 宣言的 UI のエントリポイント（Shark 自身で実装）。
 //
-// ui.run() が、開く・くり返す・描き直す・閉じる をぜんぶ引き受ける。
-// 書く人が書くのは、いまどうあるべきか（view）と、押されたときの動きだけ。
+// ui.run() が、ウィンドウ生成・イベントループ・再描画・終了処理をすべて統合管理する。
+// アプリケーション側は画面状態（view）とイベントハンドラ（update / action）を定義する。
 //
-// 値を持つ部品（checkbox・radio・slider・number・field・textarea・password・
-// combo・listbox・tabs）は、**変数を ref で渡すのがいちばん短い**。動いたら
-// その変数が直に書き換わるので、名札も update も ui.value() も要らない。
-//   ui.checkbox("音を出す", ref sound)
+// 状態を持つウィジェット（checkbox, radio, slider, number, field, textarea, password,
+// combo, listbox, tabs）は、変数を ref で渡すバインディングが最も簡潔である。
+// 操作時に変数が直接更新されるため、ID 指定や update 処理、ui.value() の呼び出しは不要。
+//   ui.checkbox("音声出力", ref sound)
 //   ui.slider(ref volume, 0, 100)
-//   ui.combo(ref iro, iro_na)
+//   ui.combo(ref color, color_names)
 //
-// ボタンのように値を持たないものは、動きをその場に書く。
-//   ui.button("ふやす", func() -> void { count += 1; })
+// ボタンなどのステートレスなウィジェットは、無名関数（ラムダ式）でアクションを直接記述できる。
+//   ui.button("カウントアップ", func() -> void { count += 1; })
 //
-// 名札を付けて update で振り分ける形も残してある。その場に書いた関数からは
-// 外側の局所変数が見えないので、升ごとに作るもの（ui.grid の cell）などはこちら。
-//   ui.button("ふやす", "inc")
-// 混ぜてよい。
+// ウィジェットID を指定して update 関数でイベントを振り分ける従来スタイルにも対応。
+// 無名関数内からは外部のローカル変数がキャプチャできないため、グリッドのセル（ui.grid の cell）など
+// 動的に反復生成されるウィジェットはこの形式を使用する。
+//   ui.button("カウントアップ", "inc")
+// 両方のスタイルを混在して使用可能。
 //
-// 格子を升ごとの関数から作る形（ui.grid(rows, cols, cell)）もここにある。
-// 処理系（ネイティブ）からは Shark の関数を呼び戻せないので、関数を受ける形は Shark で書く。
+// グリッドをセル生成関数から構築する形式（ui.grid(rows, cols, cell)）も本ファイルで提供する。
+// ネイティブ（C++）層から Shark 関数を直接コールバックできないため、関数を受け取る高階関数は Shark で記述する。
 //
-// 状態は書く人がふつうの変数で持つ。ここは覚えない。
-// 処理系はこのファイルを埋め込んで持ち、std.ui を入れたときだけ読み込む
-// （core/shark.cpp）。core/prelude.h は tools/prelude.py がここから作る。
+// 状態は呼び出し元が通常の変数で管理する（暗黙的な状態保持は行わない）。
+// ランタイムはこのファイルを C++ ヘッダ（core/prelude.h）として埋め込み、std.ui インポート時に読み込む
+// （core/shark.cpp）。core/prelude.h は tools/prelude.py により自動生成される。
 import std.ui;
 
 public func run(title: string, width: int, height: int,
                 view: func() -> Widget,
                 update: func(string) -> void,
                 resizable: bool) -> void {
-  // 面は**画面の画素と1対1**に取る。細かさは丸めない数を使う ―
-  // Windows の 125% やブラウザの拡大では 1.25・1.5 のような半端な数になり、
-  // 整数に丸めた大きさで取ると機種が縮め直すので、字も線もにじむ
+  // サーフェス解像度はディスプレイの物理ピクセルと 1:1 に設定。丸めを行わない論理ピクセル比を使用する
+  // （Windows の 125% やブラウザズームなど小数スケールでのぼやけを防止）
   var r = ui.pixel_ratio();
   ui.open(title, int(float(width) * r + 0.5), int(float(height) * r + 0.5), resizable);
   if ui.font_name() == "" { _ = ui.font(int(12.0 * r + 0.5)); }
 
-  // 画面が無いところ（SHARK_UI=off など）では、1回だけ描いて返る。
-  // 面はそのままにしておくので、ui.get() や ui.to_png() で結果を見られる
+  // ヘッドレス環境（SHARK_UI=off 等）では、1 フレームのみ描画して復帰する。
+  // サーフェスは保持されるため、ui.get() や ui.to_png() で出力結果の取得が可能
   if !ui.visible() {
     ui.clear();
     _ = ui.show(view());
@@ -48,17 +48,17 @@ public func run(title: string, width: int, height: int,
   while ui.poll() {
     ui.clear();
     var hit = ui.show(view());
-    var changed = ui.edited();    // ref で受けた入力欄が、変数を書き換えた
-    if ui.has_action() {          // 部品が関数を持っていれば、それを呼ぶ
+    var changed = ui.edited();    // ref でバインドされた入力欄が変数を更新したか判定
+    if ui.has_action() {          // ウィジェットのアクション関数が設定されていれば実行
       var act = ui.action();
       act();
       changed = true;
     }
-    if hit != "" {                // 名札が付いていれば、update に渡す
+    if hit != "" {                // ウィジェットID が返却されていれば update を実行
       update(hit);
       changed = true;
     }
-    if changed {                  // 状態が変わったので、すぐ描き直す
+    if changed {                  // 状態が変更されたため即時再描画
       ui.clear();
       _ = ui.show(view());
     }
@@ -68,14 +68,14 @@ public func run(title: string, width: int, height: int,
   ui.close();
 }
 
-// resizable を省いた形。窓は縁を引いて大きさを変えられる
+// resizable を省略したオーバーロード。ウィンドウのリサイズは有効（true）となる
 public func run(title: string, width: int, height: int,
                 view: func() -> Widget,
                 update: func(string) -> void) -> void {
   run(title, width, height, view, update, true);
 }
 
-// 部品に関数を持たせる書き方。update は要らない
+// update を省略したオーバーロード。各ウィジェットの個別 action コールバックを使用する
 public func run(title: string, width: int, height: int,
                 view: func() -> Widget) -> void {
   run(title, width, height, view, __ui_ignore, true);
@@ -89,8 +89,8 @@ public func run(title: string, width: int, height: int,
 func __ui_ignore(hit: string) -> void {
 }
 
-// 格子を、升ごとの関数から作る。cell(行, 列) が返す部品を左上から右へ詰める。
-// 並べ方は ui.grid(cols, cells) と同じ（core/lib/ui.cpp）
+// セル生成関数からグリッドウィジェットを構築。cell(row, col) が返却するウィジェットを行優先で配置する。
+// 内部的に ui.grid(cols, cells) を生成（core/lib/ui.cpp 参照）
 public func grid(rows: int, cols: int, cell: func(int, int) -> Widget) -> Widget {
   var cells: list<Widget> = [];
   for var r in range(rows) {

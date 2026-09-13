@@ -1,10 +1,10 @@
-// prelude.shk — Shark 自身で書いた標準の一部。
+// prelude.shk — Shark 自身で実装された標準ライブラリ共通プレリュード
 //
-// 並べ替えは、基本型でもクラスでも同じコードで動かしたいので Shark で書いてある
-// （compare の呼び分けは仮想マシンが行う）。処理系はこのファイルを埋め込んで持ち、
-// 起動時に読み込む。core/prelude.h は tools/prelude.py がここから作る。
+// ソート処理（マージソート）は基本型・クラス型を問わず同一コードで処理するため Shark 自身で実装
+// （compare のディスパッチは VM が行う）。ランタイムバイナリにヘッダとして埋め込まれ、
+// 起動時に読み込まれる。core/prelude.h は tools/prelude.py により本ファイルから自動生成される。
 //
-// 名前が __ で始まるものは、書く人からは見えない。xs.sort() から呼ばれる。
+// 接頭辞 __ を持つ関数は内部用シンボル。ユーザーコードには直接露出せず、xs.sort() 等の内部実装から呼び出される。
 
 func __merge<T: Comparable>(ref xs: list<T>, lo: int, mid: int, hi: int) -> void {
   var tmp: list<T> = [];
@@ -46,6 +46,6 @@ func __sort<T: Comparable>(ref xs: list<T>) -> void {
   }
 }
 
-// ui.action() が返す既定。押された部品が関数を持っていないとき用
+// ui.action() のデフォルト戻り値。アクション関数が未設定のウィジェット用
 func __noop() -> void {
 }

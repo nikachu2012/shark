@@ -32,8 +32,8 @@ int main() {
   Str code((const char*)kStageBytecode, (int)sizeof kStageBytecode);
   Config cfg = game::game_config();
 
-  // 作ったときに決めた「使ってよいメモリ」と「panic の言い方」は、覚え書きに入っている
-  // （build_stage.cpp）。読んで使わないと、ここの既定（64MB）のままになる
+  // 生成時に指定されたメモリ上限およびパニック言語設定はヘッダーに格納されている
+  // （build_stage.cpp）。ヘッダーから読み出して適用しない場合、デフォルト値（64MB）が使用される
   Str err;
   BytecodeHeader h;
   if (!bytecode_read_header(code, &h, cfg.lang, &err)) {

@@ -173,7 +173,7 @@ func main() -> int {
   var hit2 = ui.show(ui.label("l"), 40, 30);   // 置く場所を決める
   print(f"[{hit2}] {ui.get(41, 30) != 0} {ui.get(4, 4) != 0}");
 
-  // --- ref で受ける入力欄（名札は返らず、変数を直に書き換える）---
+  // --- ref で受ける入力欄（ID は返らず、変数を直接更新する）---
   ui.clear(0);
   var hit3 = ui.show(ui.field(ref t_name));
   print(f"[{hit3}] [{t_name}] {ui.edited()}");   // 誰も打っていないので、そのまま
@@ -346,7 +346,7 @@ func main() -> int {
   // 改行のところで行が変わる。中身は2行なので、3 行目は空
   print(f"{hits(1, 3, 119, 11) > 0} {hits(1, 11, 119, 19) > 0} {hits(1, 19, 119, 27)}");
 
-  // 名札で受ける形。行数を省くと 4 行ぶん（8 × 4 ＋ 3 × 2 = 38）
+  // ID 指定形式。行数を省略すると 4 行分（8 × 4 ＋ 3 × 2 = 38）
   ui.clear(0);
   var h5 = ui.show(ui.textarea("memo", "xy").background(black), 0, 0);
   print(f"[{h5}] [{ui.text_value()}] {ui.get(0, 37) != 0} {ui.get(0, 38) != 0}");

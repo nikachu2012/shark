@@ -117,39 +117,36 @@
     <h2>つかいかた</h2>
     <p>左に書いて <b>実行</b>。処理系そのもの（C++ で書いたコア）を WebAssembly にしたものが、
        このタブの中だけで動きます。書いたものはどこにも送られません。</p>
-    <h3>手数</h3>
+    <h3>機能</h3>
     <ul>
-      <li><b>実行</b> … <code>main</code>（または並べた文）を動かす</li>
-      <li><b>型検査</b> … 動かさずに、誤りだけを見る</li>
-      <li><b>テスト</b> … <code>test_</code> で始まる関数を順に走らせる</li>
-      <li><b>整える</b> … 見た目を整える（<code>shark fmt</code> と同じもの）。
-          <kbd>Shift</kbd> + <kbd>Alt</kbd> + <kbd>F</kbd> でも同じ</li>
-      <li><b>止める</b> … 途中でやめる。止まらない繰り返しでも画面は固まりません</li>
-      <li><b>説明</b> … 関数の一覧と、言語の使い方を<b>小窓</b>で出します
-          （<kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>I</kbd>）。書きながら読めて、
-          頭をつかめば動かせ、右下の角で大きさを変えられます。
-          ここに入っているので、繋がっていなくても読めます</li>
+      <li><b>実行</b> … <code>main</code>（またはトップレベルスクリプト）を実行</li>
+      <li><b>型検査</b> … 実行せずに静的型検査のみを実行</li>
+      <li><b>テスト</b> … <code>test_</code> で始まるユニットテスト関数を順次実行</li>
+      <li><b>フォーマット</b> … コードを自動整形（<code>shark fmt</code> 相当）。
+          <kbd>Shift</kbd> + <kbd>Alt</kbd> + <kbd>F</kbd> でも実行可能</li>
+      <li><b>停止</b> … スクリプトの実行を強制停止。無限ループ時もブラウザがフリーズしません</li>
+      <li><b>ドキュメント</b> … 標準ライブラリ一覧と言語仕様をウィンドウで表示
+          （<kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>I</kbd>）。エディタと並行して閲覧・操作できます</li>
     </ul>
 
     <h3>ターミナル</h3>
-    <p>右がわは端末とおなじ流れです。出力も、打った文字も1本に並び、
-       出る形は <code>shark</code> コマンドと同じにしてあります。</p>
+    <p>右ペインは CLI ターミナルと同様に対話形式で動作し、標準出力・標準エラー出力・入力が統合表示されます。</p>
     <ul>
-      <li><code>input()</code> は<b>打たれるまで待ちます</b>。そのまま打って <kbd>Enter</kbd></li>
-      <li>ボタンを押さずに、<code>run</code> <code>check</code> <code>test</code>
+      <li><code>input()</code> は標準入力を待機します。文字を入力して <kbd>Enter</kbd> を押してください</li>
+      <li>ボタンを押さずに、ターミナルで <code>run</code> <code>check</code> <code>test</code>
           <code>fmt</code> <code>explain E0102</code> <code>modules</code>
-          と打っても動きます（<code>help</code> で一覧）</li>
-      <li><kbd>Ctrl</kbd> + <kbd>C</kbd> … 止める　/　<kbd>Ctrl</kbd> + <kbd>D</kbd> … 入力の終わり（<code>none</code> になる）</li>
-      <li><kbd>Ctrl</kbd> + <kbd>L</kbd> … 流れを消す　/　<kbd>↑</kbd> <kbd>↓</kbd> … 打った覚え</li>
+          と入力してコマンド実行することも可能です（<code>help</code> でコマンド一覧）</li>
+      <li><kbd>Ctrl</kbd> + <kbd>C</kbd> … 実行停止　/　<kbd>Ctrl</kbd> + <kbd>D</kbd> … EOF（入力終了）</li>
+      <li><kbd>Ctrl</kbd> + <kbd>L</kbd> … 画面クリア　/　<kbd>↑</kbd> <kbd>↓</kbd> … コマンド履歴</li>
     </ul>
-    <h3>覚えておくと早い</h3>
+    <h3>ショートカットキー</h3>
     <ul>
       <li><kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>Enter</kbd> … 実行</li>
-      <li><kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>.</kbd> … 止める</li>
-      <li><kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>Space</kbd> … 入力候補を出す</li>
-      <li><kbd>F12</kbd> … 定義へ飛ぶ　/　<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> … 関数を探す</li>
-      <li><kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>I</kbd> … 説明の小窓を出す・消す</li>
-      <li><kbd>F1</kbd> … 書くところでできることを並べる</li>
+      <li><kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>.</kbd> … 停止</li>
+      <li><kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>Space</kbd> … コード補完の表示</li>
+      <li><kbd>F12</kbd> … 定義へジャンプ　/　<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> … シンボル検索</li>
+      <li><kbd>Ctrl</kbd>（<kbd>⌘</kbd>）+ <kbd>I</kbd> … ドキュメントウィンドウの表示切り替え</li>
+      <li><kbd>F1</kbd> … コマンドパレットを開く</li>
     </ul>
     <h3>入力補完</h3>
     <ul>
@@ -160,23 +157,22 @@
       <li>赤い波線は<b>本物の型検査</b>の結果です（打つ手を止めると走ります）</li>
     </ul>
 
-    <h3>画面（std.ui）</h3>
-    <p><code>ui.open()</code> を呼ぶと<b>窓</b>が出ます。キーもマウス（指も）もそのまま届きます。</p>
+    <h3>GUI（std.ui）</h3>
+    <p><code>ui.open()</code> を呼び出すと仮想ウィンドウが表示され、キーボードやマウス（タッチ）イベントが送信されます。</p>
     <ul>
-      <li>名札の帯を引くと動かせます。右下の隅を引くと大きさが変わり、<b>面も同じ大きさに作り直されます</b>
-          （<code>ui.open(..., false)</code> なら変わりません）</li>
-      <li>× を押すと <code>ui.poll()</code> が <code>false</code> を返します（机の上の窓と同じ）</li>
-      <li><code>ui.field</code> の日本語は、ブラウザのかな漢字変換がそのまま使えます</li>
-      <li>字は<b>ブラウザに描いてもらいます</b>。<code>ui.font(12 * ui.scale())</code>（<code>ui.run</code> は自分で呼びます）で
-          日本語もそのまま出ます。どの機種にもあるフォントを選んであり、
-          いま使っているものは <code>ui.font_name()</code> で分かります</li>
+      <li>タイトルバーをドラッグしてウィンドウを移動できます。右下隅をドラッグするとサイズを変更でき、<b>描画サーフェスも自動的にリサイズされます</b>
+          （<code>ui.open(..., false)</code> の場合は固定サイズとなります）</li>
+      <li>× ボタンをクリックすると <code>ui.poll()</code> が <code>false</code> を返します（デスクトップウィンドウと同様）</li>
+      <li><code>ui.field</code> のテキスト入力では、ブラウザのネイティブ IME によるかな漢字変換がそのまま利用可能です</li>
+      <li>テキスト描画はブラウザの Canvas API を使用します。<code>ui.font(12 * ui.scale())</code> により
+          システムフォントを用いた日本語表示に対応し、適用中のフォントは <code>ui.font_name()</code> で取得できます</li>
     </ul>
 
-    <h3>ブラウザでできないこと</h3>
+    <h3>ブラウザ環境の制限事項</h3>
     <ul>
-      <li><code>std.file</code> が触るのは、このタブの中だけにある仮の置き場です。閉じると消えます</li>
-      <li><code>os.run()</code>（外のプログラムを呼ぶ）は使えません</li>
-      <li>読めるファイルは <code>playground.shk</code>（左に書いているもの）だけです</li>
+      <li><code>std.file</code> がアクセスするのはブラウザ内仮想ファイルシステム（メモリ上）です。タブを閉じるとデータは破棄されます</li>
+      <li><code>os.run()</code>（外部プロセスの実行）は Web 環境では使用できません</li>
+      <li>初期状態で読み込めるファイルは <code>playground.shk</code>（エディタ上のコード）のみです</li>
     </ul>
     <h3>この処理系が持つモジュール</h3>
     <p id="help-modules" class="mods">—</p>

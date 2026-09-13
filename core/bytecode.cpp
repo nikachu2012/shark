@@ -108,9 +108,9 @@ static uint64_t str_key(const Str& t) {
   return h;
 }
 
-// 見張り（checksum）。覚え書きの後ろぜんぶを 1 つの数にまとめる。
-// 1 バイトでも化けていれば、中身を組み立てる前に気づける（spec/runtime/bytecode.md）。
-// 悪意のある書き換えを防ぐものではない
+// チェックサム（FNV-1a 32ビット）。ヘッダ以降の全データを 1 つのハッシュ値にまとめる。
+// 1 バイトでも破損していれば、バイトコードのデシリアライズ前に検出できる（spec/runtime/bytecode.md 参照）。
+// （改ざん防止用ではなくデータ破損検知用）
 static uint32_t payload_checksum(const Str& b, int from) {
   uint64_t h = 0xcbf29ce484222325ull;
   for (int i = from; i < b.size(); i++) { h ^= (uint64_t)(unsigned char)b[i]; h *= 0x100000001b3ull; }
@@ -119,8 +119,7 @@ static uint32_t payload_checksum(const Str& b, int from) {
 
 struct Writer {
   Str b;
-  // 名前や道は同じものが何度も出てくる。本体には番号だけを入れ、
-  // 中身は表にまとめて1回だけ書く（spec/runtime/bytecode.md）
+  // 識別子名やパス文字列を定数プールにまとめ、本体側にはインデックスのみを格納する（spec/runtime/bytecode.md 参照）
   Vec<Str> pool;
   Lookup pool_at;
   void u8(int v) { b.push((char)(v & 0xff)); }
@@ -150,7 +149,7 @@ struct Reader {
   const Str& b;
   int p;
   bool bad;
-  const Vec<Str>* pool;   // 文字列の表（覚え書きのすぐ後ろにある）
+  const Vec<Str>* pool;   // 文字列定数プール（ヘッダの直後に配置）
   explicit Reader(const Str& s) : b(s), p(0), bad(false), pool(0) {}
   int u8() {
     if (p >= b.size()) { bad = true; return 0; }
@@ -425,12 +424,12 @@ bool bytecode_write(Program& prog, const Registry& reg, const BytecodeHeader& h,
   for (int i = 0; i < prog.inits.size(); i++) w.sv(prog.inits[i]);
   w.sv(prog.entry);
 
-  // 並べ方は「覚え書き ＋ 文字列の表 ＋ 本体」。
-  // 表は本体を書き終えないと揃わないので、最後にここで前へ付ける
+  // バイナリ構造は「ヘッダ ＋ 文字列定数プール ＋ バイトコード本体」。
+  // 定数プールは本体のシリアライズ完了時に確定するため、ここで先頭に連結する
   Writer head;
   for (int i = 0; i < 4; i++) head.u8(kBytecodeMagic[i]);
   head.fixed32((uint32_t)kBytecodeVersion);
-  head.fixed32(0);                        // 見張りの置き場所。中身が揃ってから埋める
+  head.fixed32(0);                        // チェックサム格納領域。データ確定後に設定
   head.str(h.main_file);
   head.u8(h.lang == LANG_EN ? 1 : 0);
   head.fixed32((uint32_t)h.memory_mb);
@@ -440,7 +439,7 @@ bool bytecode_write(Program& prog, const Registry& reg, const BytecodeHeader& h,
   for (int i = 0; i < w.pool.size(); i++) head.str(w.pool[i]);
   head.b += w.b;
 
-  // 見張りは、自分より後ろぜんぶを見る
+  // チェックサムは自身以降の全データを対象とする
   uint32_t sum = payload_checksum(head.b, kChecksumAt + 4);
   for (int i = 0; i < 4; i++) head.b[kChecksumAt + i] = (char)((sum >> (8 * i)) & 0xff);
 
@@ -465,7 +464,7 @@ bool bytecode_read_header(const Str& in, BytecodeHeader* h, Lang lang, Str* err)
   }
   uint32_t sum = r.fixed32();
   if (!r.bad && sum != payload_checksum(in, kChecksumAt + 4)) {
-    *err = L(lang, "バイトコードが壊れています（見張りの数が合いません）",
+    *err = L(lang, "バイトコードが壊れています（チェックサムが一致しません）",
              "the bytecode is damaged (checksum mismatch)");
     return false;
   }
@@ -475,7 +474,7 @@ bool bytecode_read_header(const Str& in, BytecodeHeader* h, Lang lang, Str* err)
   h->modules = r.fixed32();
   h->natives = r.fixed64();
   if (r.bad) {
-    *err = L(lang, "バイトコードの覚え書きが壊れています", "the bytecode header is damaged");
+    *err = L(lang, "バイトコードのヘッダが壊れています", "the bytecode header is damaged");
     return false;
   }
   return true;
@@ -494,10 +493,10 @@ bool bytecode_read(const Str& in, Program* prog, TypeTable& types, const Registr
   }
 
   Reader r(in);
-  // 覚え書きを読み飛ばす
+  // ヘッダを読み飛ばす
   r.p = 4;
   r.fixed32();
-  r.fixed32();   // 見張り（bytecode_read_header で確かめ済み）
+  r.fixed32();   // チェックサム（bytecode_read_header で検証済み）
   r.str();       // もとのファイル名。ここだけは表を使わない
   r.u8();
   r.fixed32();

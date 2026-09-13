@@ -1,6 +1,6 @@
-// 並行処理。async も await も無い（spec/runtime/concurrency.md）
+// 並行処理の例（spec/runtime/concurrency.md）
 func fetch(name: string, sec: float) -> string {
-  sleep(sec);                 // このタスクだけが止まる
+  sleep(sec);                 // カレントタスクのみスリープ
   return name + " 取得";
 }
 
@@ -10,17 +10,17 @@ func worker(ch: channel<string>, name: string) -> void {
 }
 
 func main() -> int {
-  var t = task fetch("A", 0.05);   // 走り始める。ここでは待たない
+  var t = task fetch("A", 0.05);   // バックグラウンドで非同期実行開始
   print("ほかのことをする");
   print(t.wait());
 
-  var pages = parallel {           // まとめて走らせて、全部待つ
+  var pages = parallel {           // 複数タスクを並行実行し、すべて完了するまで待機
     task fetch("B", 0.03);
     task fetch("C", 0.02);
   };
   print(pages);
 
-  var ch = channel<string>();      // 送り手は何個でも、受け手は1つ
+  var ch = channel<string>();      // チャンネル（マルチプロデューサー・シングルコンシューマー）
   task worker(ch, "い");
   task worker(ch, "ろ");
   for var i in range(2) {

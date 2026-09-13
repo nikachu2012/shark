@@ -1,14 +1,14 @@
-// imecheck.cpp — 変換つきの文字入力（IME）を、偽の出し先で動かして見張る
+// imecheck.cpp — モック画面環境での IME（テキスト入力・コンポジション）挙動検証
 //
-// macOS の受け皿（NSTextView）とブラウザの受け皿（<textarea>）は、
-// **確定した中身と、選んでいるところの数え方が違う**。
+// macOS のネイティブ入力（NSTextView）および Web ブラウザ（<textarea>）では、
+// 確定文字列と選択範囲（カーソル位置）でオフセットの基準が異なる:
 //
-//   text_state    が返す確定文字列 … 変換中の字を**抜いた**もの
-//   text_selection が返す位置      … 変換中の字も**数に入れた**もの
+//   text_state    が返す確定文字列 … 未確定（コンポジション中）文字列を除外した確定テキスト
+//   text_selection が返すインデックス … 未確定文字列も含めた全体のテキストインデックス
 //
-// この2つを同じ物差しだと思って使うと、変換中の字が増えるたびにカーソルが
-// 1文字ずつずれていく。ここでは同じ数え方をする偽の出し先を作って、
-// 変換中の字が**カーソルのところ**に出ることを絵で確かめる。
+// このオフセット管理方式を正しく考慮しないと、変換候補文字数が増加するたびに
+// カーソル描画位置がずれていく。本テストでは同等のオフセット管理を行うモック画面実装を用いて、
+// コンポジション文字列および下線が正しいカーソル位置に描画されるかを検証する。
 #include <stdio.h>
 #include <string.h>
 
@@ -29,13 +29,10 @@ static const int kTextX = 5;     // field_pad_x()
 static const int kTextY = 3;     // field_pad_y()
 static const int kLineH = 8;
 
-// --- 絵から読み取る -------------------------------------------------------
-// 変換中の字には下線が引かれる（差し色）。その左端の画素を探す。
-// 枠も差し色なので、字の始まる x から右へ、枠の上下を外して見る
-// （下線の行そのものは字の大きさで動くので、決め打ちにしない）
+// --- 画面バッファの解析 ---------------------------------------------------
+// 変換中のテキストにはアクセントカラーの下線が引かれる。その左端 X 座標を走査する。
+// 枠線も同色のため、テキスト領域内の Y 座標のみを対象とする。
 static int underline_x(int from) {
-  // 見るのは字の行のあたりだけ。枠の上下の線も差し色なので、そこまで見ると
-  // いちばん左の枠を拾ってしまう
   for (int x = from; x < fake::pw; x++)
     for (int y = 1; y <= kTextY + kLineH + 1; y++)
       if (fake::at(x, y) == fake::kAccent) return x;
@@ -51,16 +48,16 @@ static void expect(const char* label, int got, int want) {
   g_fail++;
 }
 
-// 台本。1こま描くごとに1つ進める
-//   0: "abc" のうしろを押す（3 文字目にカーソルが行く）
-//   1: 離す
-//   2: 焦点と受け皿が落ち着くのを1こま待つ
-//   3〜5: 変換中の字を1つずつ増やす
+// テストシナリオ。1 フレーム描画ごとに進行する
+//   0: "abc" の末尾をクリック（3 文字目にカーソルを移動）
+//   1: マウスアップ
+//   2: フォーカス状態の安定化を 1 フレーム待機
+//   3〜5: コンポジション文字列を 1 文字ずつ追記
 //   6: 確定
 static int g_step = 0;
 static int g_seen[8];
 static void one_frame() {
-  // 描き終わったところ。変換中の下線がどこから始まっているかを控える
+  // 描画完了時の検証: コンポジション下線の開始 X 座標を記録
   if (g_step >= 3 && g_step <= 6) g_seen[g_step] = underline_x(kTextX);
   switch (g_step) {
     case 0: fake::mouse(kTextX + kCellW * 3, kTextY + 2, 0, true); break;
@@ -120,11 +117,11 @@ static void check(const char* label, const char* widget) {
   fake::on_frame = 0;
   int* seen = g_seen;
 
-  // 数え方が食い違っていると、打つたびに 6 画素（1 字）ずつ右へずれていく
+  // インデックス計算の不整合があると、入力ごとに 6 ピクセル（1 文字）ずつ右にずれていく
   int want = kTextX + kCellW * 3;
-  expect("変換の1字目が出るところ", seen[4], want);
-  expect("2字目まで伸ばしても同じ", seen[5], want);
-  expect("3字目まで伸ばしても同じ", seen[6], want);
+  expect("変換第1文字目の描画位置", seen[4], want);
+  expect("2文字目への伸長時も位置維持", seen[5], want);
+  expect("3文字目への伸長時も位置維持", seen[6], want);
 }
 
 int main() {
@@ -137,15 +134,15 @@ int main() {
   p.screen = &fake::kScreen;
   platform_set(&p);
 
-  // "abcdef" の3文字目のうしろを押してから、そこで変換を始める。
-  // 変換中の字は**押したところ**から出るはずで、打つたびに右へずれてはいけない
-  check("複数行の入力欄（ui.textarea）", "ui.textarea(ref memo, 2)");
-  check("1行の入力欄（ui.field）", "ui.field(ref memo)");
+  // "abcdef" の 3 文字目の後方をクリックし、その位置で変換を開始する。
+  // 未確定文字列はクリック位置を起点として描画され、入力文字数が増加しても開始位置がずれないことを検証する。
+  check("複数行テキストエリア（ui.textarea）", "ui.textarea(ref memo, 2)");
+  check("単行テキストフィールド（ui.field）", "ui.field(ref memo)");
 
   if (g_fail) {
-    printf("imecheck: %d 件おかしい\n", g_fail);
+    printf("imecheck: %d 件失敗\n", g_fail);
     return 1;
   }
-  printf("imecheck: ぜんぶ通った\n");
+  printf("imecheck: 全テスト合格\n");
   return 0;
 }

@@ -1,41 +1,41 @@
-# 見本（examples/）
+# サンプルコード（examples/）
 
-どれも `./shark run examples/<名前>.shk` で動く。
-画面を持たないところ（`SHARK_UI=off` や ssh の先）では、窓の出るものは
-**見えない面**に描いて PNG に保存する（`ui.visible()` で見分けている）。
+収録されているサンプルコードは、すべて `./shark run examples/<ファイル名>.shk` で実行可能です。
+GUI 表示環境のない環境（`SHARK_UI=off` 設定時や SSH 接続時など）では、ウィンドウを表示するサンプルは
+自動的に**オフスクリーンバッファ**に描画され、PNG 画像として保存されます（`ui.visible()` で判定）。
 
-ブラウザからも同じものを選べる。並べる順と名前は
-[web/examples.py](../web/examples.py) の `ITEMS` が正で、ここに増やしたら
-あちらにも足す（食い違うと `make web` が止まる）。
+Web ブラウザ環境からも同一のサンプルコードを選択して実行できます。サンプルの表示順序および表示名は
+[web/examples.py](../web/examples.py) の `ITEMS` が正（マスター）であり、本ディレクトリにサンプルを追加した際は
+そちらにも登録する必要があります（不整合がある場合 `make web` が停止します）。
 
-## 言語のかたち
+## 言語機能のサンプル
 
-| 見本 | 分かること |
+| サンプル | 内容 |
 |---|---|
-| [hello.shk](hello.shk) | いちばん短いプログラム（`main` は無くてもよい） |
-| [fizzbuzz.shk](fizzbuzz.shk) | 繰り返しと分岐 |
-| [fish.shk](fish.shk) | クラス・継承・インタフェース・並べ替え |
-| [config.shk](config.shk) | 失敗するかもしれない処理（`Result` / `try` / `if var`） |
-| [tasks.shk](tasks.shk) | 並行処理（`task`。`async` も `await` も無い） |
+| [hello.shk](hello.shk) | 最小構成のプログラム（`main` 関数の省略例） |
+| [fizzbuzz.shk](fizzbuzz.shk) | ループと条件分岐 |
+| [fish.shk](fish.shk) | クラス・継承・インタフェース・ソート処理 |
+| [config.shk](config.shk) | エラーハンドリング（`Result` / `try` / `if var`） |
+| [tasks.shk](tasks.shk) | 並行処理（`task` による軽量協調タスク。`async`/`await` 不要） |
 
-## 画面（std.ui）
+## GUI・グラフィック（std.ui）のサンプル
 
-`std.ui` は2つの層に分かれる。**下の層**は点や線を自分で描くところ、
-**上の層**は部品を組んで1つ返すところ（[spec/library/ui.md](../spec/library/ui.md)）。
+`std.ui` は 2 つのレイヤーに分かれています。**低レベル層**はピクセル・プリミティブ描画やイベントを直接制御し、
+**高レベル層**はウィジェットツリーを構築して宣言的に記述します（[spec/library/ui.md](../spec/library/ui.md) 参照）。
 
-| 見本 | 層 | 分かること |
+| サンプル | レイヤー | 内容 |
 |---|---|---|
-| [paint.shk](paint.shk) | 下 | マウスで描く。押された・動いたを自分で見る |
-| [node_editor.shk](node_editor.shk) | 下 | **ノードをつないでプログラムを作る。**組んだものが Shark のコードになって出る。拡大縮小・ミニマップと、線と丸を自分でなめらかに描くところも |
-| [hexedit.shk](hexedit.shk) | 下 | Hex エディタ。表を自分で描き、キーとマウスで書き換える。取り消し・やり直し・探す・開く画面まで一とおり |
-| [breakout.shk](breakout.shk) | 下 | 2D のゲーム。絵（Canvas）と透けた色 |
-| [cube3d.shk](cube3d.shk) | 下 | 3D。三角形（`ui.tri`）と奥行き（z バッファ）だけで書く |
-| [counter.shk](counter.shk) | 上 | いちばん小さい宣言的な書き方（`ui.run` と `view()`） |
-| [widgets.shk](widgets.shk) | 上 | **部品をぜんぶ出す見本。**飾りの鎖（`.border` など）も一とおり |
-| [cube_ui.shk](cube_ui.shk) | 上 | 状態はふつうの変数のまま、部品（つまみ・木・色）で 3D を動かす |
+| [paint.shk](paint.shk) | 低レベル | マウスによるペイントツール。マウスイベントの直接ハンドリング |
+| [node_editor.shk](node_editor.shk) | 低レベル | **ノードエディタ。** ノードを接続してビジュアルプログラミングを行い、Shark コードを生成。ズーム・パン・ミニマップ機能およびベジエ曲線・アンチエイリアス円の描画 |
+| [hexedit.shk](hexedit.shk) | 低レベル | Hex エディタ。テーブル描画、キーボード・マウス操作、アンドゥ・リドゥ、検索、ファイルオープンダイアログ |
+| [breakout.shk](breakout.shk) | 低レベル | 2D ブロック崩しゲーム。オフスクリーン Canvas とアルファブレンディング |
+| [cube3d.shk](cube3d.shk) | 低レベル | 3D ワイヤーフレーム・ソリッド描画。三角形ラスタライズ（`ui.tri`）と Z バッファ |
+| [counter.shk](counter.shk) | 高レベル | 最小構成の宣言的 UI（`ui.run` と `view()`） |
+| [widgets.shk](widgets.shk) | 高レベル | **全 UI ウィジェットの総合デモ。** メソッドチェーンによるスタイリング（`.border` 等）の網羅 |
+| [cube_ui.shk](cube_ui.shk) | 高レベル | 通常の変数による状態管理と、ウィジェット（スライダー・ツリー・カラーピッカー）による 3D オブジェクトの操作 |
 
-## ゲームに組み込む
+## ホスト組み込みサンプル
 
-| ところ | 分かること |
+| ディレクトリ | 内容 |
 |---|---|
-| [embed/](embed) | C++ のゲームから Shark を呼ぶ。バイトコードを焼き込む形も（`make embed`） |
+| [embed/](embed) | C++ アプリケーション（ゲームエンジン等）から Shark を呼び出すサンプル。事前コンパイル済みバイトコードの組み込み実行例を含む（`make embed`） |

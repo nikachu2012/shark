@@ -1,16 +1,19 @@
-// shark_web.cpp — ブラウザ側のホスト（spec/runtime/embedding.md）
+// shark_web.cpp — WebAssembly / ブラウザ環境向けホスト実装（spec/runtime/embedding.md）
 //
-// これはコアの外側の実装。frontend/main.cpp が端末に向けてしていることを、
-// そのままブラウザに向けて行う。コアはこのファイルを必要としない。
+// コア処理系の外部実装。frontend/main.cpp が CLI 向けに行う処理（初期化、ループ進行、I/O 転送）を
+// Web ブラウザ向けに提供する。コアライブラリはこのファイルに依存しない。
 //
-//   1. 処理系を作る            shk_load()
-//   2. 少しずつ動かす          shk_pump()   ← 画面の更新1回につき1度呼ぶ
-//   3. 出力を受け取る          shk_out_ptr() / shk_out_len()
+//   1. スクリプトのロード      shk_load()
+//   2. 命令ステップの進行      shk_pump()   ← requestAnimationFrame ごとに呼び出し
+//   3. 出力の取得              shk_out_ptr() / shk_out_len()
 //
-// 無限ループを書かれても固まらないのは、組み込みと同じ仕組み。
-// 1回に進める命令の数を JavaScript 側が決めて渡す。
+// 協調的マルチタスク機構により、無限ループを含むスクリプトでもブラウザメインスレッドをブロックしない。
+// 1 回の pump で実行する VM 命令数を JavaScript 側からバジェットとして指定可能。
 //
-// 文字列を返すものは、次に同じ関数を呼ぶまでの間だけ中身が保つ。
+// 文字列ポインタを返す関数は、次回同一関数呼び出しまでの間のみバッファの生存期間が保証される。
+
+#include <stdio.h>
+#include <string.h>
 #include <emscripten/emscripten.h>
 
 #include "../core/platform/web.h"
@@ -22,11 +25,11 @@ using namespace shark;
 
 namespace {
 
-// ------------------------------------------------------------ 出入り口
-Str g_out;          // print と write が書いたもの。JavaScript が読んでは空にする
-Str g_in;           // input() に返す行。JavaScript が打たれたそばから入れる
+// ------------------------------------------------------------ 入出力バッファ
+Str g_out;          // print / write の出力バッファ。JavaScript 側が取得後にクリア
+Str g_in;           // input() 用の入力バッファ。JavaScript 側から随時追記
 int g_in_pos = 0;
-int g_eof_at = -1;  // ここまで読んだら終端を1度返す（端末の Ctrl-D にあたる）。-1 は無し
+int g_eof_at = -1;  // EOF 位置（端末の Ctrl-D 相当）。-1 は EOF 未設定
 
 void on_output(void* ud, const char* s, int n) {
   (void)ud;
@@ -39,7 +42,7 @@ void on_platform_write(void* ud, const char* s, int n, bool is_err) {
 bool on_input(void* ud, Str* out) {
   (void)ud;
   out->clear();
-  if (g_in_pos >= g_in.size()) {   // 終端。none になる
+  if (g_in_pos >= g_in.size()) {   // 終端到達。nil を返却
     g_eof_at = -1;
     return false;
   }
@@ -51,27 +54,27 @@ bool on_input(void* ud, Str* out) {
   }
   return true;
 }
-// 読める行（または終端）が来ているか。来るまで input() は待つ。
-// 端末で read が返るまで止まっているのと同じことを、刻んで動くまま行う
+// 読み取り可能な行（または EOF）が存在するか判定。データが到達するまで input() はブロック（待機）
+// CLI で read() がブロックするのと同様の挙動を、ノンブロッキングな pump ループ上で実現
 bool on_input_ready(void* ud) {
   (void)ud;
   if (g_in_pos < g_in.size()) return true;
   return g_eof_at >= 0 && g_in_pos >= g_eof_at;
 }
 
-// ------------------------------------------------------------ 持ち物
-enum Mode { M_IDLE = 0, M_RUN = 1, M_TEST = 2, M_DONE = 3 };
-
-Config g_cfg;
+// ------------------------------------------------------------ 状態管理
 Engine* g_engine = 0;
+Config  g_cfg;
+int     g_last_status = 0;   // 0=running 1=done 2=error
+
+enum Mode { M_IDLE = 0, M_RUN = 1, M_TEST = 2, M_DONE = 3 };
 Mode g_mode = M_IDLE;
-int g_last_status = 0;
 
-Vec<Str> g_mod_paths, g_mod_sources;      // import で使えるようにしておくもの
-Vec<Str> g_src_names, g_src_texts;        // 診断を整形するときに元のソースが要る
-Str g_answer;                             // 返す文字列の置き場
+Vec<Str> g_mod_paths, g_mod_sources;      // 事前ロード済み仮想モジュール（import 解決用）
+Vec<Str> g_src_names, g_src_texts;        // エラー診断メッセージ整形用の元ソースコード
+Str g_answer;                             // 文字列戻り値用バッファ
 
-// テストの進み具合（frontend/main.cpp の cmd_test と同じ順で進める）
+// テスト実行状態（frontend/main.cpp の cmd_test と同様のフェーズ遷移）
 Vec<int> g_test_idx;
 Vec<Str> g_test_names;
 int  g_test_cur = -1;
@@ -158,7 +161,7 @@ Str diagnostics_json(const Vec<Diagnostic>& ds) {
       json_str(&r, d.help[k]);
     }
     r += "],";
-    // 端末と同じ整形。そのまま出したいときのために添える
+    // CLI と同様の整形済み診断メッセージ
     json_field(&r, "text", format_diagnostic(d, source_of(d.file), false, g_cfg.lang));
     r += "}";
   }
@@ -166,7 +169,7 @@ Str diagnostics_json(const Vec<Diagnostic>& ds) {
   return r;
 }
 
-// ------------------------------------------------------------ テストを進める
+// ------------------------------------------------------------ テスト実行制御
 void test_record(bool ok) {
   if (g_test_json.size() > 1) g_test_json += ",";
   g_test_json += "{";
@@ -194,7 +197,7 @@ void test_start(int i) {
   g_engine->run_only(g_test_idx[i], false);
 }
 
-// もう走らせるものが無ければ false
+// 実行対象のテスト関数が残っていない場合は false
 bool test_next() {
   int i = g_test_cur + 1;
   if (i >= g_test_idx.size()) {
@@ -223,10 +226,10 @@ void test_finish_one() {
 
 }  // namespace
 
-// ================================================================ 外に出す
+// ================================================================ エクスポート C API
 #define API extern "C" EMSCRIPTEN_KEEPALIVE
 
-// 最初に1度だけ。移植層を差し込む
+// 初期化（初回 1 回のみ）。Web プラットフォーム抽象化レイヤーを登録
 API void shk_boot() {
   platform_set(platform_web());
   web_set_sink(on_platform_write, 0);
@@ -234,7 +237,7 @@ API void shk_boot() {
 
 API const char* shk_version() { return "0.1.0"; }
 
-// 次の shk_load() から使う設定
+// 次回 shk_load() で使用するランタイム設定
 API void shk_config(int memory_mb, int lang_en, int strict) {
   g_cfg = Config();
   g_cfg.lang = lang_en ? LANG_EN : LANG_JA;
@@ -242,7 +245,7 @@ API void shk_config(int memory_mb, int lang_en, int strict) {
   g_cfg.memory_limit = (size_t)(memory_mb > 0 ? memory_mb : 0) << 20;
 }
 
-// import で使えるようにしておくもの（shk_load の前に足す）
+// 仮想モジュールを登録（shk_load 前に呼び出し）
 API void shk_add_module(const char* path, const char* source) {
   g_mod_paths.push(Str(path));
   g_mod_sources.push(Str(source));
@@ -252,9 +255,9 @@ API void shk_clear_modules() {
   g_mod_sources.clear();
 }
 
-// 読み込む（字句解析・構文解析・型検査・バイトコード生成）。誤りの数を返す
+// スクリプトの読み込み（字句解析・構文解析・型検査・バイトコード生成）。エラー数を返す
 API int shk_load(const char* name, const char* source) {
-  if (g_engine) {   // 確保と解放は移植層に通す（core/support.h）
+  if (g_engine) {   // メモリ確保・解放はプラットフォーム抽象化レイヤー経由（core/support.h）
     g_engine->~Engine();
     sk_free(g_engine);
     g_engine = 0;
@@ -292,8 +295,8 @@ API int shk_load(const char* name, const char* source) {
   return errs;
 }
 
-// 見た目を整える（core/fmt_src.cpp）。読めないソースは、もとのまま返る。
-// 整えられたかどうかは shk_formatted() で分かる
+// ソースコード整形（フォーマッター core/fmt_src.cpp）。構文エラーがある場合は元の文字列を返す。
+// 整形が成功したかどうかは shk_formatted() で判定
 Str g_fmt;
 int g_fmt_ok = 0;
 
@@ -305,25 +308,25 @@ API const char* shk_format(const char* source) {
 }
 API int shk_formatted() { return g_fmt_ok; }
 
-// 直前の shk_load() が返した診断（JSON）
+// 直前の shk_load() で生成された診断メッセージ（JSON 形式）
 API const char* shk_diagnostics() { return g_answer.c_str(); }
 API int shk_ok() { return g_engine && g_engine->ok() ? 1 : 0; }
 API int shk_has_entry() { return g_engine && g_engine->has_entry() ? 1 : 0; }
 
-// input() に返す文字列をためる（打たれた行をそのつど渡す）
+// input() 用の入力バッファにテキストを追加（入力された行を都度渡す）
 API void shk_push_input(const char* text) {
   g_in += Str(text);
   if (g_in.size() && g_in[g_in.size() - 1] != '\n') g_in.push('\n');
-  if (g_eof_at >= 0 && g_eof_at < g_in.size()) g_eof_at = -1;   // 続きが来たので終端は取り消し
+  if (g_eof_at >= 0 && g_eof_at < g_in.size()) g_eof_at = -1;   // 入力が追記されたため EOF を解除
 }
 
-// もう入力は無い、と伝える（端末の Ctrl-D）。次の input() が none になる
+// 入力ストリームの終端（EOF）を通知（Ctrl-D 相当）。次回 input() が nil を返す
 API void shk_push_eof() { g_eof_at = g_in.size(); }
 
-// input() が行を待って止まっているか。JavaScript はこれを見て入力を促す
+// input() が入力待機中（ブロック状態）か判定。JavaScript 側で入力プロンプトを表示する判定に使用
 API int shk_waiting_input() { return g_engine && g_engine->waiting_input() ? 1 : 0; }
 
-// 実行を始める。読み込みの時点で main は呼ぶ準備ができている
+// 通常実行を開始。shk_load() 完了時点で main 関数呼び出しの準備が完了している
 API int shk_start_run() {
   if (!g_engine || !g_engine->ok()) return 0;
   if (!g_engine->has_entry()) return 0;
@@ -332,7 +335,7 @@ API int shk_start_run() {
   return 1;
 }
 
-// test_ で始まる関数を走らせ始める。見つかった件数を返す
+// test_ で始まるテスト関数の実行を開始。検出されたテスト数を返す
 API int shk_start_test() {
   if (!g_engine || !g_engine->ok()) return -1;
   g_test_idx.clear();
@@ -344,14 +347,14 @@ API int shk_start_test() {
   g_test_fail = false;
   g_test_json = Str("[");
   test_reset_hooks();
-  // トップレベルの文（test.before_each の登録など）を先に済ませる
+  // モジュール最上位文（test.before_each の登録等）を先行実行
   g_engine->run_only(g_engine->has_entry() ? g_engine->program()->entry : -1, true);
   g_mode = M_TEST;
   g_last_status = 0;
   return g_test_idx.size();
 }
 
-// budget 命令だけ進める。0=まだ続く 1=終わった 2=止まった
+// 指定されたバジェット（命令ステップ数）だけ実行を進める。戻り値: 0=実行継続中 1=正常終了 2=ランタイムパニック停止
 API int shk_pump(int budget) {
   if (!g_engine || g_mode == M_IDLE || g_mode == M_DONE) return g_last_status;
   RunStatus st = g_engine->step(budget);
@@ -362,26 +365,29 @@ API int shk_pump(int budget) {
     return (g_last_status = (st == SK_Finished ? 1 : 2));
   }
 
-  // ここから先はテスト。1つの段が終わるたびに次の段へ進める
+  // テスト実行中: フェーズ完了ごとに次のフェーズへ遷移
   if (g_test_phase == 0) {                      // トップレベル
     if (st == SK_Error) {
-      g_mode = M_DONE;
+      g_test_fail = true;
+      g_test_fail_msg = g_engine->error_message();
+      test_record(false);
       g_test_json += "]";
+      g_mode = M_DONE;
       return (g_last_status = 2);
     }
     if (!test_next()) return (g_last_status = 1);
     return (g_last_status = 0);
   }
-  if (st == SK_Error) {                         // テストの中で止まった
+  if (st == SK_Error) {                         // テストケース内でパニック/エラー発生
     g_test_fail = true;
     g_test_fail_msg = g_engine->error_message();
   }
-  if (g_test_phase == 1) {                      // 前処理 → 本体
+  if (g_test_phase == 1) {                      // セットアップ（before_each） → テスト本体
     g_test_phase = 2;
     g_engine->run_only(g_test_idx[g_test_cur], false);
     return (g_last_status = 0);
   }
-  if (g_test_phase == 2 && test_after_index() >= 0) {   // 本体 → 後処理
+  if (g_test_phase == 2 && test_after_index() >= 0) {   // テスト本体 → ティアダウン（after_each）
     g_test_phase = 3;
     g_engine->run_only(test_after_index(), false);
     return (g_last_status = 0);
@@ -390,16 +396,16 @@ API int shk_pump(int budget) {
   return (g_last_status = (g_mode == M_DONE ? 1 : 0));
 }
 
-// 走らせるのが終わったのに面が開いたままなら、ここで片づける。
-// `shark` コマンドならプロセスごと消えて窓も消えるところ。ブラウザは頁が残るので、
-// 誰も見ていない窓（閉じるボタンを押しても、受け取る側がもう居ない）が居座ってしまう
+// 実行終了時に UI ウィンドウが開いたままの場合はクリーンアップを行う。
+// CLI ではプロセス終了時に OS 側で破棄されるが、ブラウザ環境ではページが存続するため、
+// 未解放のウィンドウやリソースが残り続けるのを防ぐ。
 API void shk_ui_close() { ui_shutdown(); }
 
 API int shk_idle() { return g_engine && g_engine->idle() ? 1 : 0; }
 API void shk_abort() { if (g_engine) g_engine->abort_run(); }
 API int shk_exit_code() { return g_engine ? g_engine->exit_code() : 0; }
 
-// 止まった理由（JSON）
+// ランタイムエラー詳細（JSON 形式）
 API const char* shk_error() {
   Str r("{");
   if (g_engine) {
@@ -416,23 +422,23 @@ API const char* shk_error() {
   return g_answer.c_str();
 }
 
-// テストの結果（JSON）
+// テスト実行結果一覧（JSON 形式）
 API const char* shk_test_results() { return g_test_json.c_str(); }
 API int shk_test_passed() { return g_test_passed; }
 API int shk_test_total() { return g_test_idx.size(); }
 
-// いま動いているプログラムが使っている量（バイト）
+// 実行中プログラムの動的ヒープ使用量（バイト）
 API double shk_memory_used() { return g_engine ? (double)g_engine->memory_used() : 0.0; }
-// 読み込みで作ったもの（構文木・バイトコード・型の表）も含めた全体
+// スクリプトロード時の静的データ（AST・バイトコード・型定義テーブル）を含む総メモリ使用量
 API double shk_memory_total() { return g_engine ? (double)g_engine->memory_total() : 0.0; }
 API double shk_memory_limit() { return g_engine ? (double)g_engine->memory_limit() : 0.0; }
 
-// print と write が書いたもの。読んだら shk_out_clear() で空にする
+// print / write による出力データ。取得後に shk_out_clear() でクリア
 API const char* shk_out_ptr() { return g_out.data(); }
 API int shk_out_len() { return g_out.size(); }
 API void shk_out_clear() { g_out.clear(); }
 
-// この処理系が持つモジュールの一覧（JSON）
+// 利用可能な組み込みモジュール一覧（JSON 配列）
 API const char* shk_modules() {
   Str r("[");
   if (g_engine) {
@@ -447,7 +453,7 @@ API const char* shk_modules() {
   return g_answer.c_str();
 }
 
-// エラー番号の詳しい説明（無ければ空）
+// エラーコード（診断コード）の詳細解説テキストを取得（未定義の場合は空文字列）
 API const char* shk_explain(const char* code) {
   const char* text = diag_explain(code, g_cfg.lang);
   return text ? text : "";

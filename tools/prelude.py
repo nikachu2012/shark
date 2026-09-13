@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-# prelude.py — stdlib/prelude.shk を core/prelude.h（C++ の文字列）にする。
+# prelude.py — stdlib/prelude.shk および prelude_ui.shk を C++ ヘッダ（core/prelude.h）に変換する
 #
-#   python3 tools/prelude.py        # make が要るときに呼ぶ
+#   python3 tools/prelude.py        # Makefile から必要時に自動実行
 #
-# コアはファイルを読まないので、Shark で書いた部分は埋め込んで持つ。
-# 直すのは stdlib/prelude.shk の方で、core/prelude.h は作られたもの。
+# コア自身はファイル I/O を行わないため、Shark 自身で記述された標準処理は C++ 文字列として埋め込む。
+# 修正対象は stdlib/prelude.shk / prelude_ui.shk であり、core/prelude.h は自動生成物。
 import os
 import sys
 
-# Windows の端末は既定が UTF-8 ではない。知らせが化けないようにそろえる
+# Windows コンソールのデフォルト文字コード対策（文字化け防止のため UTF-8 に統一）
 if sys.platform == 'win32':
     import ctypes
     ctypes.windll.kernel32.SetConsoleOutputCP(65001)
@@ -19,9 +19,9 @@ SRC = os.path.join(ROOT, 'stdlib/prelude.shk')
 SRC_UI = os.path.join(ROOT, 'stdlib/prelude_ui.shk')
 OUT = os.path.join(ROOT, 'core/prelude.h')
 
-HEAD = '''// prelude.h — Shark 自身で書いた部分（tools/prelude.py が stdlib/prelude.shk から作る）
+HEAD = '''// prelude.h — Shark 自身で実装されたコード（tools/prelude.py により自動生成）
 //
-// ここを直さない。直すのは stdlib/prelude.shk。
+// このファイルは自動生成されます。直接編集せず、stdlib/prelude.shk / prelude_ui.shk を編集してください。
 #ifndef SHARK_PRELUDE_H
 #define SHARK_PRELUDE_H
 
@@ -39,7 +39,7 @@ def escape(line):
 
 
 def body_of(path):
-    """説明の // だけの行は埋め込まない（処理系に持たせるのは中身だけ）"""
+    """先頭のコメント行は埋め込まない（コード本体のみを埋め込む）"""
     with open(path, encoding='utf-8') as f:
         lines = f.read().split('\n')
     body, started = [], False

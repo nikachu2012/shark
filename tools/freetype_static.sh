@@ -1,18 +1,18 @@
 #!/bin/sh
-# freetype_static.sh — FreeType を取ってきて、**静的に**作る（build/freetype/libfreetype.a）
+# freetype_static.sh — FreeType のソースを取得し、静的ライブラリとしてビルドする（build/freetype/libfreetype.a）
 #
-#   sh tools/freetype_static.sh          # 作る（もうあれば何もしない）
-#   sh tools/freetype_static.sh --flags  # make に渡す指定だけを出す
+#   sh tools/freetype_static.sh          # ビルド（既に存在する場合はスキップ）
+#   sh tools/freetype_static.sh --flags  # make に渡すビルドフラグのみを出力
 #
-# 何のために:
-#   FreeType は唯一の外部ライブラリで、日本語などの字形を出すのに使う。
-#   機種に入っているものに繋ぐと、配ったときに相手の機械にも同じものが要る。
-#   ここで元から静的に作っておけば、できあがりの shark 1つで済む。
-#   Windows での同じ役目は tools\build_win.bat freetype（PowerShell の側）。
+# 目的:
+#   FreeType は日本語等のフォント描画に使用する唯一の外部ライブラリ。
+#   OS 提供の動的ライブラリにリンクすると、配布先の環境にも同一ライブラリが必要となる。
+#   ここで静的ライブラリとしてあらかじめビルドしておくことで、単一バイナリで配布可能にする。
+#   Windows での同等の処理は tools\build_win.bat freetype（build_win.ps1 側）が担う。
 #
-# 取ってくるものと、作る一覧は build_win.ps1 と揃えてある。
-# 圧縮や画像の展開（zlib・libpng・brotli）には**繋がない**。字形を出すのに要らず、
-# 繋ぐと配るものが増えるため。
+# ソースの取得元およびビルド対象ファイル一覧は build_win.ps1 と統一してある。
+# 圧縮や画像展開ライブラリ（zlib・libpng・brotli）にはリンクしない。
+# フォントのアウトライン描画には不要であり、依存関係を増やさないため。
 set -e
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -41,7 +41,7 @@ if [ ! -f "$src/include/ft2build.h" ]; then
   elif command -v wget >/dev/null 2>&1; then
     wget -q -O "$tgz" "$url"
   else
-    echo "curl も wget もありません。$src に FreeType の元を置いてから、もう一度呼びます" >&2
+    echo "curl も wget も見つかりません。$src に FreeType のソースコードを配置してから再実行してください" >&2
     exit 1
   fi
   (cd "$root/build" && tar -xzf freetype.tar.gz)

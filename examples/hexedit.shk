@@ -21,9 +21,9 @@
 //   Ctrl+S                                   保存
 //   Ctrl+Q / Esc                             おしまい（変えたままなら聞く）
 //
-// マウス: 押したところへ動く。引けば選ぶ。右端のつまみで送る。
+// マウス: クリックでカーソル移動。ドラッグで範囲選択。右端のスクロールバーでスクロール。
 //
-// 画面が無いところ（SHARK_UI=off など）では、1 こま描いて hexedit.png に保存する。
+// ヘッドレス環境（SHARK_UI=off 等）では、1 フレーム描画して hexedit.png に保存します。
 import std.ui;
 import std.file;
 import std.os;
@@ -105,17 +105,17 @@ var history: list<Edit> = [];
 var future: list<Edit> = [];
 var saved_mark = 0;               // 保存したときの history の長さ。-1 なら、もうその状態には戻れない
 
-// 問いかけ（位置へ飛ぶ・探す・開く・名前・変えたままでよいか）
+// ダイアログ状態（goto: 指定アドレス移動 / find: 検索 / open: ファイルを開く / saveas: 名前を付けて保存 / confirm: 未保存確認）
 var dialog = "";                  // "" | "goto" | "find" | "open" | "saveas" | "confirm"
 var prompt = "";
-var find_hex = true;              // 探すものを 16 進として読むか、文字として読むか
+var find_hex = true;              // 検索対象の解釈（true: 16進数、false: ASCII文字列）
 var last_find = "";
-var after_confirm = "";           // 「変えたままでよいか」に答えたあとにすること: "quit" | "open"
-var after_save = "";              // 名前を付けて保存したあとにすること（同上。無ければ ""）
-var open_dir = "";                // 開く画面で見ているフォルダ
-var open_entries: list<string> = [];   // その中身。フォルダは末尾に /
-var open_pick = 0;                // 選んでいる候補
-var open_scroll = 0;              // 候補の一番上
+var after_confirm = "";           // 未保存確認後の遷移アクション: "quit" | "open"
+var after_save = "";              // 別名保存完了後の遷移アクション（同上。未設定時は ""）
+var open_dir = "";                // ファイルダイアログで表示中のディレクトリ
+var open_entries: list<string> = [];   // ディレクトリ内エントリ一覧（ディレクトリは末尾 /）
+var open_pick = 0;                // 選択中のエントリインデックス
+var open_scroll = 0;              // リストのスクロールオフセット
 
 // 知らせ（下の行にしばらく出す）
 var message = "";
@@ -127,7 +127,7 @@ var dragging_bar = false;         // つまみを引いている最中
 var hit_pane = 0;                 // hit_at() の結果: どちらの側か
 var hit_nib = 0;                  // hit_at() の結果: どちらの桁か
 
-// 字と寸法。フォントから決まるので、こまごとに layout() で計算し直す
+// 文字とレイアウト寸法。フォントサイズ等から決まるため、フレームごとに layout() で再計算する
 var K = 1;                        // 画面の細かさ（ui.scale）
 var font_px = 8;                  // 機種のフォントの大きさ（画素）
 var have_font = false;            // 機種の等幅フォントが読めたか
@@ -146,11 +146,11 @@ var bar_w = 8;
 var y_grid = 0;                   // 表の上端
 var grid_h = 0;
 var rows_vis = 1;                 // 見えている行数
-var dlg_x = 0;                    // 問いかけの箱
+var dlg_x = 0;                    // ダイアログボックスの配置領域
 var dlg_y = 0;
 var dlg_w = 0;
 var dlg_h = 0;
-var in_x = 0;                     // 問いかけの入力欄
+var in_x = 0;                     // ダイアログ内入力フィールドの配置領域
 var in_y = 0;
 var in_w = 0;
 
@@ -633,7 +633,7 @@ func save() -> bool {
   return true;
 }
 
-// ------------------------------------------------------------------ 問いかけ
+// ------------------------------------------------------------------ ダイアログ処理
 func say(s: string) -> void {
   message = s;
   message_left = 180;
@@ -1239,7 +1239,7 @@ func main() -> int {
   ui.open("hexedit", width_for(16), height_for(16));
   say("F1 shows the keys");
 
-  // 画面が無いときは、1 こまだけ描いて PNG に残す
+  // ヘッドレス環境では 1 フレームのみ描画して PNG 保存
   if !ui.visible() {
     if data.len() == 0 { demo_data(); }
     layout();
