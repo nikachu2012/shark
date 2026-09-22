@@ -1,0 +1,49 @@
+1 + 2
+var x = 10
+x * 3
+func sq(n: int) -> int {
+  return n * n;
+}
+sq(x)
+x += 5;
+x
+var names = ["a", "b"]
+names.push("c");
+names
+var m = {"a": 1}
+m
+class P {
+  public var a: int;
+  public func init(a: int) { this.a = a; }
+  public func to_string() -> string { return f"P({this.a})"; }
+}
+var p = P(3)
+p
+y + 1
+x
+var z = nothing_here
+z
+func sq(n: int) -> int { return n * n * n; }
+sq(2)
+func fact(n: int) -> int {
+  if n <= 1 { return 1; }
+
+  return n * fact(n - 1);
+}
+fact(10)
+var dbl = func(n: int) -> int { return n * 2; }
+dbl(21)
+import std.math
+math.abs(-3)
+math.sqrt(16.0)
+[1, 2, 3][5]
+x
+for var i in range(3) { write(string(i)); }
+print("")
+var x = "文字"
+x
+:reset
+x
+import std.os
+os.exit(3)
+print("ここには来ない")

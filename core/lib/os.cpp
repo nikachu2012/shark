@@ -57,6 +57,7 @@ static NativeStatus o_temp_dir(VM& vm, Value* a, int n, Value& out) {
 static NativeStatus o_exit(VM& vm, Value* a, int n, Value& out) {
   (void)n;
   vm.exit_code = (int)A(a, 0)->i;
+  vm.exit_requested = true;
   vm.status = SK_Finished;
   out = mk_void();
   return N_Ok;

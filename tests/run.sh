@@ -73,6 +73,20 @@ if [ -f "$root/tests/fmt/messy.shk" ]; then
   fi
 fi
 
+# 対話（shark repl）の検証。入力を流し込み、値の表示・定義の引き継ぎ・
+# 誤りのあとの続行・:reset・os.exit での終了をまとめて確かめる
+if [ -f "$root/tests/repl/session.txt" ]; then
+  got=$(cd "$root/tests/repl" && "$shark" repl --no-color < session.txt 2>&1 | norm)
+  if [ "$got" = "$(norm < "$root/tests/repl/session.expected")" ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "fail  tests/repl/session.txt"
+    norm < "$root/tests/repl/session.expected" > "$expnorm"
+    printf '%s\n' "$got" | diff -u "$expnorm" - | sed -n '3,12p'
+  fi
+fi
+
 # メモリリークおよびメモリ上限の検証（C++ 側）
 if [ -x "$root/tests/memcheck" ] || [ -x "$root/tests/memcheck.exe" ]; then
   if "$root/tests/memcheck" > /tmp/shark_memcheck.txt 2>&1; then

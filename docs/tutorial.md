@@ -244,6 +244,7 @@ $ shark check game.shk     # 動かさずに、間違い（文法や型のミス
 $ shark build game.shk     # 誰でも遊べる単独の実行ファイル（アプリ）にまとめる
 $ shark fmt -w game.shk    # プログラムの見た目（字下げなど）をきれいに整える
 $ shark test game.shk      # 作ったテストを一気に動かして確認する
+$ shark repl               # 1行ずつ打ち込んで、その場で動かしてみる（1 + 2 と打つと 3）
 $ shark explain E0102      # エラー番号の意味と直し方を教えてもらう
 ```
 

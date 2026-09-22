@@ -32,6 +32,7 @@ make embed && ./examples/embed/game   # ホストへの組み込みサンプル�
 ./shark build <file.shk>   ランタイムとバイトコードを統合した単一バイナリを生成（後述）
 ./shark test [file.shk]    test_ で始まるテスト関数を実行（ファイル省略時は *_test.shk をすべて実行）
 ./shark fmt <file.shk>…    ソースコードを自動整形（-w で上書き保存、--check で検証のみ）
+./shark repl               対話モード（1行ずつ入力してその場で実行。式を打つと値を表示）
 ./shark explain E0102      エラーコードの詳細説明を表示
 ./shark modules            有効化されているモジュール一覧を表示
 

@@ -51,6 +51,7 @@ MSYS2 / MinGW の make 環境であれば Makefile がそのまま動作する�
 ./shark fmt <file.shk>      # ソースコードを自動整形（-w で上書き保存、--check でフォーマット検証のみ）
 ./shark build <file.shk>    # 単一実行バイナリを生成（--bytecode で .shkc のみ保存）
 ./sharkvm <file.shkc>       # 専用ランタイムで直接実行
+./shark repl                # 対話モード（前の入力の変数・関数・クラスを引き継ぐ。:help で使い方）
 ./shark explain E0102       # エラーコードの詳細説明を表示
 ```
 

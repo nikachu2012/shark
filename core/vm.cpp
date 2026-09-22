@@ -46,7 +46,7 @@ void chan_obj_dispose(ChanObj* o) { chan_unref(o->c); }
 // ------------------------------------------------------------------ VM
 VM::VM()
     : prog(0), reg(0), diag(0), cur(0), status(SK_Running), exit_code(0), error_line(0),
-      stack_size(65536), task_stack_size(4096), max_call_depth(10000), started_at(0), aborted(false), rng_state(0x853c49e6748fea9bull),
+      stack_size(65536), task_stack_size(4096), max_call_depth(10000), started_at(0), aborted(false), exit_requested(false), rng_state(0x853c49e6748fea9bull),
       steps_since_switch(0), has_panic(false), idle_hint(false), input_wait(false), boot_pos(0) {}
 
 VM::~VM() {
@@ -83,19 +83,23 @@ Value VM::default_of(Type* t) {
   }
 }
 
-void VM::start(bool with_inits) {
+void VM::start(bool with_inits, int first_init) {
   // ここから先に確保するものは「実行中のプログラムのぶん」として数える
   MemRunScope run_scope;
   // 読み込み直しに備えて、前回のぶんを離してから始める
   for (int i = 0; i < tasks.size(); i++) task_unref(tasks[i]);
   tasks.clear();
   boot.clear();
+  exit_requested = false;
   if (with_inits) {
     for (int i = 0; i < globals.size(); i++) val_release(globals[i]);
     globals.clear();
-    for (int i = 0; i < prog->globals.size(); i++) globals.push(default_of(prog->globals[i]->type));
-    for (int i = 0; i < prog->inits.size(); i++) boot.push(prog->inits[i]);
+    first_init = 0;
   }
+  for (int i = globals.size(); i < prog->globals.size(); i++)
+    globals.push(default_of(prog->globals[i]->type));
+  if (first_init >= 0)
+    for (int i = first_init; i < prog->inits.size(); i++) boot.push(prog->inits[i]);
   if (prog->entry >= 0) boot.push(prog->entry);
   boot_pos = 0;
   TaskState* main_task = task_new(*this, stack_size);

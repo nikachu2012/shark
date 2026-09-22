@@ -41,8 +41,8 @@ int CodeGen::add_const(Value v) {
   return f_->consts.size() - 1;
 }
 
-void CodeGen::run() {
-  for (int i = 0; i < prog_.funcs.size(); i++) {
+void CodeGen::run(int first_func) {
+  for (int i = first_func; i < prog_.funcs.size(); i++) {
     FuncInfo* f = prog_.funcs[i];
     if (f->is_native || f->is_pure || !f->decl || !f->decl->body) continue;
     gen_func(f);

@@ -298,6 +298,15 @@ inline bool color_default() {
 #endif
 }
 
+// 標準入力が端末か（REPL が、見出しと入力待ちの印を出すかどうかを決める）
+inline bool stdin_is_tty() {
+#if defined(_WIN32)
+  return _isatty(_fileno(stdin)) != 0;
+#else
+  return isatty(fileno(stdin)) != 0;
+#endif
+}
+
 // ------------------------------------------------------------------ 実行
 inline void print_panic(VM& vm, bool color) {
   const char* red = color ? "\x1b[31m\x1b[1m" : "";

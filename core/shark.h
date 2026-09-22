@@ -67,6 +67,15 @@ class Engine {
   // 入出力はホストが受け取る
   void set_io(const HostIO& io) { vm_.io = io; }
 
+  // REPL（spec/frontend.md）。入力を1回分ずつ足していく。
+  // 前の入力で作った変数・関数・クラスは残り、前の文はもう一度は走らない。
+  // 誤りがあれば、その入力は無かったことになる（ok() が false）。
+  // 通ったら step() で終わるまで動かす。走らせるものが無ければ、すぐ SK_Finished になる。
+  // load() を呼ぶと、それまでの入力は捨てられる
+  const Vec<Diagnostic>& repl_eval(const Str& name, const Str& source);
+  // os.exit() で終わった（REPL を閉じる合図）
+  bool exit_requested() const { return vm_.exit_requested; }
+
   // テスト（spec/library/test.md）。1件ずつ順に走らせるのは呼ぶ側
   void find_tests(Vec<int>* out, Vec<Str>* names);
   // 関数を1つだけ走らせる。with_inits が false なら、いまのグローバルをそのまま使う
@@ -80,6 +89,14 @@ class Engine {
   Unit* load_unit(const Str& path, const Str& source, const Str& display, bool is_entry, int depth,
                   int line = 1, int col = 1, int len = 1);
   bool find_module_source(const Str& path, Str* src, Str* display);
+  void begin_program();   // 前のプログラムを捨て、前奏だけを読んだ状態にする
+  void repl_begin();
+
+  // REPL で名前を付け直した前の定義（入力が通らなかったとき戻す）
+  struct Renamed {
+    Str* name;
+    Str old;
+  };
 
   Config cfg_;
   TypeTable types_;
@@ -96,6 +113,9 @@ class Engine {
   Vec<Str> loading_;   // 循環 import の検出
   Vec<Str> loaded_;
   Vec<Unit*> units_;
+  bool repl_;         // REPL の途中（プログラムが入力のたびに育つ）
+  int repl_count_;    // これまでに受け取った入力の数
+  int repl_inits_;    // 走らせ終えた初期化の数（Program::inits の位置）
 };
 
 // 診断を1件、人が読む形に整える（フロントエンドの参考。コアは使わない）

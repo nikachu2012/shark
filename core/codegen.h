@@ -12,7 +12,8 @@ namespace shark {
 class CodeGen {
  public:
   CodeGen(Program& prog, TypeTable& types, Registry& reg) : prog_(prog), reg_(reg), f_(0), line_(1) { (void)types; }
-  void run();
+  // first_func から先の関数だけを作る（REPL で足した分。前のぶんは作ってある）
+  void run(int first_func = 0);
 
  private:
   void gen_func(FuncInfo* f);

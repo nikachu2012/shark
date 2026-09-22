@@ -43,8 +43,17 @@ class Checker {
 
   // 1) すべてのモジュールの宣言を集める
   void collect(Unit* u);
-  // 2) 本体を検査する。誤りが無ければ true
-  bool check_all();
+  // 2) 本体を検査する。誤りが無ければ true。
+  //    from_unit から先だけを検査する（REPL で足した入力。前のぶんは検査済み）
+  bool check_all(int from_unit = 0);
+
+  // REPL で入力が通らなかったとき、足した分を捨てて元に戻すための目印
+  int unit_count() const { return units_.size(); }
+  int vkey_count() const { return vkeys_.size(); }
+  void truncate(int units, int vkeys) {
+    units_.resize(units, 0);
+    vkeys_.resize(vkeys, Str());
+  }
 
   ClassInfo* class_error() { return c_error_; }
   ClassInfo* class_comparable() { return c_comparable_; }
@@ -79,6 +88,8 @@ class Checker {
   // --- 式 ---
   Type* check_expr(Node* e);
   Type* check_call(Node* e);
+  // print / write。引数は検査済みのものを受け取る
+  Type* check_print(Node* e, const Str& name);
   Type* check_field(Node* e);
   Type* check_index(Node* e);
   Type* check_binary(Node* e);

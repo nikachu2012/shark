@@ -1332,6 +1332,21 @@ void Checker::check_stmt(Node* s) {
     }
     case S_Expr: {
       Type* t = check_expr(s->a);
+      if (s->echo && t && t->kind != T_Void && t->kind != T_Unknown) {
+        // REPL: 式の値を出す。print(式) に置き換える（式は検査済み）
+        Node* call = arena_.make<Node>();
+        call->kind = E_Call;
+        call->line = s->a->line; call->col = s->a->col; call->len = s->a->len;
+        Node* callee = arena_.make<Node>();
+        callee->kind = E_Ident;
+        callee->name = Str("print");
+        callee->line = call->line; callee->col = call->col; callee->len = call->len;
+        call->a = callee;
+        call->list.push(s->a);
+        call->type = check_print(call, Str("print"));
+        s->a = call;
+        break;
+      }
       if (t && is_result(t) && !(s->a->kind == E_Call && s->a->opcode == CK_None)) {
         Diagnostic& d = diag_.warn("E0202", diag_.L("失敗するかもしれない呼び出しの結果を捨てています",
                                                     "the Result of this call is discarded"));
@@ -2971,6 +2986,77 @@ bool Checker::reject_named_args(Node* e, const char* what_ja, const char* what_e
   return true;
 }
 
+Type* Checker::check_print(Node* e, const Str& name) {
+  // どんな型でも、いくつでも受け取る。名前を付けて渡せるのは
+  // sep:（値の区切り。既定は空白）と end:（終わりに足す文字。
+  // 既定は print が改行、write は空）だけ
+  Node* sep_arg = 0;
+  Node* end_arg = 0;
+  if (e->argnames.size() == e->list.size() && e->list.size() > 0) {
+    Vec<Node*> vals;
+    for (int i = 0; i < e->list.size(); i++) {
+      const Str& nm = e->argnames[i];
+      if (nm == "sep") { sep_arg = e->list[i]; continue; }
+      if (nm == "end") { end_arg = e->list[i]; continue; }
+      if (nm.size()) {
+        Diagnostic& d = diag_.error("E0159",
+            diag_.L(name + " で名前を付けて渡せるのは sep: と end: だけです",
+                    Str("only sep: and end: may be named in ") + name));
+        d.spans.push(Span(e->list[i]->line, e->list[i]->col, e->list[i]->len));
+        d.help.push(diag_.L("値の区切りは sep: \"-\"、終わりの文字は end: \"\" のように書きます",
+                            "write sep: \"-\" for the separator, end: \"\" for the ending"));
+        continue;   // この引数は捨てて先へ進む
+      }
+      vals.push(e->list[i]);
+    }
+    e->list = vals;
+    e->argnames.clear();
+  }
+  // 値の並び。クラスは to_string() があれば自動で呼び、無ければ実行時に
+  // クラス名(メンバ: 値, ...) の形で出す
+  for (int i = 0; i < e->list.size(); i++) {
+    Type* at = e->list[i]->type;
+    if (at && at->kind == T_Void) {
+      Diagnostic& d = diag_.error("E0148", diag_.L(name + " に渡せる値がありません",
+                                                   name + " needs a value"));
+      d.spans.push(Span(e->list[i]->line, e->list[i]->col, e->list[i]->len));
+      d.help.push(diag_.L("この呼び出しは何も返しません。返す関数を書くか、値を渡します",
+                          "this call returns nothing; pass a value instead"));
+    } else if (at && has_to_string(at)) {
+      // to_string() が見えないなど、差し替えに失敗したときのために、
+      // なぜ to_string() の話になったのかを添える
+      int before = diag_.size();
+      wrap_to_string(e, at, i);
+      for (int k = before; k < diag_.size(); k++)
+        diag_.items()[k].help.push(
+            diag_.L(name + " はクラスを出すとき to_string() を呼びます",
+                    name + " calls to_string() to show a class"));
+    }
+  }
+  if (sep_arg) need_assign(t_.t_string(), sep_arg->type, sep_arg, "sep", "sep");
+  if (end_arg) need_assign(t_.t_string(), end_arg->type, end_arg, "end", "end");
+  // 命令には sep と end を必ず最後に並べて渡す（実装は後ろ2つを取り出す）
+  if (!sep_arg) {
+    sep_arg = arena_.make<Node>();
+    sep_arg->kind = E_Str;
+    sep_arg->name = Str(" ");
+    sep_arg->line = e->line; sep_arg->col = e->col; sep_arg->len = e->len;
+    sep_arg->type = t_.t_string();
+  }
+  if (!end_arg) {
+    end_arg = arena_.make<Node>();
+    end_arg->kind = E_Str;
+    end_arg->name = Str(name == "print" ? "\n" : "");
+    end_arg->line = e->line; end_arg->col = e->col; end_arg->len = e->len;
+    end_arg->type = t_.t_string();
+  }
+  e->list.push(sep_arg);
+  e->list.push(end_arg);
+  e->opcode = CK_Native;
+  e->resolved = reg_.find(name == "print" ? "print" : "write");
+  return t_.t_void();
+}
+
 Type* Checker::check_call(Node* e) {
   Node* callee = e->a;
   Vec<Node*> args;
@@ -3029,76 +3115,7 @@ Type* Checker::check_call(Node* e) {
       e->resolved = reg_.find("len");
       return t_.t_int();
     }
-    if (name == "print" || name == "write") {
-      // どんな型でも、いくつでも受け取る。名前を付けて渡せるのは
-      // sep:（値の区切り。既定は空白）と end:（終わりに足す文字。
-      // 既定は print が改行、write は空）だけ
-      Node* sep_arg = 0;
-      Node* end_arg = 0;
-      if (e->argnames.size() == e->list.size() && e->list.size() > 0) {
-        Vec<Node*> vals;
-        for (int i = 0; i < e->list.size(); i++) {
-          const Str& nm = e->argnames[i];
-          if (nm == "sep") { sep_arg = e->list[i]; continue; }
-          if (nm == "end") { end_arg = e->list[i]; continue; }
-          if (nm.size()) {
-            Diagnostic& d = diag_.error("E0159",
-                diag_.L(name + " で名前を付けて渡せるのは sep: と end: だけです",
-                        Str("only sep: and end: may be named in ") + name));
-            d.spans.push(Span(e->list[i]->line, e->list[i]->col, e->list[i]->len));
-            d.help.push(diag_.L("値の区切りは sep: \"-\"、終わりの文字は end: \"\" のように書きます",
-                                "write sep: \"-\" for the separator, end: \"\" for the ending"));
-            continue;   // この引数は捨てて先へ進む
-          }
-          vals.push(e->list[i]);
-        }
-        e->list = vals;
-        e->argnames.clear();
-      }
-      // 値の並び。クラスは to_string() があれば自動で呼び、無ければ実行時に
-      // クラス名(メンバ: 値, ...) の形で出す
-      for (int i = 0; i < e->list.size(); i++) {
-        Type* at = e->list[i]->type;
-        if (at && at->kind == T_Void) {
-          Diagnostic& d = diag_.error("E0148", diag_.L(name + " に渡せる値がありません",
-                                                       name + " needs a value"));
-          d.spans.push(Span(e->list[i]->line, e->list[i]->col, e->list[i]->len));
-          d.help.push(diag_.L("この呼び出しは何も返しません。返す関数を書くか、値を渡します",
-                              "this call returns nothing; pass a value instead"));
-        } else if (at && has_to_string(at)) {
-          // to_string() が見えないなど、差し替えに失敗したときのために、
-          // なぜ to_string() の話になったのかを添える
-          int before = diag_.size();
-          wrap_to_string(e, at, i);
-          for (int k = before; k < diag_.size(); k++)
-            diag_.items()[k].help.push(
-                diag_.L(name + " はクラスを出すとき to_string() を呼びます",
-                        name + " calls to_string() to show a class"));
-        }
-      }
-      if (sep_arg) need_assign(t_.t_string(), sep_arg->type, sep_arg, "sep", "sep");
-      if (end_arg) need_assign(t_.t_string(), end_arg->type, end_arg, "end", "end");
-      // 命令には sep と end を必ず最後に並べて渡す（実装は後ろ2つを取り出す）
-      if (!sep_arg) {
-        sep_arg = arena_.make<Node>();
-        sep_arg->kind = E_Str;
-        sep_arg->name = Str(" ");
-        sep_arg->line = e->line; sep_arg->col = e->col; sep_arg->len = e->len;
-        sep_arg->type = t_.t_string();
-      }
-      if (!end_arg) {
-        end_arg = arena_.make<Node>();
-        end_arg->kind = E_Str;
-        end_arg->name = Str(name == "print" ? "\n" : "");
-        end_arg->line = e->line; end_arg->col = e->col; end_arg->len = e->len;
-        end_arg->type = t_.t_string();
-      }
-      e->list.push(sep_arg);
-      e->list.push(end_arg);
-      e->opcode = CK_Native;
-      e->resolved = reg_.find(name == "print" ? "print" : "write");
-      return t_.t_void();
-    }
+    if (name == "print" || name == "write") return check_print(e, name);
     // クラスの生成
     ClassInfo* c = find_class(name, unit_);
     if (c) {
@@ -3529,12 +3546,13 @@ void Checker::check_func_body(FuncInfo* fi, FuncDecl* fd, Unit* u, ClassInfo* cl
 }
 
 // ------------------------------------------------------------------ 全体
-bool Checker::check_all() {
-  for (int i = 0; i < units_.size(); i++) collect_class_bodies(units_[i]);
+bool Checker::check_all(int from_unit) {
+  int first_func = prog_.funcs.size();   // ここから先が、今回足した関数
+  for (int i = from_unit; i < units_.size(); i++) collect_class_bodies(units_[i]);
   for (int i = 0; i < prog_.classes.size(); i++) layout_class(prog_.classes[i]);
 
   // virtual / override の規則
-  for (int ui = 0; ui < units_.size(); ui++) {
+  for (int ui = from_unit; ui < units_.size(); ui++) {
     Unit* u = units_[ui];
     unit_ = u;
     diag_.set_file(u->display);
@@ -3596,7 +3614,7 @@ bool Checker::check_all() {
   }
 
   // 自分自身を値として持つクラスは作れない
-  for (int ui = 0; ui < units_.size(); ui++) {
+  for (int ui = from_unit; ui < units_.size(); ui++) {
     Unit* u = units_[ui];
     unit_ = u;
     diag_.set_file(u->display);
@@ -3624,14 +3642,14 @@ bool Checker::check_all() {
     }
   }
 
-  for (int i = 0; i < units_.size(); i++) collect_funcs(units_[i]);
-  for (int i = 0; i < units_.size(); i++) collect_globals(units_[i]);
+  for (int i = from_unit; i < units_.size(); i++) collect_funcs(units_[i]);
+  for (int i = from_unit; i < units_.size(); i++) collect_globals(units_[i]);
 
   // 同じ名前・同じ引数の関数が2つある
   for (int i = 0; i < prog_.funcs.size(); i++) {
     FuncInfo* a = prog_.funcs[i];
     if (a->owner || !a->decl) continue;
-    for (int k = i + 1; k < prog_.funcs.size(); k++) {
+    for (int k = i + 1 > first_func ? i + 1 : first_func; k < prog_.funcs.size(); k++) {
       FuncInfo* b = prog_.funcs[k];
       if (b->owner || !b->decl) continue;
       if (!(a->name == b->name) || !(a->module == b->module)) continue;
@@ -3650,14 +3668,15 @@ bool Checker::check_all() {
   }
 
   // トップレベルの初期化と本体
-  for (int ui = 0; ui < units_.size(); ui++) {
+  for (int ui = from_unit; ui < units_.size(); ui++) {
     Unit* u = units_[ui];
     unit_ = u;
     diag_.set_file(u->display);
 
     // 文を並べただけのファイルでは、初期化も文も「書いた順」に走らせる。
     // 先にまとめて初期化すると、print と var の順が入れ替わって見える
-    bool script = u->is_entry && !u->has_main && u->top_stmts.size() > 0;
+    // REPL の入力は var だけでも同じ扱いにする（@init にまとめると、走らせる機会が無い）
+    bool script = u->is_entry && !u->has_main && (u->top_stmts.size() > 0 || u->is_repl);
 
     if (u->globals.size() > 0) {
       FuncInfo* fi = new_func(prog_);
@@ -3785,6 +3804,9 @@ bool Checker::check_all() {
         Node* body = arena_.make<Node>();
         body->kind = S_Block;
         for (int i = 0; i < u->top_stmts.size(); i++) body->list.push(u->top_stmts[i]);
+        // REPL では、最後に書いた式の値を出す（1 + 2 と打てば 3）
+        Node* last = u->top_stmts.back();
+        if (u->is_repl && last->kind == S_Expr) last->echo = true;
         FuncDecl* fd = arena_.make<FuncDecl>();
         fd->name = fi->name;
         fd->body = body;

@@ -80,6 +80,7 @@ struct VM {
   int max_call_depth;
   int64_t started_at;
   bool aborted;
+  bool exit_requested;  // os.exit() で終わった（REPL が、入力1回分の終わりと見分ける）
   uint64_t rng_state;
   int steps_since_switch;
 
@@ -87,7 +88,10 @@ struct VM {
   ~VM();
 
   void set_program(Program* p, Registry* r);
-  void start(bool with_inits = true);  // 初期化とエントリの呼び出しを準備する
+  // 初期化とエントリの呼び出しを準備する。
+  // with_inits が false なら、いまのグローバルを残す。そのとき増えたグローバルは既定値で埋め、
+  // first_init 番目から先の初期化だけを呼ぶ（REPL で足した分。-1 なら呼ばない）
+  void start(bool with_inits = true, int first_init = -1);
   void reset();                 // 読み込み直しの前に、抱えているものを離す
   RunStatus step(int budget);   // budget 命令だけ進める
   void abort_run() { aborted = true; }

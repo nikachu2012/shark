@@ -129,12 +129,13 @@ struct Node {
   bool is_global;
   bool is_ref_param;
   bool checked;          // 検査を済ませてある（トップレベルの初期化を文の間に混ぜたとき）
+  bool echo;             // S_Expr: 値があれば出す（REPL の入力の最後の式）
 
   Node()
       : kind(E_Int), line(0), col(0), len(0), ival(0), dval(0), a(0), b(0), c(0), tann(0),
         fdecl(0), is_const(false), optional_chain(false), type(0), bind_type(0), bind2_type(0),
         slot(-1), slot2(-1), resolved(-1), resolved2(-1), vararg_from(-1), opcode(0), rcls(0), rfunc(0),
-        is_global(false), is_ref_param(false), checked(false) {}
+        is_global(false), is_ref_param(false), checked(false), echo(false) {}
 };
 
 struct ParamDecl {
@@ -212,7 +213,8 @@ struct Unit {
   Vec<Node*> top_stmts;   // トップレベルに並べた文（実行するファイルだけ）
   bool has_main;
   bool is_entry;
-  Unit() : has_main(false), is_entry(false) {}
+  bool is_repl;   // REPL の1回分の入力。var だけでも、書いた順にその場で走らせる
+  Unit() : has_main(false), is_entry(false), is_repl(false) {}
 };
 
 }  // namespace shark

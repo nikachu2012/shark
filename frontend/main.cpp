@@ -2,14 +2,17 @@
 //
 // これは実行系（コア）の外側の実装。ファイルを読み、コアを呼び、
 // 返ってきた診断を端末向けに整形する。コアはこのファイルを必要としない。
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "../core/fmt_src.h"
+#include "../core/lexer.h"
 #include "../core/platform/platform.h"
 #include "../core/runtime.h"
 #include "../core/shark.h"
 #include "host.h"
+#include "lineedit.h"
 
 namespace shark {
 
@@ -168,6 +171,182 @@ static int cmd_run(const Str& file, bool check_only, Lang lang, bool strict, boo
     return 1;
   }
   return run_loop(e.vm(), color);
+}
+
+// ------------------------------------------------------------------ 対話（repl）
+// 1行ずつ受け取って、その場で動かす。前の入力で作った変数・関数・クラスは残る。
+// 最後に式を書くと、その値を出す（コアが print に置き換える）。
+// 中身はコアの Engine::repl_eval（入力をプログラムに足していく）
+
+// 走っている間の Ctrl-C は、プログラムだけを止める（REPL は閉じない）
+static volatile sig_atomic_t g_interrupted = 0;
+static void on_interrupt(int) { g_interrupted = 1; }
+
+static int repl_run(VM& vm, bool color) {
+  g_interrupted = 0;
+  void (*prev)(int) = signal(SIGINT, on_interrupt);
+  int rc = 0;
+  for (;;) {
+    if (g_interrupted) { vm.abort_run(); g_interrupted = 0; }
+    RunStatus st = vm.step(200000);
+    if (st == SK_Finished) { rc = vm.exit_code; break; }
+    if (st == SK_Error) {
+      print_panic(vm, color);
+      rc = 1;
+      break;
+    }
+    if (vm.idle_hint) platform().sleep_nanos(500000);
+  }
+  signal(SIGINT, prev);
+  return rc;
+}
+
+// 括弧が閉じきっていないか（続きの行を待つ）。文字列やコメントの中は数えない
+static bool repl_incomplete(const Str& src) {
+  DiagBag tmp;
+  Lexer lx(src, tmp);
+  Vec<Token> toks;
+  lx.run(&toks);
+  int depth = 0;
+  for (int i = 0; i < toks.size(); i++) {
+    TokKind k = toks[i].kind;
+    if (k == TK_LParen || k == TK_LBrace || k == TK_LBracket) depth++;
+    if (k == TK_RParen || k == TK_RBrace || k == TK_RBracket) depth--;
+  }
+  return depth > 0;
+}
+
+// 最後の字句（; を付け足すかどうかを決める）
+static TokKind repl_last_token(const Str& src) {
+  DiagBag tmp;
+  Lexer lx(src, tmp);
+  Vec<Token> toks;
+  lx.run(&toks);
+  for (int i = toks.size() - 1; i >= 0; i--)
+    if (toks[i].kind != TK_EOF) return toks[i].kind;
+  return TK_EOF;
+}
+
+static void repl_print_diags(const Vec<Diagnostic>& ds, const Str& name, const Str& src, bool color) {
+  fflush(stdout);   // 前に出したものと順が入れ替わらないように
+  for (int i = 0; i < ds.size(); i++) {
+    Str text = format_diagnostic(ds[i], ds[i].file == name ? src : g_sources.find(ds[i].file), color,
+                                 g_lang);
+    fwrite(text.data(), 1, (size_t)text.size(), stderr);
+    fputc('\n', stderr);
+  }
+}
+
+static Str trim_space(const Str& s) {
+  int a = 0, b = s.size();
+  while (a < b && (s[a] == ' ' || s[a] == '\t' || s[a] == '\n' || s[a] == '\r')) a++;
+  while (b > a && (s[b - 1] == ' ' || s[b - 1] == '\t' || s[b - 1] == '\n' || s[b - 1] == '\r')) b--;
+  return s.sub(a, b - a);
+}
+
+static void repl_help() {
+  printf(
+      "  式を打つと、その値を出します（例: 1 + 2）\n"
+      "  var・func・class は、次の入力からも使えます。同じ名前で書き直すと新しいほうに置き換わります\n"
+      "  括弧が閉じていなければ、続きの行を待ちます（空の行を2つ続けると打ち切り）\n"
+      "  ↑ ↓ で前に打った行を呼び戻せます（~/.shark_history に残ります）\n"
+      "  Ctrl-C は、打ちかけなら入力を捨て、動いている最中ならプログラムを止めます\n"
+      "  :help   この説明\n"
+      "  :reset  変数や関数を全部捨てて、始めからにする\n"
+      "  :quit   終わる（Ctrl-D でも）\n");
+}
+
+static int cmd_repl(Lang lang, bool strict, bool color) {
+  bool tty = stdin_is_tty();
+  g_base_dir = Str(".");
+  Config cfg;
+  cfg.lang = lang;
+  cfg.strict = strict;
+  cfg.memory_limit = g_memory_mb << 20;
+  Engine* e = new Engine(cfg);
+  setup(*e);
+  if (tty) printf("Shark🦈 REPL  :help で使い方、:quit で終わります\n");
+  LineEditor le;   // ↑ ↓ で前の入力を呼び戻す（frontend/lineedit.h）
+  if (tty) le.load_history();
+
+  int count = 0;
+  for (;;) {
+    // 1回分の入力を集める
+    Str src;
+    bool eof = false;
+    bool cancel = false;
+    int blanks = 0;   // 続きの行で、空の行が2つ続いたら打ち切る（関数の中の1行空けは続き）
+    for (;;) {
+      Str line;
+      LineResult lr = le.read(src.size() ? "   ... " : "shark> ", &line);
+      if (lr == LINE_EOF) { eof = true; break; }
+      if (lr == LINE_CANCEL) { cancel = true; break; }   // Ctrl-C で打ちかけを捨てる
+      if (tty) le.add(line);
+      if (src.size() && trim_space(line).size() == 0) {
+        if (++blanks >= 2) break;
+      } else {
+        blanks = 0;
+      }
+      if (src.size()) src += "\n";
+      src += line;
+      if (!repl_incomplete(src)) break;
+    }
+    if (cancel) continue;
+    if (eof && trim_space(src).size() == 0) {
+      if (tty) printf("\n");
+      break;
+    }
+    Str body = trim_space(src);
+    if (body.size() == 0) continue;
+
+    if (body[0] == ':') {
+      if (body == ":quit" || body == ":q" || body == ":exit") break;
+      if (body == ":help" || body == ":h") { repl_help(); continue; }
+      if (body == ":reset") {
+        delete e;
+        e = new Engine(cfg);
+        setup(*e);
+        count = 0;
+        if (tty) printf("始めからにしました\n");
+        continue;
+      }
+      fflush(stdout);
+      fprintf(stderr, "知らないコマンドです: %s（:help で一覧）\n", body.c_str());
+      continue;
+    }
+
+    count++;
+    Str name = Str("[") + str_from_int(count) + "]";
+
+    // 終わりの ; は省いてもよい。最後が式なら、その値をコアが出す
+    Str stmt = body;
+    TokKind last = repl_last_token(stmt);
+    if (last != TK_Semi && last != TK_RBrace && !repl_incomplete(stmt)) stmt += ";";
+    const Vec<Diagnostic>* ds = &e->repl_eval(name, stmt);
+    if (!e->ok() && last == TK_RBrace) {
+      // var m = {"a": 1} のように } で終わる式の文。; を足して読み直す
+      Vec<Diagnostic> first = *ds;
+      const Vec<Diagnostic>& ds2 = e->repl_eval(name, stmt + ";");
+      if (e->ok()) {
+        stmt += ";";
+        ds = &ds2;
+      } else {
+        repl_print_diags(first, name, stmt, color);
+        continue;
+      }
+    }
+    repl_print_diags(*ds, name, stmt, color);
+    if (!e->ok()) continue;
+    fflush(stdout);
+    int rc = repl_run(e->vm(), color);
+    fflush(stdout);
+    if (e->exit_requested()) {
+      delete e;
+      return rc;
+    }
+  }
+  delete e;
+  return 0;
 }
 
 // ------------------------------------------------------------------ 作る（build）
@@ -523,6 +702,7 @@ static void usage() {
       "  shark build <file.shk>    どこでも動く1つのファイルにする（実行装置＋バイトコード）\n"
       "  shark test [file.shk]     test_ で始まる関数を走らせる（省略すると *_test.shk 全部）\n"
       "  shark fmt <file.shk>…     見た目を整える（-w で書き換え、--check で確かめるだけ）\n"
+      "  shark repl                1行ずつ打ち込んで、その場で動かす\n"
       "  shark explain E0102       エラーの詳しい説明を出す\n"
       "  shark modules             この処理系が持つモジュールを並べる\n"
       "\n"
@@ -613,6 +793,7 @@ int main_impl(int argc, char** argv) {
     if (files.size() == 0) { usage(); return 2; }
     return cmd_fmt(files, write, check);
   }
+  if (cmd == "repl") return cmd_repl(lang, strict, color);
   if (cmd == "explain") {
     if (rest.size() < 2) { usage(); return 2; }
     return cmd_explain(rest[1], lang);

@@ -10,7 +10,7 @@ namespace shark {
 
 Engine::Engine(const Config& cfg)
     : cfg_(cfg), reg_(types_), arena_(0), prog_(0), checker_(0), ok_(false), loader_(0),
-      loader_ud_(0) {
+      loader_ud_(0), repl_(false), repl_count_(0), repl_inits_(0) {
   diag_.set_lang(cfg.lang);
   diag_.set_strict(cfg.strict);
   vm_.stack_size = cfg.stack_size;
@@ -131,9 +131,7 @@ Unit* Engine::load_unit(const Str& path, const Str& source, const Str& display, 
   return u;
 }
 
-const Vec<Diagnostic>& Engine::load(const Str& name, const Str& source) {
-  diag_.clear();
-  ok_ = false;
+void Engine::begin_program() {
   // 先に仮想マシンを片付ける（この後で Program を捨てるため）
   vm_.reset();
   if (checker_) { checker_->~Checker(); sk_free(checker_); checker_ = 0; }
@@ -142,6 +140,7 @@ const Vec<Diagnostic>& Engine::load(const Str& name, const Str& source) {
   units_.clear();
   loaded_.clear();
   loading_.clear();
+  repl_ = false;
 
   arena_ = new (sk_alloc(sizeof(Arena))) Arena();
   prog_ = new (sk_alloc(sizeof(Program))) Program();
@@ -170,6 +169,20 @@ const Vec<Diagnostic>& Engine::load(const Str& name, const Str& source) {
     loaded_.push(Str("@std.ui"));
     checker_->collect(uu);
   }
+}
+
+// 前奏の中の警告は利用者に見せない
+static void drop_prelude_warnings(Vec<Diagnostic>& items) {
+  for (int i = items.size() - 1; i >= 0; i--)
+    if ((items[i].file == "@prelude" || items[i].file == "@std.ui") &&
+        items[i].severity == SEV_WARNING)
+      items.remove(i);
+}
+
+const Vec<Diagnostic>& Engine::load(const Str& name, const Str& source) {
+  diag_.clear();
+  ok_ = false;
+  begin_program();
 
   load_unit(Str("@entry"), source, name, true, 0);
   checker_->check_all();
@@ -181,12 +194,131 @@ const Vec<Diagnostic>& Engine::load(const Str& name, const Str& source) {
     vm_.start();
     ok_ = true;
   }
-  // 前奏の中の警告は利用者に見せない
-  Vec<Diagnostic>& items = diag_.items();
-  for (int i = items.size() - 1; i >= 0; i--)
-    if ((items[i].file == "@prelude" || items[i].file == "@std.ui") &&
-        items[i].severity == SEV_WARNING)
-      items.remove(i);
+  drop_prelude_warnings(diag_.items());
+  return diag_.items();
+}
+
+// ------------------------------------------------------------------ REPL
+// 前奏だけを型検査・コード生成まで済ませておく。入力はこの上に足していく
+void Engine::repl_begin() {
+  begin_program();
+  checker_->check_all();
+  CodeGen cg(*prog_, types_, reg_);
+  cg.run();
+  vm_.set_program(prog_, &reg_);
+  repl_ = true;
+  repl_count_ = 0;
+  repl_inits_ = 0;
+}
+
+const Vec<Diagnostic>& Engine::repl_eval(const Str& name, const Str& source) {
+  diag_.clear();
+  ok_ = false;
+  if (!repl_) repl_begin();
+  repl_count_++;
+
+  // 通らなかったときに戻すための目印
+  int nfuncs = prog_->funcs.size();
+  int nclasses = prog_->classes.size();
+  int nglobals = prog_->globals.size();
+  int ninits = prog_->inits.size();
+  int nunits = units_.size();
+  int nloaded = loaded_.size();
+  int cunits = checker_->unit_count();
+  int cvkeys = checker_->vkey_count();
+  int saved_entry = prog_->entry;
+  prog_->entry = -1;
+
+  // 入力ごとに別のモジュールとして読む（名前はどれも main。互いの宣言が見える）
+  Str path = Str("@entry") + str_from_int(repl_count_);
+  Unit* u = load_unit(path, source, name, true, 0);
+  Vec<Renamed> renamed;
+  if (u) {
+    u->is_repl = true;
+    // 前の入力で import したものは、続けて使える
+    for (int i = nunits - 1; i >= 0; i--) {
+      Unit* pu = units_[i];
+      if (!pu->is_repl) continue;
+      for (int k = 0; k < pu->imports.size(); k++) {
+        const ImportDecl& im = pu->imports[k];
+        bool dup = false;
+        for (int m = 0; m < u->imports.size(); m++)
+          if (u->imports[m].path == im.path && u->imports[m].alias == im.alias) dup = true;
+        if (!dup) u->imports.push(im);
+      }
+    }
+    // 同じ名前で定義し直したら、新しいほうが見えるようにする。
+    // 前の定義は名前を変えて残す（それを使って作った値や関数は、前の定義のまま動く）
+    Str tag = Str("@") + str_from_int(repl_count_);
+    for (int i = 0; i < u->funcs.size(); i++)
+      for (int k = 0; k < nfuncs; k++) {
+        FuncInfo* f = prog_->funcs[k];
+        if (f->owner || !(f->module == "main") || !(f->name == u->funcs[i]->name)) continue;
+        Renamed r; r.name = &f->name; r.old = f->name;
+        renamed.push(r);
+        f->name += tag;
+      }
+    for (int i = 0; i < u->classes.size(); i++)
+      for (int k = 0; k < nclasses; k++) {
+        ClassInfo* c = prog_->classes[k];
+        if (!(c->module == "main") || !(c->name == u->classes[i]->name)) continue;
+        Renamed r; r.name = &c->name; r.old = c->name;
+        renamed.push(r);
+        c->name += tag;
+      }
+    for (int i = 0; i < u->globals.size(); i++)
+      for (int k = 0; k < nglobals; k++) {
+        GlobalInfo* g = prog_->globals[k];
+        if (!(g->module == "main") || !(g->name == u->globals[i]->name)) continue;
+        Renamed r; r.name = &g->name; r.old = g->name;
+        renamed.push(r);
+        g->name += tag;
+      }
+    checker_->check_all(cunits);
+  }
+
+  if (!u || diag_.has_error()) {
+    // この入力は無かったことにする
+    for (int i = prog_->funcs.size() - 1; i >= nfuncs; i--) {
+      prog_->funcs[i]->~FuncInfo();
+      sk_free(prog_->funcs[i]);
+    }
+    prog_->funcs.resize(nfuncs, 0);
+    for (int i = prog_->classes.size() - 1; i >= nclasses; i--) {
+      prog_->classes[i]->~ClassInfo();
+      sk_free(prog_->classes[i]);
+    }
+    prog_->classes.resize(nclasses, 0);
+    for (int i = prog_->globals.size() - 1; i >= nglobals; i--) {
+      prog_->globals[i]->~GlobalInfo();
+      sk_free(prog_->globals[i]);
+    }
+    prog_->globals.resize(nglobals, 0);
+    prog_->inits.resize(ninits, 0);
+    prog_->entry = saved_entry;
+    for (int i = 0; i < renamed.size(); i++) *renamed[i].name = renamed[i].old;
+    units_.resize(nunits, 0);
+    loaded_.resize(nloaded, Str());
+    checker_->truncate(cunits, cvkeys);
+    repl_count_--;
+    drop_prelude_warnings(diag_.items());
+    return diag_.items();
+  }
+
+  CodeGen cg(*prog_, types_, reg_);
+  cg.run(nfuncs);
+  vm_.status = SK_Running;
+  vm_.has_panic = false;
+  vm_.aborted = false;
+  vm_.error_message.clear();
+  vm_.error_trace.clear();
+  vm_.error_line = 0;
+  vm_.exit_code = 0;
+  // 足した import の初期化と、この入力の文だけを走らせる。グローバルはそのまま
+  vm_.start(false, repl_inits_);
+  repl_inits_ = prog_->inits.size();
+  ok_ = true;
+  drop_prelude_warnings(diag_.items());
   return diag_.items();
 }
 
